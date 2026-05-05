@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(mkdir -p \"C:/Projects/TradingAgents-TW\")",
+      "Read(//c/Projects/**)",
+      "Bash(docker --version)",
+      "Bash(npm --version)",
+      "Bash(uv --version)",
+      "Bash(pip show *)",
+      "Bash(winget list *)",
+      "Bash(uv python *)"
+    ]
+  }
+}
