@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased] — TradingAgents-TW v1.0 development
+
+### Added (v0.3.0 - Phase 1 完成)
+
+- **v7.0 完整實施計劃**：`PLAN.md` 重構為 21 個 Phase（P0-P20）詳細 prompt
+- **Phase 1：原版遷移 + 新骨架 + 工程規範**
+  - 原版 v0.2.4 套件碼遷移至 `legacy/`，確保新版完全隔離
+  - 新後端骨架：`backend/app/{api,core,repos,services,domain,models,schemas,agents,data_sources,llm,workers,notifications,exports}/`
+  - 前端骨架：`frontend/src/{app,components,lib,store,hooks,i18n}/`
+  - 資料管線骨架：`data-pipeline/{schemas,scripts}/`
+  - Docker 骨架：`docker/{timescaledb,nginx/certs,backups,playwright}/`
+- **工程規範文件**：`docs/engineering-standards.md`、`docs/setup.md`、`docs/contributing.md`
+- **CI/CD 雛形**：`.github/workflows/ci.yml`（lint + secret scan + pre-commit）+ `security.yml`（bandit + gitleaks + CodeQL）
+- **Pre-commit hooks**：ruff、detect-secrets、trailing-whitespace、check-yaml/json/toml
+- **`.env.example`**：列齊 v1.0 所有欄位（依 Phase 補值時程標註）
+- **`backend/pyproject.toml` + `uv.lock`**：FastAPI / Pydantic v2 / SQLAlchemy 2.0 async / structlog 等依賴
+- **5 個 unit test 雛形**：`test_skeleton.py` 等（驗證骨架 + 模組可 import）
+- **Phase 健康檢查腳本**：`scripts/health_checks/phase_01.sh`
+- **Phase 進度追蹤**：`docs/phase_progress.md` + `docs/phase_reports/PHASE_01.md`
+
+### Changed
+
+- **`README.md`** 改寫為新版（原版備份至 `legacy/README_original.md`）
+- **`.gitignore`** 升級（涵蓋 .venv / node_modules / .env / docker/backups / IDE 等）
+- **`.vscode/settings.json`** 排除 `legacy/` 等目錄避免搜尋雜訊
+
+### Migration Notes
+
+- `git checkout pre-tw-edition-backup` 可回到改造前狀態
+- 原版套件碼在 `legacy/`，**不可直接 import**（架構已大改）
+- Phase 13 LangGraph Agent 系統時可參考 `legacy/tradingagents/agents/` 的結構
+
+---
+
 ## [0.2.4] — 2026-04-25
 
 ### Added

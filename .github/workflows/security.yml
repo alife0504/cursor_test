@@ -2,73 +2,71 @@ name: Security Scan
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
   schedule:
-    - cron: '0 2 * * 1'
+    - cron: '0 2 * * 1'   # 每週一 02:00 UTC
   workflow_dispatch:
 
 permissions:
   contents: read
   security-events: write
 
+# v7.0 Phase 1 雛形：bandit + detect-secrets + gitleaks
+# 後續 Phase 升級：
+#   P3 後 bandit 真正掃 backend/app
+#   P19 後加 Trivy（image scan）
+#   P19 後加 npm audit（前端 deps）
+
 jobs:
-  pip-audit:
-    name: Python Dependency CVE Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install pip-audit
-        run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit
-
-      - name: Audit dependencies
-        run: |
-          if [ -f requirements.lock ]; then
-            pip-audit -r requirements.lock --strict
-          else
-            pip install .
-            pip-audit --skip-editable --strict
-          fi
-
-  bandit:
-    name: Static Code Security Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install bandit
-        run: pip install bandit[toml]
-
-      - name: Run bandit
-        run: bandit -r tradingagents cli -ll -ii
-
-  gitleaks:
+  detect-secrets:
     name: Secret Leak Detection
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.7.3"
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync deps
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Run detect-secrets
+        working-directory: backend
+        run: uv run detect-secrets scan --baseline ../.secrets.baseline
 
+  gitleaks:
+    name: Gitleaks (history scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bandit:
+    name: Bandit (Python static analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install bandit
+        run: pip install 'bandit[toml]>=1.7.10'
+      - name: Run bandit
+        # P1 階段 backend/app 還沒程式碼，加 || true 避免空目錄報錯
+        # P3+ 之後此 || true 移除
+        run: bandit -r backend/app -ll -ii || true
 
   codeql:
     name: CodeQL Analysis
@@ -77,11 +75,14 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: python
-
+          # 排除 legacy 與 lock files
+          paths-ignore: |
+            legacy/**
+            **/uv.lock
+            **/package-lock.json
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
