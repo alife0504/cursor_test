@@ -1,0 +1,99 @@
+# TradingAgents-TW Dev docker-compose (v0.3.0 - Phase 2)
+#
+# 啟動：make up   /  停止：make down
+#
+# 依 PLAN.md 第十二章 + 13.2 章設計：
+#   - timescaledb / redis / qdrant 三服務皆 healthcheck
+#   - DB 帳號分離（ta_migration / ta_service_rw / ta_agent_ro）由 init.sh 建立
+#   - Redis requirepass + maxmemory 1GB allkeys-lru
+#   - Qdrant API key 強制
+#
+# 後續 Phase 升級：
+#   P3：加 backend service（含 wait-for-services.sh）
+#   P7：加 celery_worker / celery_beat
+#   P15：加 frontend service（dev profile）
+
+name: tradingagents
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: ta-timescaledb
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tradingagents_tw}
+      # 讓 init.sh 從 env 讀帳號密碼（envsubst 替換）
+      TA_MIGRATION_PASSWORD: ${TA_MIGRATION_PASSWORD}
+      TA_SERVICE_RW_PASSWORD: ${TA_SERVICE_RW_PASSWORD}
+      TA_AGENT_RO_PASSWORD: ${TA_AGENT_RO_PASSWORD}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      # init.sh 跑 envsubst 把 .template 轉成實際 SQL，再給 psql
+      - ./docker/timescaledb/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./docker/timescaledb/init.sql.template:/docker-entrypoint-initdb.d/init.sql.template:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-tradingagents_tw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ta-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.5
+    container_name: ta-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      QDRANT__SERVICE__ENABLE_TLS: "false"
+      # 限制 Web UI（dashboard）需 API key
+      QDRANT__SERVICE__READ_ONLY_API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # Qdrant 1.9 image 內建 wget；/healthz 不需 API key
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz | grep -q 'healthz check passed' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+volumes:
+  timescaledb_data:
+    name: tradingagents_timescaledb_data
+  redis_data:
+    name: tradingagents_redis_data
+  qdrant_data:
+    name: tradingagents_qdrant_data

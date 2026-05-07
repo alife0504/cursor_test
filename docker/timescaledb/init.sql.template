@@ -1,0 +1,60 @@
+-- TradingAgents-TW TimescaleDB 初始化 SQL（template，由 init.sh 跑 envsubst 替換變數）
+-- 依 PLAN.md 第 19.1 章帳號分離 + 第 8.5 章 安全規範
+
+-- ============================================================================
+-- 1. 啟用必要 extensions
+-- ============================================================================
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;        -- 用於股票名稱模糊搜尋
+CREATE EXTENSION IF NOT EXISTS pgcrypto;       -- 用於 hash chain（P4 audit_logs）
+
+-- ============================================================================
+-- 2. 三個應用帳號（依第 19.1 章）
+-- ============================================================================
+-- ta_migration：可改 schema（給 alembic 用）
+-- ta_service_rw：DML only（後端業務用，禁止 DDL）
+-- ta_agent_ro：read only（Agent / Tool 用，防 prompt injection 注入 SQL）
+-- ============================================================================
+
+-- ── ta_migration（DDL allowed） ──
+CREATE USER ta_migration WITH PASSWORD '${TA_MIGRATION_PASSWORD}' CREATEDB;
+GRANT ALL PRIVILEGES ON DATABASE tradingagents_tw TO ta_migration;
+GRANT ALL ON SCHEMA public TO ta_migration;
+
+-- ── ta_service_rw（DML only） ──
+CREATE USER ta_service_rw WITH PASSWORD '${TA_SERVICE_RW_PASSWORD}';
+GRANT CONNECT ON DATABASE tradingagents_tw TO ta_service_rw;
+GRANT USAGE ON SCHEMA public TO ta_service_rw;
+
+-- 之後 ta_migration 建表時，自動 grant SELECT/INSERT/UPDATE/DELETE 給 ta_service_rw
+ALTER DEFAULT PRIVILEGES FOR USER ta_migration IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ta_service_rw;
+ALTER DEFAULT PRIVILEGES FOR USER ta_migration IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO ta_service_rw;
+
+-- ── ta_agent_ro（Read-only） ──
+CREATE USER ta_agent_ro WITH PASSWORD '${TA_AGENT_RO_PASSWORD}';
+GRANT CONNECT ON DATABASE tradingagents_tw TO ta_agent_ro;
+GRANT USAGE ON SCHEMA public TO ta_agent_ro;
+
+-- ta_migration 建表時，自動 grant SELECT 給 ta_agent_ro
+ALTER DEFAULT PRIVILEGES FOR USER ta_migration IN SCHEMA public
+  GRANT SELECT ON TABLES TO ta_agent_ro;
+
+-- ============================================================================
+-- 3. 連線參數預設（依第 14.1 章）
+-- ============================================================================
+-- 為三個帳號設定 statement_timeout / lock_timeout 預設
+-- （後端 session 也會在連線時 SET，這裡是 fallback 保護）
+ALTER USER ta_migration   SET statement_timeout = '300s';
+ALTER USER ta_service_rw  SET statement_timeout = '30s';
+ALTER USER ta_service_rw  SET lock_timeout = '10s';
+ALTER USER ta_service_rw  SET idle_in_transaction_session_timeout = '60s';
+ALTER USER ta_agent_ro    SET statement_timeout = '15s';
+ALTER USER ta_agent_ro    SET lock_timeout = '5s';
+
+-- ============================================================================
+-- 4. 後續 Phase 補
+-- ============================================================================
+-- P4：建表（透過 alembic）
+-- P9：audit_logs REVOKE UPDATE/DELETE from ta_service_rw（hash chain 不可竄改）

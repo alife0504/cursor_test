@@ -4,7 +4,7 @@
 |-------|------|---------|---------|---------|------------------|------|
 | P0 | ✅ 完成 | 2026-05-03 | 2026-05-04 | 0.5 | 0（手動） | 環境驗證通過；補建 docs/phase_progress.md 與 scripts/health_checks/ 目錄 |
 | P1 | ✅ 完成 | 2026-05-04 | 2026-05-05 | 3.0 | 1 | 原版遷移 + 新骨架 + 工程規範文件 + Git 工作流程；21 passed, 15 skipped；health_check 全綠 |
-| P2 | ⏳ 待開始 | - | - | - | - | - |
+| P2 | ✅ 完成 | 2026-05-05 | 2026-05-06 | 3.0 | 1 | Docker 三服務（TimescaleDB/Redis/Qdrant）+ 三帳號分離 + Qdrant API key + 14 個 integration tests；累積 50 tests；phase_02.sh graceful skip OK |
 | P3 | ⏳ 待開始 | - | - | - | - | - |
 | P4 | ⏳ 待開始 | - | - | - | - | - |
 | P5 | ⏳ 待開始 | - | - | - | - | - |

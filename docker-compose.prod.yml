@@ -1,0 +1,127 @@
+# TradingAgents-TW Prod docker-compose (v0.3.0 - Phase 2 雛形)
+#
+# 與 dev 差異（依 PLAN.md 第 19.5 章 + 19.6 章 prod 規範）：
+#   - ports 不對外（僅 backend 透過 nginx 暴露）
+#   - read_only: true（除必要 volume）
+#   - cap_drop: ALL（必要才加 NET_BIND_SERVICE）
+#   - resource limits（mem / cpus）
+#   - restart: always（dev 是 unless-stopped）
+#
+# Phase 19 才會完整化（加 backend / celery / frontend / nginx 等服務）
+# 本 Phase 只先建立可用的 dev-equivalent prod 雛形（DB 三服務）。
+
+name: tradingagents-prod
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: ta-timescaledb-prod
+    # prod 不對外暴露 5432（backend 透過內網連）
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tradingagents_tw}
+      TA_MIGRATION_PASSWORD: ${TA_MIGRATION_PASSWORD}
+      TA_SERVICE_RW_PASSWORD: ${TA_SERVICE_RW_PASSWORD}
+      TA_AGENT_RO_PASSWORD: ${TA_AGENT_RO_PASSWORD}
+    volumes:
+      - timescaledb_data_prod:/var/lib/postgresql/data
+      - ./docker/timescaledb/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./docker/timescaledb/init.sql.template:/docker-entrypoint-initdb.d/init.sql.template:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-tradingagents_tw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: always
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+        reservations:
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: ta-redis-prod
+    expose:
+      - "6379"
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data_prod:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: always
+    stop_grace_period: 30s
+    # Redis 7 alpine 預設 root；read-only fs 需排除 /data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+          cpus: "1.0"
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.5
+    container_name: ta-qdrant-prod
+    expose:
+      - "6333"
+      - "6334"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      QDRANT__SERVICE__READ_ONLY_API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - qdrant_data_prod:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz | grep -q 'healthz check passed' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: always
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.5"
+
+  # ── 後續 Phase 加入 ──
+  # backend:        P3 / P19 完整化
+  # celery_worker:  P7 / P19
+  # celery_beat:    P7 / P19
+  # frontend:       P15 / P19
+  # nginx:          P19（HTTPS + Let's Encrypt + reverse proxy）
+
+volumes:
+  timescaledb_data_prod:
+    name: tradingagents_timescaledb_data_prod
+  redis_data_prod:
+    name: tradingagents_redis_data_prod
+  qdrant_data_prod:
+    name: tradingagents_qdrant_data_prod
+
+networks:
+  default:
+    name: tradingagents_prod_net
+    driver: bridge
