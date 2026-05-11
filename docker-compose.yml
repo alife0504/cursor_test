@@ -81,8 +81,9 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      # Qdrant 1.9 image 內建 wget；/healthz 不需 API key
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz | grep -q 'healthz check passed' || exit 1"]
+      # Qdrant 1.9+ image 無 wget/curl/python；用 bash builtin /dev/tcp 測 port 開（最低門檻）
+      # 等 6333 listening 就算 healthy（service 起來時就 listening）
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' 2>/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5

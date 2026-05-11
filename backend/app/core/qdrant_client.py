@@ -19,7 +19,13 @@ _qdrant_client: AsyncQdrantClient | None = None
 
 
 def get_qdrant_client() -> AsyncQdrantClient:
-    """取得 / 註冊全域 AsyncQdrantClient（單例）。"""
+    """取得 / 註冊全域 AsyncQdrantClient（單例）。
+
+    v0.3.0 設定：
+    - dev 環境 `https=False`（無 TLS）；prod TLS 由 nginx 終結，client 仍走 plain
+    - 預設不啟 prefer_grpc，避免 client 假設 TLS handshake
+    - 後續 P4+ 大量 vector write 時可改 prefer_grpc=True，但需確認 server TLS 設定一致
+    """
     global _qdrant_client
     if _qdrant_client is None:
         _qdrant_client = AsyncQdrantClient(
@@ -27,7 +33,8 @@ def get_qdrant_client() -> AsyncQdrantClient:
             port=settings.QDRANT_PORT,
             grpc_port=settings.QDRANT_GRPC_PORT,
             api_key=settings.QDRANT_API_KEY.get_secret_value(),
-            prefer_grpc=True,  # gRPC 比 HTTP 快（依 ADR-002）
+            https=False,  # dev 無 TLS（prod 由 nginx 終結，client 仍走 plain）
+            prefer_grpc=False,  # dev 預設用 REST，避免 gRPC TLS handshake 問題
             timeout=30,
         )
     return _qdrant_client

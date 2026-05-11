@@ -45,8 +45,8 @@ wait_for "TimescaleDB" "pg_isready -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTG
 wait_for "Redis" "(echo PING | nc -w 2 $REDIS_HOST $REDIS_PORT) | grep -qE 'PONG|NOAUTH'"
 
 # ── Qdrant ──
-# /healthz 不需 API key
-wait_for "Qdrant" "wget -qO- http://$QDRANT_HOST:$QDRANT_PORT/healthz"
+# 用 curl（backend image 有裝 curl，比 wget 通用）；/healthz 不需 API key
+wait_for "Qdrant" "curl -fsS http://$QDRANT_HOST:$QDRANT_PORT/healthz -o /dev/null"
 
 echo ""
 echo "✅ All services ready (took ${elapsed}s)"
