@@ -90,6 +90,39 @@ services:
     restart: unless-stopped
     stop_grace_period: 10s
 
+  # ── Backend FastAPI（P3 加）────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ta-backend
+    image: tradingagents-backend:dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # 容器內走內網 hostname（覆寫 .env 中的 localhost）
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      APP_ENV: dev
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/live > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 60s
+    restart: unless-stopped
+
 volumes:
   timescaledb_data:
     name: tradingagents_timescaledb_data

@@ -52,24 +52,52 @@ bash scripts/health_checks/phase_01.sh
 
 ---
 
-## 2. Phase 2：Docker 基礎服務（TBD）
+## 2. Phase 2：Docker 基礎服務（✅ 完成）
 
 ```bash
 make up               # 啟動 timescaledb / redis / qdrant
 make down             # 停止
 make logs             # 看 log
 make ps               # 看狀態
+make psql             # 進 psql（superuser）
+make redis-cli        # 進 redis-cli（互動）
+make qdrant-status    # Qdrant 健康檢查
 ```
+
+driver 用三個 DB 帳號（從 .env 取對應密碼）：
+- `ta_migration`：alembic 用
+- `ta_service_rw`：後端業務用（DML only）
+- `ta_agent_ro`：Agent 用（read only）
 
 ---
 
-## 3. Phase 3：後端工程基礎（TBD）
+## 3. Phase 3：後端工程基礎（✅ 完成）
 
 ```bash
-make backend-dev      # uvicorn --reload
-curl http://localhost:8000/health/live
-curl http://localhost:8000/health/ready
+# 本機跑 backend（dev mode，reload）
+make backend-dev
+
+# 開另一終端
+curl http://localhost:8000/health/live    # 200 + envelope
+curl http://localhost:8000/health/ready   # 三服務 OK → 200
+curl http://localhost:8000/health/seeded  # 暫回 false（P7 後 true）
+open http://localhost:8000/docs           # Swagger UI
+
+# 容器化跑（背景）
+make backend-image    # build image
+docker compose up -d backend
+make backend-logs     # 跟 log
+make backend-shell    # 進容器 shell
 ```
+
+**Phase 3 core 模組（後續 Phase 共用）：**
+- `app/core/config.py`：settings 單例（pydantic v2）
+- `app/core/logging_config.py`：`from app.core.logging_config import get_logger`
+- `app/core/database.py`：`get_rw_session() / get_ro_session()` (FastAPI Depends)
+- `app/core/redis_client.py`：`get_redis(RedisDB.CACHE)` 等 7 個 db
+- `app/core/qdrant_client.py`：`get_qdrant_client()`
+- `app/core/errors.py`：`raise NotFoundError(message_zh="...")` 等
+- `app/core/response_envelope.py`：`envelope_success(data, trace_id=...)`
 
 ---
 

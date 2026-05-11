@@ -1,9 +1,10 @@
-# TradingAgents-TW Makefile (v0.3.0 - Phase 2)
-# 後續 Phase 會擴充（init-db/seed/backfill/backend-dev/frontend-dev/...）
+# TradingAgents-TW Makefile (v0.3.0 - Phase 3)
+# 後續 Phase 會擴充（init-db/seed/backfill/frontend-dev/...）
 
 .PHONY: help lint format test secrets-scan precommit clean \
         up down logs restart ps psql redis-cli qdrant-status \
-        services-reset
+        services-reset backend-dev backend-image backend-shell \
+        backend-logs
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -12,7 +13,6 @@ help:  ## 顯示可用 target
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "後續 Phase 會新增："
-	@echo "  P3: make backend-dev / backend-image"
 	@echo "  P4: make init-db / migration-up / migration-down"
 	@echo "  P7: make seed-stocks / seed-admin / backfill / verify-data / up-workers"
 	@echo "  P15: make frontend-dev / frontend-build / frontend-test"
@@ -62,6 +62,20 @@ services-reset:  ## 完全重設三服務（停止 + 砍 volume + 重啟，會�
 	docker compose down -v
 	docker compose up -d
 	@sleep 10 && docker compose ps
+
+# ── Backend FastAPI（P3 新增） ──────────────────────
+
+backend-dev:  ## 跑 backend dev mode（uvicorn --reload，host=0.0.0.0:8000）
+	cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+backend-image:  ## Build backend Docker image（dev tag）
+	docker build -t tradingagents-backend:dev -f backend/Dockerfile .
+
+backend-shell:  ## 進 backend container shell（必先 make up）
+	docker compose exec backend bash
+
+backend-logs:  ## 跟 backend container log
+	docker compose logs -f backend
 
 # ── 程式碼品質（P1 已有） ───────────────────────────
 

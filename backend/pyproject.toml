@@ -27,6 +27,8 @@ dependencies = [
     "alembic>=1.13,<2.0",
     # Redis
     "redis>=5.0,<6.0",
+    # Qdrant（P3 startup 連線需要）
+    "qdrant-client>=1.9,<2.0",
     # Auth (P8 才用，這裡先列)
     "python-jose[cryptography]>=3.3,<4.0",
     "passlib[bcrypt]>=1.7,<2.0",
