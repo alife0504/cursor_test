@@ -7,7 +7,7 @@ requires-python = ">=3.11,<3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "TradingAgents-TW" }]
 
-# v7.0 Phase 1 雛形依賴（後續 Phase 補：langgraph、celery、qdrant-client、pandas、playwright 等）
+# v7.0 Phase 1~5 累積依賴
 dependencies = [
     # Web 框架
     "fastapi>=0.115,<0.116",
@@ -29,13 +29,20 @@ dependencies = [
     "redis>=5.0,<6.0",
     # Qdrant（P3 startup 連線需要）
     "qdrant-client>=1.9,<2.0",
-    # pgvector（P4 加，現階段不主用，預留未來若改 pgvector 替代 Qdrant）
+    # pgvector（P4 加,現階段不主用,預留未來若改 pgvector 替代 Qdrant）
     "pgvector>=0.3,<0.5",
-    # Auth (P8 才用，這裡先列)
+    # Auth (P8 才用,這裡先列)
     "python-jose[cryptography]>=3.3,<4.0",
     "passlib[bcrypt]>=1.7,<2.0",
     # 時區
     "tzdata",
+    # P5：資料源 Adapter / Repository（pandas + parsing + rate limit）
+    "pandas>=2.2,<3.0",
+    "pyarrow>=15,<22",
+    "aiolimiter>=1.1,<2.0",
+    "feedparser>=6.0,<7.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "lxml>=5.2,<7.0",
 ]
 
 [dependency-groups]

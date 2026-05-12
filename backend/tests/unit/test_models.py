@@ -136,7 +136,7 @@ def test_idempotency_key_ttl_calculated() -> None:
     # 預設 23.99 ~ 24.01 小時間
     assert (
         23.9 < delta.total_seconds() / 3600 < 24.1
-    ), f"TTL 不對：{delta.total_seconds()/3600} hours"
+    ), f"TTL 不對：{delta.total_seconds() / 3600} hours"
 
 
 def test_celery_dead_letter_resolved_default_false() -> None:

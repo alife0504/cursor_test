@@ -28,7 +28,11 @@ def test_backend_app_directory_exists() -> None:
 
 
 def test_backend_subdirectories_complete() -> None:
-    """app/ 下必須有所有 v7.0 規範子目錄（依第二十二章）。"""
+    """app/ 下必須有所有 v7.0 規範子目錄（依第二十二章）。
+
+    註：v7.0 P5 起 data_sources/base 由「placeholder 目錄」改為 base.py 檔案
+    （ABC + 註冊機制集中於單檔），因此此測試只檢查 tw/ 與 us/ 目錄。
+    """
     required = [
         "api/v1",
         "core",
@@ -44,7 +48,6 @@ def test_backend_subdirectories_complete() -> None:
         "agents/tools/us",
         "data_sources/tw",
         "data_sources/us",
-        "data_sources/base",
         "llm",
         "workers",
         "notifications",
@@ -52,6 +55,12 @@ def test_backend_subdirectories_complete() -> None:
     ]
     missing = [d for d in required if not (APP_ROOT / d).is_dir()]
     assert not missing, f"backend/app/ 下缺少子目錄：{missing}"
+
+    # data_sources/base.py + fallback.py 應為檔案而非目錄（P5 重構）
+    assert (APP_ROOT / "data_sources" / "base.py").is_file(), "data_sources/base.py 應為檔案"
+    assert (
+        APP_ROOT / "data_sources" / "fallback.py"
+    ).is_file(), "data_sources/fallback.py 應為檔案"
 
 
 def test_legacy_directory_exists_and_isolated() -> None:

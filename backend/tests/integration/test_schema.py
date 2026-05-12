@@ -67,7 +67,7 @@ async def test_all_tables_created() -> None:
     conn = await _connect_superuser()
     try:
         n = await conn.fetchval(
-            "SELECT count(*) FROM information_schema.tables " "WHERE table_schema = 'public'"
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"
         )
         assert n >= 24, f"預期 ≥ 24 tables（含 alembic_version），實際 {n}"
 
@@ -285,7 +285,7 @@ async def test_ta_agent_ro_can_read_but_not_write() -> None:
         # INSERT 應失敗
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await conn.execute(
-                "INSERT INTO users (email, password_hash) " "VALUES ('hack@x.com', 'x')"
+                "INSERT INTO users (email, password_hash) VALUES ('hack@x.com', 'x')"
             )
     finally:
         await conn.close()

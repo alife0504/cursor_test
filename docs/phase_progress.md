@@ -7,7 +7,7 @@
 | P2 | ✅ 完成 | 2026-05-05 | 2026-05-06 | 3.0 | 1 | Docker 三服務（TimescaleDB/Redis/Qdrant）+ 三帳號分離 + Qdrant API key + 14 個 integration tests；累積 50 tests；phase_02.sh graceful skip OK |
 | P3 | ✅ 完成 | 2026-05-06 | 2026-05-11 | 4.0 | 1 | 後端工程基礎（14 個 core 模組 + minimal main.py）+ /health/{live,ready,seeded} + 結構化 log + envelope + 38 個新測試；累積 88 tests；73 passed 15 skipped；phase_03.sh 13 項通過 |
 | P4 | ✅ 完成 | 2026-05-12 | 2026-05-12 | 4.0 | 1 | 完整 DB schema（25 表）+ 13 個 alembic baseline migration + 6 hypertable + 6 retention policy + audit hash chain trigger + 7 Qdrant collections + 27 新增測試；累積 115 collected / 114 passed / 1 skipped；phase_04.sh 13 項通過 |
-| P5 | ⏳ 待開始 | - | - | - | - | - |
+| P5 | ✅ 完成 | 2026-05-12 | 2026-05-12 | 4.0 | 1 | TW 5 個資料源 Adapter（FinMind/TWSE/TPEX/MOPS/cnyes）+ DataSourceFallback + 4 個 Repository + DataPipelineService + FinancialStatement model & 0014 migration + 67 個新測試（10 finmind / 7 twse / 5 tpex / 9 mops / 4 cnyes / 8 fallback / 19 repos / 5 service integration）；累積 183 collected / 181 passed / 1 skipped / 1 network deselected；phase_05.sh 8 項通過 |
 | P6 | ⏳ 待開始 | - | - | - | - | - |
 | P7 | ⏳ 待開始 | - | - | - | - | - |
 | P8 | ⏳ 待開始 | - | - | - | - | - |

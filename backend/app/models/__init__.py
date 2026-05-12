@@ -17,6 +17,7 @@ from app.models.analysis import (
 from app.models.audit import AuditLog
 from app.models.base import Base, CreatedAtMixin, TimestampedMixin, metadata
 from app.models.dlq import CeleryDeadLetter
+from app.models.financials import STATEMENT_TYPE_VALUES, FinancialStatement
 from app.models.idempotency import IDEMPOTENCY_TTL_HOURS, IdempotencyKey
 from app.models.news import SENTIMENT_VALUES, Announcement, NewsMetadata
 from app.models.notification import (
@@ -49,6 +50,7 @@ __all__ = [
     "ORDER_STATUS_VALUES",
     "SENTIMENT_VALUES",
     "SIGNAL_VALUES",
+    "STATEMENT_TYPE_VALUES",
     "AnalysisReport",
     "Announcement",
     "AuditLog",
@@ -56,6 +58,7 @@ __all__ = [
     "CeleryDeadLetter",
     "CreatedAtMixin",
     "DebateMessage",
+    "FinancialStatement",
     "IdempotencyKey",
     "InstitutionalTrading",
     "LLMMonthlyQuota",

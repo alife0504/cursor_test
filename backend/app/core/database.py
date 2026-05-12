@@ -155,7 +155,7 @@ async def test_db_connection() -> None:
         assert result.scalar() == 1
         # P4：驗證 schema 已 migrate
         table_count = await conn.execute(
-            text("SELECT count(*) FROM information_schema.tables " "WHERE table_schema = 'public'")
+            text("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
         )
         n_tables = table_count.scalar() or 0
         if n_tables < 20:
