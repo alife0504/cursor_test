@@ -56,5 +56,8 @@ ALTER USER ta_agent_ro    SET lock_timeout = '5s';
 -- ============================================================================
 -- 4. 後續 Phase 補
 -- ============================================================================
--- P4：建表（透過 alembic）
--- P9：audit_logs REVOKE UPDATE/DELETE from ta_service_rw（hash chain 不可竄改）
+-- P4：建表（透過 alembic baseline migrations 0001-0013）
+--      - 0001-0011：所有 v1.0 業務表 + hypertable + retention policy
+--      - 0012：updated_at trigger + audit_logs hash chain trigger
+--      - 0013：REVOKE UPDATE/DELETE on audit_logs from ta_service_rw
+-- 跑 `make init-db` 一次性完成 alembic + Qdrant + admin。

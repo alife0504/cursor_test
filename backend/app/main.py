@@ -41,6 +41,7 @@ from app.core.qdrant_client import (
     dispose_qdrant_client,
     test_qdrant_connection,
 )
+from app.core.qdrant_init import ensure_collections
 from app.core.redis_client import (
     RedisDB,
     dispose_redis_pools,
@@ -85,6 +86,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.critical("qdrant.startup_probe_failed", error=str(e))
             raise ExternalServiceError(message_zh="Qdrant 連線失敗", source="qdrant") from e
+
+        # P4：確保 Qdrant 7 個 collections 存在（idempotent）
+        try:
+            await ensure_collections()
+        except Exception as e:
+            logger.critical("qdrant.ensure_collections_failed", error=str(e))
+            raise ExternalServiceError(
+                message_zh="Qdrant collections 初始化失敗", source="qdrant"
+            ) from e
 
     yield
 

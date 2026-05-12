@@ -1,0 +1,127 @@
+"""台股獨有資料表：三大法人 / 融資融券 / 月營收。
+
+依 PLAN.md 第 10.5 章 + 第 20.2 章。
+"""
+
+from __future__ import annotations
+
+from datetime import date as date_type
+from datetime import datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
+
+
+class InstitutionalTrading(Base):
+    """三大法人買賣超（台股 only）。"""
+
+    __tablename__ = "institutional_trading"
+
+    symbol: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("stock_list.symbol", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    date: Mapped[date_type] = mapped_column(Date, primary_key=True)
+
+    # 外資（含外資自營商）
+    foreign_buy: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    foreign_sell: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    foreign_net: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+
+    # 投信
+    trust_buy: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    trust_sell: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    trust_net: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+
+    # 自營商
+    dealer_buy: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    dealer_sell: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    dealer_net: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+
+    source: Mapped[str | None] = mapped_column(String(30))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_institutional_trading_date", "date"),)
+
+
+class MarginTrading(Base):
+    """融資融券（台股 only）。"""
+
+    __tablename__ = "margin_trading"
+
+    symbol: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("stock_list.symbol", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    date: Mapped[date_type] = mapped_column(Date, primary_key=True)
+
+    margin_balance: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    """融資餘額（張）。"""
+    margin_quota: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    margin_buy: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    margin_sell: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+
+    short_balance: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    """融券餘額（張）。"""
+    short_quota: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    short_buy: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    short_sell: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+
+    source: Mapped[str | None] = mapped_column(String(30))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_margin_trading_date", "date"),)
+
+
+class MonthlyRevenue(Base):
+    """每月營收（台股 only） — 第 10 號公報，台股早於財報 1.5 月發布。"""
+
+    __tablename__ = "monthly_revenue"
+
+    symbol: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("stock_list.symbol", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    month: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+
+    revenue: Mapped[Decimal] = mapped_column(Numeric(24, 2), nullable=False)
+    """當月營收（元）。"""
+    revenue_mom: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    """月增率 (%)。"""
+    revenue_yoy: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    """年增率 (%)。"""
+    ytd_revenue: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    ytd_yoy: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
+    announced_at: Mapped[date_type | None] = mapped_column(Date)
+    source: Mapped[str | None] = mapped_column(String(30))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_monthly_revenue_year_month", "year", "month"),)
+
+
+__all__ = ["InstitutionalTrading", "MarginTrading", "MonthlyRevenue"]

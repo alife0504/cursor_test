@@ -101,13 +101,48 @@ make backend-shell    # 進容器 shell
 
 ---
 
-## 4. Phase 4：DB Schema + Alembic（TBD）
+## 4. Phase 4：DB Schema + Alembic（✅ 完成）
+
+### 一次性初始化（dev 環境第一次跑）
 
 ```bash
+make up               # 確保三服務 healthy
 make init-db          # alembic upgrade head + Qdrant collections + 第一個 admin
-make migration-up
-make migration-down
 ```
+
+`make init-db` 等同於：
+
+```bash
+cd backend && uv run python ../data-pipeline/scripts/init_db.py
+```
+
+完成後：
+- 25 個 public schema table 建立完成
+- 6 個 hypertable + 6 個 retention policy 設定完成
+- 9 個 trigger（updated_at + audit hash chain）已啟用
+- Qdrant 7 個 collection 存在
+- 1 個 admin 帳號（email 由 `.env` 的 `ADMIN_EMAIL` 指定，`must_change_password=TRUE`）
+
+### Migration 日常操作
+
+```bash
+make migration-up           # 套用到最新
+make migration-down         # 退回一步
+make migration-new MSG="add foo column"
+make migration-status       # 看目前 version
+make migration-history      # 看歷史
+make migration-redo         # downgrade base + upgrade head（雙向健全性測試）
+```
+
+詳細用法見 `docs/runbooks/migrations.md`。
+
+### 驗證
+
+```bash
+bash scripts/health_checks/phase_04.sh
+```
+
+退出條件：表數 ≥ 24、hypertable ≥ 6、retention ≥ 6、trigger 完整、Qdrant 7 collections、雙向 alembic OK、27 P4 測試全綠。
 
 ---
 

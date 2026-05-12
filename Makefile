@@ -4,7 +4,8 @@
 .PHONY: help lint format test secrets-scan precommit clean \
         up down logs restart ps psql redis-cli qdrant-status \
         services-reset backend-dev backend-image backend-shell \
-        backend-logs
+        backend-logs init-db migration-up migration-down migration-new \
+        migration-status migration-history migration-redo
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -76,6 +77,29 @@ backend-shell:  ## 進 backend container shell（必先 make up）
 
 backend-logs:  ## 跟 backend container log
 	docker compose logs -f backend
+
+# ── DB Migration / Init（P4 新增） ─────────────────
+
+init-db:  ## 一次性：alembic upgrade head + Qdrant collections + admin 帳號
+	cd backend && uv run python ../data-pipeline/scripts/init_db.py
+
+migration-up:  ## alembic upgrade head
+	cd backend && uv run alembic upgrade head
+
+migration-down:  ## alembic downgrade -1
+	cd backend && uv run alembic downgrade -1
+
+migration-new:  ## 新增空白 migration（用 MSG="描述" 傳訊息）
+	cd backend && uv run alembic revision -m "$(MSG)"
+
+migration-status:  ## 看目前 migration version
+	cd backend && uv run alembic current
+
+migration-history:  ## 看 migration 歷史
+	cd backend && uv run alembic history
+
+migration-redo:  ## downgrade base + upgrade head（測試雙向用）
+	cd backend && uv run alembic downgrade base && uv run alembic upgrade head
 
 # ── 程式碼品質（P1 已有） ───────────────────────────
 

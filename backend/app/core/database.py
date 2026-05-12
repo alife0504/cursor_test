@@ -77,8 +77,24 @@ def _create_engine(dsn: str, pool_size: int, *, name: str) -> AsyncEngine:
 
 _rw_engine: AsyncEngine | None = None
 _ro_engine: AsyncEngine | None = None
+_migration_engine: AsyncEngine | None = None
 _rw_sessionmaker: async_sessionmaker[AsyncSession] | None = None
 _ro_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
+def get_migration_engine() -> AsyncEngine:
+    """ta_migration 帳號 engine — alembic env.py 用，不開大 pool（DDL 是低頻）。
+
+    注意：lifespan 預設不啟動此 engine。只有需要程式化跑 migration 的
+    場景才呼叫（例如 data-pipeline/init_db.py 透過 subprocess 跑 alembic，
+    或本機 health check 想 SELECT 表數）。
+    """
+    global _migration_engine
+    if _migration_engine is None:
+        _migration_engine = _create_engine(
+            settings.postgres_dsn_migration, pool_size=2, name="migration"
+        )
+    return _migration_engine
 
 
 def get_rw_engine() -> AsyncEngine:
@@ -126,13 +142,30 @@ async def get_ro_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def test_db_connection() -> None:
-    """startup 時 fail-fast probe：兩個 engine 各跑一次 SELECT 1。"""
+    """startup 時 fail-fast probe：兩個 engine 各跑一次 SELECT 1。
+
+    P4 起：額外列舉 public schema 表數量，確認 alembic 已建立 baseline。
+    若表數 < 20 → 警告（但不 raise，避免阻塞測試環境）。
+    """
     from sqlalchemy import text
 
     rw = get_rw_engine()
     async with rw.connect() as conn:
         result = await conn.execute(text("SELECT 1"))
         assert result.scalar() == 1
+        # P4：驗證 schema 已 migrate
+        table_count = await conn.execute(
+            text("SELECT count(*) FROM information_schema.tables " "WHERE table_schema = 'public'")
+        )
+        n_tables = table_count.scalar() or 0
+        if n_tables < 20:
+            logger.warning(
+                "db.schema.incomplete",
+                tables=n_tables,
+                hint="run `make init-db` or `alembic upgrade head`",
+            )
+        else:
+            logger.info("db.schema.ready", tables=n_tables)
     logger.info("db.rw_engine.ready", pool_size=settings.POOL_SIZE_RW)
 
     ro = get_ro_engine()
@@ -144,7 +177,7 @@ async def test_db_connection() -> None:
 
 async def dispose_db_connections() -> None:
     """shutdown 時關閉 connection pool。"""
-    global _rw_engine, _ro_engine, _rw_sessionmaker, _ro_sessionmaker
+    global _rw_engine, _ro_engine, _migration_engine, _rw_sessionmaker, _ro_sessionmaker
     if _rw_engine is not None:
         await _rw_engine.dispose()
         _rw_engine = None
@@ -153,11 +186,15 @@ async def dispose_db_connections() -> None:
         await _ro_engine.dispose()
         _ro_engine = None
         _ro_sessionmaker = None
+    if _migration_engine is not None:
+        await _migration_engine.dispose()
+        _migration_engine = None
     logger.info("db.engines.disposed")
 
 
 __all__ = [
     "dispose_db_connections",
+    "get_migration_engine",
     "get_ro_engine",
     "get_ro_session",
     "get_rw_engine",
