@@ -43,6 +43,8 @@ dependencies = [
     "feedparser>=6.0,<7.0",
     "beautifulsoup4>=4.12,<5.0",
     "lxml>=5.2,<7.0",
+    # P6：美股資料源（yfinance 同步包，async wrap；Alpha Vantage/Finnhub/SEC EDGAR 用 httpx）
+    "yfinance>=0.2.40,<0.3",
 ]
 
 [dependency-groups]

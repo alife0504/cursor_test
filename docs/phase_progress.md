@@ -8,7 +8,7 @@
 | P3 | ✅ 完成 | 2026-05-06 | 2026-05-11 | 4.0 | 1 | 後端工程基礎（14 個 core 模組 + minimal main.py）+ /health/{live,ready,seeded} + 結構化 log + envelope + 38 個新測試；累積 88 tests；73 passed 15 skipped；phase_03.sh 13 項通過 |
 | P4 | ✅ 完成 | 2026-05-12 | 2026-05-12 | 4.0 | 1 | 完整 DB schema（25 表）+ 13 個 alembic baseline migration + 6 hypertable + 6 retention policy + audit hash chain trigger + 7 Qdrant collections + 27 新增測試；累積 115 collected / 114 passed / 1 skipped；phase_04.sh 13 項通過 |
 | P5 | ✅ 完成 | 2026-05-12 | 2026-05-12 | 4.0 | 1 | TW 5 個資料源 Adapter（FinMind/TWSE/TPEX/MOPS/cnyes）+ DataSourceFallback + 4 個 Repository + DataPipelineService + FinancialStatement model & 0014 migration + 67 個新測試（10 finmind / 7 twse / 5 tpex / 9 mops / 4 cnyes / 8 fallback / 19 repos / 5 service integration）；累積 183 collected / 181 passed / 1 skipped / 1 network deselected；phase_05.sh 8 項通過 |
-| P6 | ⏳ 待開始 | - | - | - | - | - |
+| P6 | ✅ 完成 | 2026-05-13 | 2026-05-13 | 2.0 | 1 | US 4 個資料源 Adapter（yfinance/Alpha Vantage/Finnhub/SEC EDGAR）+ MarketDispatcher（symbol regex 涵蓋 ETF / dual class / 特別股）+ data_sources.cache（pyarrow parquet bytes）+ DataPipelineService 升級支援 dispatcher + main.py lifespan 注入 `app.state.dispatcher` + 68 個新 test items（9 yfinance / 9 AV / 7 finnhub / 8 SEC / 23 dispatcher / 8 cache / 7 integration / 1 network）；累積 252 passed / 1 skipped；phase_06.sh 7 項通過 |
 | P7 | ⏳ 待開始 | - | - | - | - | - |
 | P8 | ⏳ 待開始 | - | - | - | - | - |
 | P9 | ⏳ 待開始 | - | - | - | - | - |

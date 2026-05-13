@@ -37,6 +37,7 @@ from app.core.database import (
 from app.core.error_handlers import register_exception_handlers
 from app.core.errors import ExternalServiceError
 from app.core.logging_config import configure_logging, get_logger
+from app.core.market_dispatcher import MarketDispatcher
 from app.core.qdrant_client import (
     dispose_qdrant_client,
     test_qdrant_connection,
@@ -51,6 +52,8 @@ from app.core.redis_client import (
 from app.core.request_id import RequestIDMiddleware
 from app.core.response_envelope import envelope_success
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.data_sources.tw import get_tw_sources
+from app.data_sources.us import get_us_sources
 
 # 先 configure_logging 避免 import 期間的 log 沒設定好
 configure_logging()
@@ -95,6 +98,23 @@ async def lifespan(app: FastAPI):
             raise ExternalServiceError(
                 message_zh="Qdrant collections 初始化失敗", source="qdrant"
             ) from e
+
+    # P6：建立跨市場 dispatcher（即使 PYTEST_RUNNING 也建，但不打網路）
+    try:
+        app.state.dispatcher = MarketDispatcher(
+            tw_sources=get_tw_sources(settings),
+            us_sources=get_us_sources(settings),
+        )
+        logger.info(
+            "market_dispatcher.ready",
+            tw_kinds=sorted(k.value for k in app.state.dispatcher.tw),
+            us_kinds=sorted(k.value for k in app.state.dispatcher.us),
+        )
+    except Exception as e:
+        logger.critical("market_dispatcher.init_failed", error=str(e))
+        raise ExternalServiceError(
+            message_zh="MarketDispatcher 初始化失敗", source="dispatcher"
+        ) from e
 
     yield
 

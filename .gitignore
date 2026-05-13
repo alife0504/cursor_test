@@ -70,3 +70,6 @@ celery.log
 
 # ── Local override（非 git 管理） ────────────────────
 *.local
+
+# ── Claude Code worktrees（執行時臨時建立） ──────────
+.claude/worktrees/
