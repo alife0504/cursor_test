@@ -65,6 +65,8 @@ dev = [
     # 型別
     "mypy>=1.13,<2.0",
     "types-redis>=4.6,<5.0",
+    # Phase 8：Redis-in-memory（fakeredis）給 auth 單元測試用
+    "fakeredis>=2.26,<3.0",
     # 安全工具（P1 退出條件需要）
     "detect-secrets>=1.5,<2.0",
     "pre-commit>=4.0,<5.0",
@@ -105,6 +107,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106"]   # tests 允許 hardcoded secret 字串
+"app/schemas/auth.py" = ["S105"]             # token_type='Bearer' 是 OAuth2 標籤，不是密碼
 
 [tool.ruff.format]
 quote-style = "double"

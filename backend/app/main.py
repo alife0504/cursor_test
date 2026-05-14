@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, text
 from starlette.responses import JSONResponse
 
+from app.api.v1.auth_router import router as auth_router
 from app.core.config import settings
 from app.core.database import (
     dispose_db_connections,
@@ -51,7 +52,9 @@ from app.core.redis_client import (
 )
 from app.core.request_id import RequestIDMiddleware
 from app.core.response_envelope import envelope_success
+from app.core.security import JWTService, TokenBlacklist
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.ws_ticket import WSTicketService
 from app.data_sources.tw import get_tw_sources
 from app.data_sources.us import get_us_sources
 
@@ -116,6 +119,22 @@ async def lifespan(app: FastAPI):
             message_zh="MarketDispatcher 初始化失敗", source="dispatcher"
         ) from e
 
+    # P8：auth 相關 service 掛 app.state（讓 router 取用同一份單例）
+    try:
+        app.state.jwt_service = JWTService(settings)
+        ws_redis = await get_redis(RedisDB.WS_TICKET)
+        app.state.ws_ticket_service = WSTicketService(ws_redis)
+        bl_redis = await get_redis(RedisDB.JWT_BLACKLIST)
+        app.state.token_blacklist = TokenBlacklist(bl_redis)
+        logger.info(
+            "auth.services.ready",
+            access_ttl_min=int(JWTService.ACCESS_TTL.total_seconds() // 60),
+            refresh_ttl_days=int(JWTService.REFRESH_TTL.total_seconds() // 86400),
+        )
+    except Exception as e:
+        logger.critical("auth.services.init_failed", error=str(e))
+        raise ExternalServiceError(message_zh="Auth 服務初始化失敗", source="auth") from e
+
     yield
 
     logger.info("app.shutdown")
@@ -155,6 +174,11 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 # ── Exception handlers ────────────────────────────────────
 register_exception_handlers(app)
+
+
+# ── Routers ───────────────────────────────────────────────
+# Phase 8: auth router
+app.include_router(auth_router)
 
 
 # ════════════════ Health endpoints ════════════════

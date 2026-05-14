@@ -37,7 +37,13 @@ from app.models.price import StockPrice
 from app.models.quota import LLMMonthlyQuota, LLMUsage
 from app.models.stock import MARKET_VALUES, StockInfo, StockList
 from app.models.tw_specific import InstitutionalTrading, MarginTrading, MonthlyRevenue
-from app.models.user import PasswordResetToken, User, UserRole, UserSession
+from app.models.user import (
+    PasswordHistory,
+    PasswordResetToken,
+    User,
+    UserRole,
+    UserSession,
+)
 from app.models.watchlist import UserWatchlist
 
 __all__ = [
@@ -68,6 +74,7 @@ __all__ = [
     "NewsMetadata",
     "NotificationLog",
     "NotificationSetting",
+    "PasswordHistory",
     "PasswordResetToken",
     "PendingOrder",
     "PortfolioPosition",

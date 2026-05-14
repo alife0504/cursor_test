@@ -148,4 +148,43 @@ class PasswordResetToken(Base):
     )
 
 
-__all__ = ["PasswordResetToken", "User", "UserRole", "UserSession"]
+class PasswordHistory(Base):
+    """密碼歷史 hash — change-password / reset-password 不可與最近 5 次重複（第 19.1 章 / Phase 8）。
+
+    Migration 0015 建表。儲存的是 bcrypt hash，不是明文。
+    """
+
+    __tablename__ = "password_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_password_history_user_id_created_at",
+            "user_id",
+            "created_at",
+            postgresql_using="btree",
+        ),
+    )
+
+
+__all__ = [
+    "PasswordHistory",
+    "PasswordResetToken",
+    "User",
+    "UserRole",
+    "UserSession",
+]
