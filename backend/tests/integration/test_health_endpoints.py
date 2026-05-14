@@ -85,13 +85,19 @@ def test_health_live_has_security_headers(client: TestClient) -> None:
 # ────────────────────── /health/seeded ──────────────────────
 
 
-def test_health_seeded_returns_false_initially(client: TestClient) -> None:
-    """P7 前 seeded 永遠 false。"""
+def test_health_seeded_returns_envelope_with_real_check(client: TestClient) -> None:
+    """P7 起 /health/seeded 是真實 DB 檢查（PLAN 13.3）。
+
+    seeded 值依當下 DB 狀態（可能 true / false），但 envelope 結構固定。
+    """
     r = client.get("/health/seeded")
     assert r.status_code == 200
     body = r.json()
-    assert body["data"]["seeded"] is False
-    assert "P7" in body["data"]["reason"]
+    data = body["data"]
+    assert isinstance(data["seeded"], bool)
+    assert isinstance(data["stock_count"], int)
+    assert isinstance(data["has_prices"], bool)
+    assert data.get("threshold_stock") == 100
 
 
 # ────────────────────── /health/ready ──────────────────────

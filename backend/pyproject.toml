@@ -45,6 +45,13 @@ dependencies = [
     "lxml>=5.2,<7.0",
     # P6：美股資料源（yfinance 同步包，async wrap；Alpha Vantage/Finnhub/SEC EDGAR 用 httpx）
     "yfinance>=0.2.40,<0.3",
+    # P7：Celery worker + beat（broker/backend = redis db=1）+ sync DB driver（給 DLQ signal 用）
+    "celery[redis]>=5.4,<5.5",
+    "psycopg2-binary>=2.9,<3.0",
+    # P7：bcrypt（seed_users.py 用，與 init_db.py 一致；passlib 4.x bug 改用 bcrypt 直接）
+    "bcrypt>=4.2,<5.0",
+    # P7：seed/backfill CLI 進度條
+    "tqdm>=4.66,<5.0",
 ]
 
 [dependency-groups]

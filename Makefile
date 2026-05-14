@@ -5,7 +5,10 @@
         up down logs restart ps psql redis-cli qdrant-status \
         services-reset backend-dev backend-image backend-shell \
         backend-logs init-db migration-up migration-down migration-new \
-        migration-status migration-history migration-redo
+        migration-status migration-history migration-redo \
+        up-workers workers-logs workers-restart down-workers \
+        seed-stocks seed-admin backfill verify-data celery-shell \
+        celery-purge celery-inspect
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -100,6 +103,44 @@ migration-history:  ## 看 migration 歷史
 
 migration-redo:  ## downgrade base + upgrade head（測試雙向用）
 	cd backend && uv run alembic downgrade base && uv run alembic upgrade head
+
+# ── Celery / Workers / Bootstrap（P7 新增） ───────
+
+up-workers:  ## 啟動 celery_worker + celery_beat（已 make up 三服務後）
+	docker compose up -d celery_worker celery_beat
+	@echo ""
+	@echo "等待 worker / beat 起來..."
+	@sleep 8 && docker compose ps celery_worker celery_beat
+
+down-workers:  ## 停止 worker + beat（保留 broker / DB）
+	docker compose stop celery_worker celery_beat
+
+workers-logs:  ## 跟 worker + beat log
+	docker compose logs -f celery_worker celery_beat
+
+workers-restart:  ## 重啟 worker + beat
+	docker compose restart celery_worker celery_beat
+
+celery-shell:  ## 進 celery worker container shell
+	docker compose exec celery_worker bash
+
+celery-purge:  ## 清空 celery broker queue（謹慎使用）
+	docker compose exec celery_worker uv run celery -A app.workers.celery_app purge -f
+
+celery-inspect:  ## 看 celery worker 註冊的 task / 佇列狀態
+	docker compose exec celery_worker uv run celery -A app.workers.celery_app inspect registered
+
+seed-stocks:  ## 抓 TWSE/TPEX/US 股票寫 stock_list（PLAN 13.1 step 3）
+	cd backend && uv run python ../data-pipeline/scripts/seed_stock_list.py
+
+seed-admin:  ## 建立第一個 admin 帳號（從 .env 讀 ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD）
+	cd backend && uv run python ../data-pipeline/scripts/seed_users.py
+
+backfill:  ## 回填 OHLCV：make backfill ARGS="--region TW --symbol 2330 --years 1"
+	cd backend && uv run python ../data-pipeline/scripts/backfill.py $(ARGS)
+
+verify-data:  ## 驗證資料完整性（stock_list / stock_prices / audit_logs）
+	cd backend && uv run python ../data-pipeline/scripts/verify_data.py
 
 # ── 程式碼品質（P1 已有） ───────────────────────────
 

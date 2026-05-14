@@ -124,6 +124,98 @@ services:
     stop_grace_period: 60s
     restart: unless-stopped
 
+  # ── Celery Worker（P7 加）────────────────────────────
+  # 與 backend 共用 image；command 改跑 celery worker；
+  # wait-for-services 等 DB/redis/qdrant healthy 才啟動。
+  celery_worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ta-celery-worker
+    image: tradingagents-backend:dev
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      APP_ENV: dev
+      # DLQ fallback file 寫到 /tmp（容器內可寫）
+      CELERY_DLQ_FALLBACK_FILE: /tmp/celery_dlq_fallback.jsonl
+    command:
+      - ./scripts/wait-for-services.sh
+      - uv
+      - run
+      - celery
+      - -A
+      - app.workers.celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=4
+      - --max-tasks-per-child=50
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # Override backend image 的 curl healthcheck（worker 沒 HTTP server）
+    # 用 celery inspect ping 驗 worker 接 broker + 回應
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "uv run celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5 || exit 1"
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+  # ── Celery Beat（P7 加）────────────────────────────
+  # Beat 是 schedule trigger；單 instance（多 instance 會重複觸發）。
+  celery_beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ta-celery-beat
+    image: tradingagents-backend:dev
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      APP_ENV: dev
+    command:
+      - ./scripts/wait-for-services.sh
+      - uv
+      - run
+      - celery
+      - -A
+      - app.workers.celery_app
+      - beat
+      - --loglevel=info
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # Beat 沒 HTTP / 沒 ping endpoint；只能驗 process 還活著（celerybeat-schedule 會 mtime 更新）
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "test -f /app/celerybeat-schedule || test -f /tmp/celerybeat-schedule || exit 0"
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    restart: unless-stopped
+
 volumes:
   timescaledb_data:
     name: tradingagents_timescaledb_data

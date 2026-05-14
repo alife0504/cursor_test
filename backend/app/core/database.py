@@ -1,14 +1,16 @@
-"""DB 連線層 — 兩個 engine（rw / ro）+ 雙 sessionmaker + lifespan helper。
+"""DB 連線層 — async engine（rw / ro）+ sync engine（celery）+ lifespan helper。
 
-依 PLAN.md 第 14.1 章連線池 + 第 19.1 章帳號分離。
+依 PLAN.md 第 14.1 章連線池 + 第 19.1 章帳號分離 + 第 14.10 章 DLQ。
 
 設計：
-- rw_engine：用 ta_service_rw（DML only）→ 後端業務 router 用
-- ro_engine：用 ta_agent_ro（SELECT only）→ Agent / Tool 用
-- migration 用獨立 ta_migration（不在 lifespan 開）
+- rw_engine（async）：ta_service_rw → 後端業務 router 用
+- ro_engine（async）：ta_agent_ro → Agent / Tool 用
+- migration_engine（async, ta_migration）：alembic env.py / data-pipeline 內部探測用
+- sync_rw_engine（sync, ta_service_rw, psycopg2）：celery worker / task_failure signal 用
+  Celery context 跑同步 SQLAlchemy 比 asyncio.run() 在 signal handler 中更穩定。
 
 lifespan startup：
-- 建 engine（依 settings 的 pool size + timeout）
+- 建 async engine（依 settings 的 pool size + timeout）
 - 跑 fail-fast probe（連一次 SELECT 1）
 
 lifespan shutdown：
@@ -17,8 +19,10 @@ lifespan shutdown：
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import contextmanager
 
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.event import listens_for
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -26,7 +30,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import AsyncAdaptedQueuePool, QueuePool
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -138,6 +143,88 @@ async def get_ro_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+# ── 同步 engine / session（celery worker + signal handler 用） ─────
+
+_sync_rw_engine: Engine | None = None
+_sync_rw_sessionmaker: sessionmaker[Session] | None = None
+
+
+def _build_sync_rw_dsn() -> str:
+    """把 async DSN 改成 psycopg2 sync DSN（給 celery / signal 用）。"""
+    pwd = settings.TA_SERVICE_RW_PASSWORD.get_secret_value()
+    return (
+        f"postgresql+psycopg2://ta_service_rw:{pwd}"
+        f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+    )
+
+
+def get_sync_rw_engine() -> Engine:
+    """同步 ta_service_rw engine — celery worker / task_failure signal 用。
+
+    pool 故意設小（celery worker concurrency=4，每 worker 1 conn 足夠）。
+    """
+    global _sync_rw_engine, _sync_rw_sessionmaker
+    if _sync_rw_engine is None:
+        _sync_rw_engine = create_engine(
+            _build_sync_rw_dsn(),
+            echo=False,
+            pool_size=4,
+            max_overflow=2,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            poolclass=QueuePool,
+            connect_args={"application_name": "tradingagents-tw/sync_rw"},
+        )
+
+        @listens_for(_sync_rw_engine, "connect")
+        def _set_timeouts(dbapi_conn, _conn_record):  # type: ignore[no-untyped-def]
+            try:
+                cur = dbapi_conn.cursor()
+                cur.execute(f"SET statement_timeout = '{settings.STATEMENT_TIMEOUT_MS}ms'")
+                cur.execute(f"SET lock_timeout = '{settings.LOCK_TIMEOUT_MS}ms'")
+                cur.close()
+            except Exception as e:  # pragma: no cover
+                logger.debug("db.sync_connect_listener.skipped", error=str(e))
+
+        _sync_rw_sessionmaker = sessionmaker(
+            _sync_rw_engine, expire_on_commit=False, class_=Session
+        )
+    return _sync_rw_engine
+
+
+@contextmanager
+def sync_rw_session() -> Iterator[Session]:
+    """同步 RW session context manager — celery task / signal handler 用。
+
+    用法：
+        with sync_rw_session() as s:
+            s.add(...)
+            s.commit()
+
+    異常時自動 rollback；正常離開時 caller 負責 commit。
+    """
+    if _sync_rw_sessionmaker is None:
+        get_sync_rw_engine()
+    assert _sync_rw_sessionmaker is not None
+    session = _sync_rw_sessionmaker()
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def dispose_sync_rw_engine() -> None:
+    """關閉 sync engine（celery worker shutdown 用）。"""
+    global _sync_rw_engine, _sync_rw_sessionmaker
+    if _sync_rw_engine is not None:
+        _sync_rw_engine.dispose()
+        _sync_rw_engine = None
+        _sync_rw_sessionmaker = None
+
+
 # ── lifespan helper ────────────────────────────────────
 
 
@@ -194,10 +281,13 @@ async def dispose_db_connections() -> None:
 
 __all__ = [
     "dispose_db_connections",
+    "dispose_sync_rw_engine",
     "get_migration_engine",
     "get_ro_engine",
     "get_ro_session",
     "get_rw_engine",
     "get_rw_session",
+    "get_sync_rw_engine",
+    "sync_rw_session",
     "test_db_connection",
 ]

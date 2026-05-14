@@ -59,6 +59,11 @@ test-results/
 .coverage
 htmlcov/
 
+# ── Security / coverage audit 工具產物 ──────────────
+backend/bandit_audit.json
+backend/cov_audit.json
+backend/.coverage
+
 # ── Logs ───────────────────────────────────────────
 *.log
 logs/

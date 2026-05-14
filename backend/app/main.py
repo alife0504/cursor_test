@@ -24,7 +24,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import func, text
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
@@ -219,13 +219,53 @@ async def health_ready(request: Request) -> JSONResponse:
 
 @app.get("/health/seeded", tags=["health"])
 async def health_seeded(request: Request) -> JSONResponse:
-    """P7 stock_list seed 完才回 true。P3 階段暫回 false。"""
+    """seeded 條件（PLAN 第 13.3 章）：stock_list ≥ 100 + 至少 1 支有 OHLCV。
+
+    回 200 + envelope；data.seeded 為 bool，data.stock_count / data.has_prices 提供 detail。
+    DB 查詢失敗 → seeded=false + reason="db_error"（不回 5xx，避免讓 onboarding 死循環）。
+    """
+    from sqlalchemy import select
+
+    from app.models.price import StockPrice
+    from app.models.stock import StockList
+
+    data: dict[str, Any] = {
+        "seeded": False,
+        "stock_count": 0,
+        "has_prices": False,
+        "threshold_stock": 100,
+    }
+
+    try:
+        ro = get_ro_engine()
+        async with ro.connect() as conn:
+            stock_count = (
+                await conn.execute(select(func.count()).select_from(StockList))
+            ).scalar() or 0
+            data["stock_count"] = int(stock_count)
+
+            has_prices_row = (await conn.execute(select(StockPrice.symbol).limit(1))).first()
+            data["has_prices"] = has_prices_row is not None
+
+        data["seeded"] = data["stock_count"] >= 100 and data["has_prices"]
+        if not data["seeded"]:
+            reason_parts: list[str] = []
+            if data["stock_count"] < 100:
+                reason_parts.append(
+                    f"stock_list={data['stock_count']} < 100（先跑 make seed-stocks）"
+                )
+            if not data["has_prices"]:
+                reason_parts.append(
+                    'stock_prices 為空（先跑 make backfill ARGS="--region TW --symbol 2330 --years 1"）'
+                )
+            data["reason"] = "; ".join(reason_parts)
+    except Exception as exc:  # pragma: no cover  - defensive
+        logger.warning("health.seeded.query_failed", error=str(exc))
+        data["reason"] = f"db_error: {type(exc).__name__}"
+
     return JSONResponse(
         status_code=200,
-        content=envelope_success(
-            {"seeded": False, "reason": "P7 not done (stock_list 尚未 seed)"},
-            trace_id=request.state.trace_id,
-        ),
+        content=envelope_success(data, trace_id=request.state.trace_id),
     )
 
 
