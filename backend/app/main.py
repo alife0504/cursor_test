@@ -28,6 +28,11 @@ from sqlalchemy import func, text
 from starlette.responses import JSONResponse
 
 from app.api.v1.auth_router import router as auth_router
+from app.api.v1.market_router import router as market_router
+from app.api.v1.screener_router import router as screener_router
+from app.api.v1.stocks_router import router as stocks_router
+from app.api.v1.users_router import router as users_router
+from app.api.v1.watchlist_router import router as watchlist_router
 from app.core.audit_middleware import AuditMiddleware
 from app.core.body_size_middleware import BodySizeMiddleware
 from app.core.config import settings
@@ -206,6 +211,13 @@ register_exception_handlers(app)
 # ── Routers ───────────────────────────────────────────────
 # Phase 8: auth router
 app.include_router(auth_router)
+
+# Phase 10: 業務 API 第一批
+app.include_router(stocks_router)
+app.include_router(watchlist_router)
+app.include_router(market_router)
+app.include_router(screener_router)
+app.include_router(users_router)
 
 
 # ════════════════ Health endpoints ════════════════

@@ -1,0 +1,213 @@
+"""Phase 10 — MarketRepository。
+
+依 PLAN.md 第 10.5 章三大法人 / 第 17.5 章 cache。
+
+提供：
+- get_overview_aggregates(market, as_of)：以 stock_prices + stock_list 聚合「漲跌家數 / 總成交量」
+- get_institutional_for_date(date, market)：列出三大法人某日紀錄
+- get_movers(market, type, limit)：漲幅 / 跌幅 / 成交量排行
+- get_latest_trading_date(market)：找最近一個 stock_prices 有資料的日期
+
+注意：本層只負責 SQL；cache 由 service 層處理（依 17.5 章規範）。
+"""
+
+from __future__ import annotations
+
+from datetime import date as date_type
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import (
+    Date,
+    Numeric,
+    Result,
+    String,
+    and_,
+    case,
+    cast,
+    func,
+    literal,
+    select,
+)
+
+from app.models.price import StockPrice
+from app.models.stock import StockList
+from app.models.tw_specific import InstitutionalTrading
+from app.repos.base import BaseRepository
+
+# 把使用者輸入的 market code 映射到 stock_list.market 集合
+_MARKET_GROUPS: dict[str, tuple[str, ...]] = {
+    "TW": ("TWSE", "TPEX"),
+    "US": ("NYSE", "NASDAQ", "AMEX"),
+}
+
+
+def _market_filter(market: str) -> tuple[str, ...]:
+    """回傳 stock_list.market 應該 in 的 enum 值。"""
+    return _MARKET_GROUPS.get(market.upper(), (market.upper(),))
+
+
+class MarketRepository(BaseRepository):
+    """市場聚合查詢。"""
+
+    # ── 最近一個交易日 ──────────────────────────────────────
+    async def get_latest_trading_date(self, market: str) -> date_type | None:
+        """找 stock_prices 中最近一筆 date（依 market 過濾）。"""
+        markets = _market_filter(market)
+        stmt = (
+            select(func.max(StockPrice.date))
+            .join(StockList, StockList.symbol == StockPrice.symbol)
+            .where(StockList.market.in_(markets))
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    # ── 大盤 overview ──────────────────────────────────────
+    async def get_overview_aggregates(self, market: str, as_of: date_type) -> dict[str, Any]:
+        """從 stock_prices 計算「漲家數 / 跌家數 / 平盤 / 總成交量」。
+
+        定義：
+        - 漲：close > 前一日 close（用 LAG window function）— 為簡化，本實作直接用 OPEN<CLOSE 替代
+          （沒前一日資料就視為平盤）。P17 真正接上 trading_calendar 後可改 LAG。
+        - 簡化版讓 stock_list 為空時也回 0 而非 SQL error。
+
+        本實作刻意保持簡單可審查；複雜邏輯放 service。
+        """
+        markets = _market_filter(market)
+        advance_expr = func.sum(case((StockPrice.close > StockPrice.open, 1), else_=0))
+        decline_expr = func.sum(case((StockPrice.close < StockPrice.open, 1), else_=0))
+        unchanged_expr = func.sum(case((StockPrice.close == StockPrice.open, 1), else_=0))
+        volume_expr = func.coalesce(func.sum(StockPrice.volume), 0)
+
+        stmt = (
+            select(
+                advance_expr.label("advance"),
+                decline_expr.label("decline"),
+                unchanged_expr.label("unchanged"),
+                volume_expr.label("volume"),
+            )
+            .join(StockList, StockList.symbol == StockPrice.symbol)
+            .where(
+                and_(
+                    StockList.market.in_(markets),
+                    StockPrice.date == as_of,
+                )
+            )
+        )
+        result: Result[Any] = await self.session.execute(stmt)
+        row = result.one_or_none()
+        if row is None:
+            return {"advance": 0, "decline": 0, "unchanged": 0, "volume": 0}
+        return {
+            "advance": int(row.advance or 0),
+            "decline": int(row.decline or 0),
+            "unchanged": int(row.unchanged or 0),
+            "volume": int(row.volume or 0),
+        }
+
+    # ── 三大法人（TW only）──────────────────────────────────
+    async def get_institutional_for_date(
+        self,
+        target_date: date_type,
+        *,
+        market: str = "TW",
+        limit: int = 100,
+    ) -> list[InstitutionalTrading]:
+        markets = _market_filter(market)
+        stmt = (
+            select(InstitutionalTrading)
+            .join(StockList, StockList.symbol == InstitutionalTrading.symbol)
+            .where(
+                and_(
+                    StockList.market.in_(markets),
+                    InstitutionalTrading.date == target_date,
+                )
+            )
+            .order_by(InstitutionalTrading.foreign_net.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    # ── 漲跌幅 / 成交量排行 ────────────────────────────────
+    async def get_movers(
+        self,
+        market: str,
+        mover_type: str,
+        *,
+        as_of: date_type | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """漲跌幅排行 / 成交量排行。
+
+        Args:
+            market: TW / US
+            mover_type: gainers / losers / volume
+            as_of: 預設為 latest_trading_date(market)
+            limit: 取前 N
+
+        Return:
+            list of dict: {symbol, name, close, change_pct, volume}
+        """
+        if as_of is None:
+            as_of = await self.get_latest_trading_date(market)
+            if as_of is None:
+                return []
+
+        markets = _market_filter(market)
+        # change_pct = (close - open) / open * 100
+        # 用 NULLIF(open, 0) 防除以 0
+        change_pct_expr = (
+            (cast(StockPrice.close, Numeric(20, 6)) - cast(StockPrice.open, Numeric(20, 6)))
+            / func.nullif(cast(StockPrice.open, Numeric(20, 6)), 0)
+            * literal(100)
+        ).label("change_pct")
+
+        stmt = (
+            select(
+                StockPrice.symbol.label("symbol"),
+                StockList.name.label("name"),
+                StockPrice.close.label("close"),
+                change_pct_expr,
+                StockPrice.volume.label("volume"),
+            )
+            .join(StockList, StockList.symbol == StockPrice.symbol)
+            .where(
+                and_(
+                    StockList.market.in_(markets),
+                    StockPrice.date == as_of,
+                )
+            )
+        )
+        mt = mover_type.lower()
+        if mt == "gainers":
+            stmt = stmt.order_by(change_pct_expr.desc().nullslast())
+        elif mt == "losers":
+            stmt = stmt.order_by(change_pct_expr.asc().nullsfirst())
+        elif mt == "volume":
+            stmt = stmt.order_by(StockPrice.volume.desc())
+        else:
+            # 預設 gainers
+            stmt = stmt.order_by(change_pct_expr.desc().nullslast())
+
+        stmt = stmt.limit(limit)
+        result = await self.session.execute(stmt)
+        rows: list[dict[str, Any]] = []
+        for r in result.all():
+            rows.append(
+                {
+                    "symbol": r.symbol,
+                    "name": r.name,
+                    "close": r.close,
+                    "change_pct": r.change_pct,
+                    "volume": int(r.volume or 0),
+                }
+            )
+        return rows
+
+
+# 抑制 unused import 警告
+_ = (Date, Decimal, String, literal)
+
+
+__all__ = ["MarketRepository"]

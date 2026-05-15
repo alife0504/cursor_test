@@ -307,6 +307,109 @@ def flush_rate_limit(env_vars):
     return _flush
 
 
+# ════════════════════════════════════════════════════════
+# Phase 10 fixtures — stock / watchlist / market 測試共用
+# ════════════════════════════════════════════════════════
+
+
+async def _login_get_access_and_csrf(client, email: str, password: str) -> tuple[str, str]:
+    """登入並回 (access_token, csrf_cookie)。給 P10 router 測試共用。"""
+    r = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert r.status_code == 200, r.text
+    csrf = r.cookies.get("csrf_token") or ""
+    return r.json()["data"]["access_token"], csrf
+
+
+@pytest.fixture
+def login_helper():
+    """提供 callable：login_helper(auth_client, email, password) → (access, csrf)。"""
+    return _login_get_access_and_csrf
+
+
+@pytest.fixture
+async def seed_stocks(db_session_maker):
+    """建立測試用 stock_list 行；自動清理（cascade 連動 stock_prices）。"""
+    import uuid as _uuid
+
+    from sqlalchemy import delete
+
+    from app.models.price import StockPrice
+    from app.models.stock import StockList
+
+    created_symbols: list[str] = []
+
+    async def _factory(rows: list[dict]) -> list[str]:
+        """rows 結構：[{symbol, market, name, industry?, is_active?}, ...]。"""
+        async with db_session_maker() as s:
+            for r in rows:
+                sym = r["symbol"]
+                stock = StockList(
+                    symbol=sym,
+                    market=r.get("market", "TWSE"),
+                    name=r.get("name", f"測試{sym}"),
+                    industry=r.get("industry"),
+                    is_active=r.get("is_active", True),
+                )
+                s.add(stock)
+                created_symbols.append(sym)
+            await s.commit()
+        return created_symbols
+
+    yield _factory
+
+    if created_symbols:
+        async with db_session_maker() as s:
+            # 先刪 OHLCV / 其他 FK 連動 → 再刪 stock_list
+            await s.execute(delete(StockPrice).where(StockPrice.symbol.in_(created_symbols)))
+            await s.execute(delete(StockList).where(StockList.symbol.in_(created_symbols)))
+            await s.commit()
+            _ = _uuid
+
+
+@pytest.fixture
+async def seed_ohlcv(db_session_maker):
+    """建立測試用 stock_prices；caller 負責 seed 對應 stock_list（FK）。"""
+    from sqlalchemy import delete
+
+    from app.models.price import StockPrice
+
+    inserted: list[tuple[str, object]] = []
+
+    async def _factory(rows: list[dict]) -> int:
+        """rows: [{symbol, date, open, high, low, close, volume?}, ...]。"""
+        from decimal import Decimal
+
+        async with db_session_maker() as s:
+            for r in rows:
+                p = StockPrice(
+                    symbol=r["symbol"],
+                    date=r["date"],
+                    open=Decimal(str(r["open"])),
+                    high=Decimal(str(r["high"])),
+                    low=Decimal(str(r["low"])),
+                    close=Decimal(str(r["close"])),
+                    volume=int(r.get("volume", 0)),
+                    source=r.get("source", "test"),
+                )
+                s.add(p)
+                inserted.append((r["symbol"], r["date"]))
+            await s.commit()
+        return len(rows)
+
+    yield _factory
+
+    if inserted:
+        async with db_session_maker() as s:
+            for sym, d in inserted:
+                await s.execute(
+                    delete(StockPrice).where(StockPrice.symbol == sym, StockPrice.date == d)
+                )
+            await s.commit()
+
+
 @pytest.fixture(autouse=True)
 def _flush_auth_redis_dbs(env_vars):
     """每個 test 前用「同步」redis client 清 jwt_blacklist + ws_ticket。

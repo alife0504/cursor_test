@@ -14,7 +14,7 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 
 from app.models.user import PasswordResetToken, User, UserSession
 
@@ -133,6 +133,88 @@ class UserRepository:
     async def mark_onboarded(self, user_id: UUID) -> None:
         stmt = update(User).where(User.id == user_id).values(onboarding_completed=True)
         await self.session.execute(stmt)
+
+    # ── Phase 10 — admin CRUD ──────────────────────────
+    async def list_page(
+        self,
+        *,
+        after_id: UUID | None = None,
+        limit: int = 50,
+        include_deleted: bool = False,
+    ) -> list[User]:
+        """Cursor pagination — order by id asc。"""
+        stmt = select(User)
+        if not include_deleted:
+            stmt = stmt.where(User.deleted_at.is_(None))
+        if after_id is not None:
+            stmt = stmt.where(User.id > after_id)
+        stmt = stmt.order_by(User.id.asc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def create(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        full_name: str | None,
+        role: str,
+        preferred_timezone: str,
+        preferred_language: str,
+        must_change_password: bool,
+    ) -> User:
+        user = User(
+            email=email,
+            password_hash=password_hash,
+            full_name=full_name,
+            role=role,
+            preferred_timezone=preferred_timezone,
+            preferred_language=preferred_language,
+            must_change_password=must_change_password,
+            onboarding_completed=False,
+            is_active=True,
+        )
+        self.session.add(user)
+        await self.session.flush()
+        return user
+
+    async def update_fields(
+        self,
+        user_id: UUID,
+        *,
+        full_name: str | None = None,
+        role: str | None = None,
+        preferred_timezone: str | None = None,
+        preferred_language: str | None = None,
+        is_active: bool | None = None,
+    ) -> User | None:
+        values: dict[str, object] = {}
+        if full_name is not None:
+            values["full_name"] = full_name
+        if role is not None:
+            values["role"] = role
+        if preferred_timezone is not None:
+            values["preferred_timezone"] = preferred_timezone
+        if preferred_language is not None:
+            values["preferred_language"] = preferred_language
+        if is_active is not None:
+            values["is_active"] = is_active
+        if not values:
+            return await self.get_by_id(user_id)
+        stmt = update(User).where(User.id == user_id).values(**values).returning(User)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def soft_delete(self, user_id: UUID) -> bool:
+        """軟刪除：is_active=false + deleted_at=now()。回 True 若有行被改。"""
+        stmt = (
+            update(User)
+            .where(and_(User.id == user_id, User.deleted_at.is_(None)))
+            .values(is_active=False, deleted_at=func.now())
+            .returning(User.id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
 
 # ─────────────────────────────────────────────────────────

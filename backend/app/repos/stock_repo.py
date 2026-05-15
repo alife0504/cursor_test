@@ -32,6 +32,41 @@ class StockRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_page(
+        self,
+        *,
+        markets: list[str] | None = None,
+        keyword: str | None = None,
+        after_symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[StockList]:
+        """Phase 10 — cursor pagination 列表。
+
+        Args:
+            markets: stock_list.market enum 過濾（如 ["TWSE","TPEX"]）；None → 不限
+            keyword: symbol prefix 或 name ILIKE 子串
+            after_symbol: cursor — 取 symbol > after_symbol（asc 排序）
+            limit: 最多筆數
+
+        排序：symbol asc（keyset 用）。
+        """
+        stmt = select(StockList).where(StockList.is_active.is_(True))
+        if markets:
+            stmt = stmt.where(StockList.market.in_(markets))
+        if keyword:
+            q = keyword.strip()
+            if q:
+                like = f"%{q}%"
+                symbol_prefix = f"{q}%"
+                stmt = stmt.where(
+                    (StockList.symbol.ilike(symbol_prefix)) | (StockList.name.ilike(like))
+                )
+        if after_symbol:
+            stmt = stmt.where(StockList.symbol > after_symbol)
+        stmt = stmt.order_by(StockList.symbol.asc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_symbol(self, symbol: str, market: str) -> StockList | None:
         stmt = select(StockList).where(and_(StockList.symbol == symbol, StockList.market == market))
         result = await self.session.execute(stmt)

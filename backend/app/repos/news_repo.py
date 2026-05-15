@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.core.logging_config import get_logger
-from app.models.news import NewsMetadata
+from app.models.news import Announcement, NewsMetadata
 from app.repos.base import BaseRepository
 
 logger = get_logger(__name__)
@@ -90,4 +90,22 @@ class NewsRepository(BaseRepository):
         return inserted
 
 
-__all__ = ["NewsRepository"]
+class AnnouncementRepository(BaseRepository):
+    """announcements 表 — Phase 10 提供「依股票列出近期重大訊息」介面。"""
+
+    async def list_by_symbol(
+        self,
+        symbol: str,
+        *,
+        since: datetime | None = None,
+        limit: int = 50,
+    ) -> list[Announcement]:
+        stmt = select(Announcement).where(Announcement.symbol == symbol)
+        if since is not None:
+            stmt = stmt.where(Announcement.published_at >= since)
+        stmt = stmt.order_by(Announcement.published_at.desc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
+__all__ = ["AnnouncementRepository", "NewsRepository"]
