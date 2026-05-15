@@ -28,7 +28,10 @@ from sqlalchemy import func, text
 from starlette.responses import JSONResponse
 
 from app.api.v1.auth_router import router as auth_router
+from app.core.audit_middleware import AuditMiddleware
+from app.core.body_size_middleware import BodySizeMiddleware
 from app.core.config import settings
+from app.core.csrf_middleware import CSRFMiddleware
 from app.core.database import (
     dispose_db_connections,
     get_ro_engine,
@@ -44,6 +47,7 @@ from app.core.qdrant_client import (
     test_qdrant_connection,
 )
 from app.core.qdrant_init import ensure_collections
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.redis_client import (
     RedisDB,
     dispose_redis_pools,
@@ -155,12 +159,32 @@ app = FastAPI(
 )
 
 
-# ── Middleware（外層先 add，最後執行）─────────────────────
-# Starlette 規則：最後 add 的 middleware 最先進、最後出
-# 順序（外 → 內）：SecurityHeaders → CORS → RequestID
-# 因此 add 順序（先 add 的最內層）：RequestID → CORS → SecurityHeaders
+# ── Middleware（Phase 9）─────────────────────
+# Starlette 規則：最後 add 的 middleware 最先進、最後出（LIFO）。
+#
+# 預期執行順序（request 進入 → response 出去）：
+#   1. SecurityHeadersMiddleware（最外層；幫 response 加 header）
+#   2. CORSMiddleware（CORS pre-flight）
+#   3. RateLimitMiddleware（Redis-based L1-L3 擋暴衝）
+#   4. CSRFMiddleware（POST/PUT/DELETE 驗 X-CSRF-Token）
+#   5. BodySizeMiddleware（Content-Length > 1MB 直接 413）
+#   6. AuditMiddleware（response 後寫 audit_logs）
+#   7. RequestIDMiddleware（最內層；產 trace_id）
+#
+# 因此 add 順序（先 add 的最內層）由內到外：
+add_order_inner_to_outer = [
+    RequestIDMiddleware,  # 最先 add = 最內層
+    AuditMiddleware,
+    BodySizeMiddleware,
+    CSRFMiddleware,
+    RateLimitMiddleware,
+]
 
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(AuditMiddleware)
+app.add_middleware(BodySizeMiddleware)
+app.add_middleware(CSRFMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -170,6 +194,9 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "Content-Type"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+
+# 抑制 unused 變數警告（這個 list 只是文件化用）
+_ = add_order_inner_to_outer
 
 
 # ── Exception handlers ────────────────────────────────────

@@ -123,11 +123,13 @@ async def test_refresh_after_logout_rejected(auth_client, make_test_user) -> Non
     refresh_cookie = login_r.cookies.get("refresh_token")
     csrf_cookie = login_r.cookies.get("csrf_token")
 
-    # logout
-    auth_client.post(
+    # logout — P9 後 POST 需 CSRF token
+    logout_r = auth_client.post(
         "/api/v1/auth/logout",
-        cookies={"refresh_token": refresh_cookie},
+        cookies={"refresh_token": refresh_cookie, "csrf_token": csrf_cookie},
+        headers={"X-CSRF-Token": csrf_cookie},
     )
+    assert logout_r.status_code == 200, logout_r.text
 
     # 用舊 cookie 再 refresh → 應失敗
     r = auth_client.post(

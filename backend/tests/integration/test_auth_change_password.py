@@ -1,4 +1,4 @@
-"""Phase 8 — /api/v1/auth/change-password 整合測試。
+"""Phase 8 — /api/v1/auth/change-password 整合測試（P9 之後加 CSRF + rate limit 處理）。
 
 依 PLAN 第二十七章 R 項：4 個必要測試。
 """
@@ -11,13 +11,22 @@ from sqlalchemy import select
 pytestmark = pytest.mark.integration
 
 
-async def _login_and_get_token(auth_client, email: str, password: str) -> str:
+async def _login_get_access_and_csrf(auth_client, email: str, password: str) -> tuple[str, str]:
+    """登入並回 (access_token, csrf_cookie)。"""
     r = auth_client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": password},
     )
     assert r.status_code == 200, r.text
-    return r.json()["data"]["access_token"]
+    csrf = r.cookies.get("csrf_token") or ""
+    return r.json()["data"]["access_token"], csrf
+
+
+def _change_password_headers(access: str, csrf: str) -> dict:
+    return {
+        "Authorization": f"Bearer {access}",
+        "X-CSRF-Token": csrf,
+    }
 
 
 # ────────────────────────────────────────────────────────
@@ -27,12 +36,13 @@ async def _login_and_get_token(auth_client, email: str, password: str) -> str:
 
 async def test_change_password_requires_old(auth_client, make_test_user) -> None:
     user, password = await make_test_user(must_change=False)
-    access = await _login_and_get_token(auth_client, user.email, password)
+    access, csrf = await _login_get_access_and_csrf(auth_client, user.email, password)
 
     r = auth_client.post(
         "/api/v1/auth/change-password",
         json={"old_password": "WrongOld1!", "new_password": "BrandNewPwd2026!"},
-        headers={"Authorization": f"Bearer {access}"},
+        headers=_change_password_headers(access, csrf),
+        cookies={"csrf_token": csrf},
     )
     assert r.status_code == 401, r.text
     body = r.json()
@@ -45,7 +55,7 @@ async def test_change_password_requires_old(auth_client, make_test_user) -> None
 
 
 async def test_change_password_blocks_recent_5(
-    auth_client, make_test_user, db_session_maker
+    auth_client, make_test_user, db_session_maker, flush_rate_limit
 ) -> None:
     user, p0 = await make_test_user(must_change=False)
     passwords = [
@@ -56,25 +66,27 @@ async def test_change_password_blocks_recent_5(
         "PwdRoundFive5!",
     ]
 
-    # 先繞圈改 4 次（共 5 個不同密碼進 history）
     current_pwd = p0
     for new in passwords[1:]:
-        access = await _login_and_get_token(auth_client, user.email, current_pwd)
+        flush_rate_limit()
+        access, csrf = await _login_get_access_and_csrf(auth_client, user.email, current_pwd)
         r = auth_client.post(
             "/api/v1/auth/change-password",
             json={"old_password": current_pwd, "new_password": new},
-            headers={"Authorization": f"Bearer {access}"},
+            headers=_change_password_headers(access, csrf),
+            cookies={"csrf_token": csrf},
         )
         assert r.status_code == 200, r.text
         current_pwd = new
 
-    # 此時 history 有 p0 ~ p3（4 筆，因為當下用的 p4 還沒進 history）
-    # 嘗試用 p0（最早的）回去 → 應被拒
-    access = await _login_and_get_token(auth_client, user.email, current_pwd)
+    # 此時 history 有 p0 ~ p3
+    flush_rate_limit()
+    access, csrf = await _login_get_access_and_csrf(auth_client, user.email, current_pwd)
     r = auth_client.post(
         "/api/v1/auth/change-password",
         json={"old_password": current_pwd, "new_password": p0},
-        headers={"Authorization": f"Bearer {access}"},
+        headers=_change_password_headers(access, csrf),
+        cookies={"csrf_token": csrf},
     )
     assert r.status_code == 401, r.text
     assert "最近 5 次" in r.json()["error"]["message"]
@@ -89,11 +101,12 @@ async def test_change_password_clears_must_change_flag(
     auth_client, make_test_user, db_session_maker
 ) -> None:
     user, password = await make_test_user(must_change=True)
-    access = await _login_and_get_token(auth_client, user.email, password)
+    access, csrf = await _login_get_access_and_csrf(auth_client, user.email, password)
     r = auth_client.post(
         "/api/v1/auth/change-password",
         json={"old_password": password, "new_password": "BrandNewPwd2026!Z"},
-        headers={"Authorization": f"Bearer {access}"},
+        headers=_change_password_headers(access, csrf),
+        cookies={"csrf_token": csrf},
     )
     assert r.status_code == 200, r.text
 
@@ -111,18 +124,22 @@ async def test_change_password_clears_must_change_flag(
 
 
 async def test_change_password_revokes_other_sessions(
-    auth_client, make_test_user, db_session_maker
+    auth_client, make_test_user, db_session_maker, flush_rate_limit
 ) -> None:
     user, password = await make_test_user(must_change=False)
     # login 2 次製造 2 個 session
+    flush_rate_limit()
     auth_client.post("/api/v1/auth/login", json={"email": user.email, "password": password})
+    flush_rate_limit()
     auth_client.post("/api/v1/auth/login", json={"email": user.email, "password": password})
 
-    access = await _login_and_get_token(auth_client, user.email, password)
+    flush_rate_limit()
+    access, csrf = await _login_get_access_and_csrf(auth_client, user.email, password)
     r = auth_client.post(
         "/api/v1/auth/change-password",
         json={"old_password": password, "new_password": "BrandNewPwd2026!Z"},
-        headers={"Authorization": f"Bearer {access}"},
+        headers=_change_password_headers(access, csrf),
+        cookies={"csrf_token": csrf},
     )
     assert r.status_code == 200, r.text
 
@@ -137,25 +154,27 @@ async def test_change_password_revokes_other_sessions(
 
 
 # ────────────────────────────────────────────────────────
-# 5. 弱密碼 → 422 (Pydantic) or 400 (policy)
+# 5. 弱密碼 → 422
 # ────────────────────────────────────────────────────────
 
 
 async def test_change_password_weak_password_rejected(auth_client, make_test_user) -> None:
     user, password = await make_test_user(must_change=False)
-    access = await _login_and_get_token(auth_client, user.email, password)
-    # 太短 → Pydantic 在 min_length=12 階段就擋掉
+    access, csrf = await _login_get_access_and_csrf(auth_client, user.email, password)
+    # 太短
     r = auth_client.post(
         "/api/v1/auth/change-password",
         json={"old_password": password, "new_password": "short"},
-        headers={"Authorization": f"Bearer {access}"},
+        headers=_change_password_headers(access, csrf),
+        cookies={"csrf_token": csrf},
     )
     assert r.status_code == 422, r.text
 
-    # 12 字長但缺 4 類字元 → policy 擋
+    # 12 字長但缺 4 類字元
     r2 = auth_client.post(
         "/api/v1/auth/change-password",
         json={"old_password": password, "new_password": "abcabcabcabc"},
-        headers={"Authorization": f"Bearer {access}"},
+        headers=_change_password_headers(access, csrf),
+        cookies={"csrf_token": csrf},
     )
-    assert r2.status_code == 422, r2.text  # ValidationError → 422
+    assert r2.status_code == 422, r2.text

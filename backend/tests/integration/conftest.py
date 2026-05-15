@@ -283,6 +283,30 @@ def _now_utc():
     return datetime.now(UTC)
 
 
+@pytest.fixture
+def flush_rate_limit(env_vars):
+    """提供 callable：清 rate limit Redis (db 2)。
+    給「需要多次 login / 多次 POST」的 test 在 loop 中呼叫，避開 L1/L2 rate limit。
+    """
+    import redis as redis_sync
+
+    pwd = env_vars.get("REDIS_PASSWORD", "")
+    host = env_vars.get("REDIS_HOST", "localhost")
+    port = int(env_vars.get("REDIS_PORT", "6379"))
+
+    def _flush() -> None:
+        try:
+            client = redis_sync.Redis(
+                host=host, port=port, db=2, password=pwd, socket_connect_timeout=2
+            )
+            client.flushdb()
+            client.close()
+        except Exception as exc:  # pragma: no cover  - noqa: S110
+            _ = exc
+
+    return _flush
+
+
 @pytest.fixture(autouse=True)
 def _flush_auth_redis_dbs(env_vars):
     """每個 test 前用「同步」redis client 清 jwt_blacklist + ws_ticket。
@@ -295,7 +319,7 @@ def _flush_auth_redis_dbs(env_vars):
         pwd = env_vars.get("REDIS_PASSWORD", "")
         host = env_vars.get("REDIS_HOST", "localhost")
         port = int(env_vars.get("REDIS_PORT", "6379"))
-        for db in (3, 5):  # JWT_BLACKLIST, WS_TICKET
+        for db in (2, 3, 5):  # RATELIMIT, JWT_BLACKLIST, WS_TICKET
             try:
                 client = redis_sync.Redis(
                     host=host, port=port, db=db, password=pwd, socket_connect_timeout=2

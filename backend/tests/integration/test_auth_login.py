@@ -167,12 +167,14 @@ async def test_login_returns_next_action_onboarding(auth_client, make_test_user)
 
 
 async def test_login_6_sessions_revokes_oldest(
-    auth_client, make_test_user, db_session_maker
+    auth_client, make_test_user, db_session_maker, flush_rate_limit
 ) -> None:
     user, password = await make_test_user(role="VIEWER", must_change=False)
 
     # login 6 次（5 次到上限，第 6 次應撤舊）
+    # 每次 login 前清 rate limit（避開 L2 5/min 限制）
     for _ in range(6):
+        flush_rate_limit()
         r = auth_client.post(
             "/api/v1/auth/login",
             json={"email": user.email, "password": password},

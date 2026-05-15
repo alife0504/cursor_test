@@ -97,13 +97,16 @@ if ! echo "$OPENAPI" | python -c "import json,sys; d=json.load(sys.stdin); sys.e
 fi
 echo "✓ openapi schema 含 /api/v1/auth/login"
 
-# ── 6) admin login ─────────────────────────────────────
-LOGIN_RESP=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+# ── 6) admin login（用 cookie jar 保存 csrf_token） ──
+COOKIE_JAR=$(mktemp)
+LOGIN_RESP=$(curl -s -c "$COOKIE_JAR" -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PWD\"}")
 TOKEN=$(echo "$LOGIN_RESP" | python -c "import json,sys; print(json.load(sys.stdin).get('data', {}).get('access_token', ''))" 2>/dev/null)
+CSRF_TOKEN=$(awk '/csrf_token/ {print $NF}' "$COOKIE_JAR" | tail -1)
 if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ]; then
   echo "❌ admin login 失敗，response: $LOGIN_RESP"
+  rm -f "$COOKIE_JAR"
   exit 1
 fi
 echo "✓ admin login 成功"
@@ -121,12 +124,14 @@ if echo "$ME_RESP" | python -c "import json,sys; sys.exit(0 if 'password_hash' i
 fi
 echo "✓ /me 200，不含 password_hash"
 
-# ── 8) WS ticket 一次性 ─────────────────────────────────
-WSTICKET_RESP=$(curl -s -X POST http://localhost:8000/api/v1/auth/ws-ticket \
-  -H "Authorization: Bearer $TOKEN")
+# ── 8) WS ticket 一次性（P9 後 POST 需 CSRF；ws-ticket 也走 CSRF 中介層） ──
+WSTICKET_RESP=$(curl -s -b "$COOKIE_JAR" -X POST http://localhost:8000/api/v1/auth/ws-ticket \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-CSRF-Token: $CSRF_TOKEN")
 TICKET=$(echo "$WSTICKET_RESP" | python -c "import json,sys; print(json.load(sys.stdin).get('data', {}).get('ticket', ''))" 2>/dev/null)
 if [ -z "$TICKET" ] || [ "$TICKET" = "None" ]; then
   echo "❌ WS ticket issue 失敗 - resp: $WSTICKET_RESP"
+  rm -f "$COOKIE_JAR"
   exit 1
 fi
 # 直接從 Redis db5 驗 key 存在
@@ -141,16 +146,22 @@ fi
 echo "✓ WS ticket 發出且寫入 Redis db5"
 
 # ── 9) lockout：連 5 次錯密碼 → 423 ─────────────────────
+# P9 後 rate-limit L2 限 5/min/IP，每次 wrong-password 後清 redis db2 避開 rate limit
+# （健康檢查目的是測 lockout，不是 rate-limit）
+docker compose exec -T redis redis-cli -n 2 -a "$REDIS_PWD" --no-auth-warning FLUSHDB > /dev/null 2>&1 || true
 for i in 1 2 3 4 5; do
   curl -s -X POST http://localhost:8000/api/v1/auth/login \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"WRONG_$i!password1\"}" > /dev/null
+  # 清 rate-limit 確保下一次不被擋
+  docker compose exec -T redis redis-cli -n 2 -a "$REDIS_PWD" --no-auth-warning FLUSHDB > /dev/null 2>&1 || true
 done
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"WRONG_X!password\"}")
 if [ "$STATUS" != "423" ]; then
   echo "❌ lockout 應回 423，實際 $STATUS"
+  rm -f "$COOKIE_JAR"
   exit 1
 fi
 echo "✓ lockout 觸發 423"

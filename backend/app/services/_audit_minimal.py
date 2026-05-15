@@ -1,27 +1,21 @@
-"""Phase 8 — 暫時的 audit log 寫入 helper（P9 會改用完整 AuditRepository）。
+"""Phase 8 → 9：thin wrapper 維持向後相容，內部呼叫 P9 AuditRepository。
 
-依 PLAN 第二十七章 P8 audit log 寫入方式。本檔僅做最小寫入，hash chain
-由 trigger（baseline 0012）自動填 prev_hash / entry_hash。
-
-P9 會：
-- 改用 AuditRepository（含 verify_chain / list 等）
-- 加 IP / user-agent 自動填入
-- 對齊 AuditMiddleware
-
-P8 為了讓退出條件第 9 項
-`SELECT count(*) FROM audit_logs WHERE action='auth.login' > 0` 通過。
+P8 originally 直接 add AuditLog；P9 整合到 AuditRepository.append。
+保留此 module 以避免 P8 既有 import 全部改。
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from app.models.audit import AuditLog
+from app.repos.audit_repo import AuditRepository
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.audit import AuditLog
 
 
 async def append_audit(
@@ -36,23 +30,17 @@ async def append_audit(
     user_agent: str | None = None,
     request_id: str | None = None,
 ) -> AuditLog:
-    """最小 audit 寫入 — caller 負責 commit。
-
-    trigger 會自動補 prev_hash / entry_hash（baseline 0012）。
-    """
-    record = AuditLog(
+    """thin wrapper — caller 仍負責 commit。"""
+    return await AuditRepository(session).append(
         actor_id=actor_id,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
-        details=details or {},
+        details=details,
         ip=ip,
         user_agent=user_agent,
         request_id=request_id,
     )
-    session.add(record)
-    await session.flush()
-    return record
 
 
 __all__ = ["append_audit"]
