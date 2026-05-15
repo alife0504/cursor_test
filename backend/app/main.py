@@ -27,12 +27,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, text
 from starlette.responses import JSONResponse
 
+from app.api.v1.admin_router import router as admin_router
+from app.api.v1.analysis_router import router as analysis_router
 from app.api.v1.auth_router import router as auth_router
+from app.api.v1.exports_router import router as exports_router
 from app.api.v1.market_router import router as market_router
+from app.api.v1.metrics_router import router as metrics_router
+from app.api.v1.notifications_router import router as notifications_router
+from app.api.v1.orders_router import router as orders_router
+from app.api.v1.reports_router import router as reports_router
 from app.api.v1.screener_router import router as screener_router
 from app.api.v1.stocks_router import router as stocks_router
 from app.api.v1.users_router import router as users_router
 from app.api.v1.watchlist_router import router as watchlist_router
+from app.api.v1.ws_router import router as ws_router
 from app.core.audit_middleware import AuditMiddleware
 from app.core.body_size_middleware import BodySizeMiddleware
 from app.core.config import settings
@@ -218,6 +226,16 @@ app.include_router(watchlist_router)
 app.include_router(market_router)
 app.include_router(screener_router)
 app.include_router(users_router)
+
+# Phase 11: 業務 API 第二批 + admin + ws + /metrics
+app.include_router(analysis_router)
+app.include_router(orders_router)
+app.include_router(reports_router)
+app.include_router(exports_router)
+app.include_router(notifications_router)
+app.include_router(admin_router)
+app.include_router(ws_router)
+app.include_router(metrics_router)
 
 
 # ════════════════ Health endpoints ════════════════

@@ -331,40 +331,70 @@ def login_helper():
 
 @pytest.fixture
 async def seed_stocks(db_session_maker):
-    """建立測試用 stock_list 行；自動清理（cascade 連動 stock_prices）。"""
+    """建立測試用 stock_list 行；自動清理（cascade 連動 stock_prices）。
+
+    Idempotent：若 symbol 已存在（例如 P7 seed 已寫入真實股號），
+    使用 ON CONFLICT DO NOTHING 跳過；cleanup 也只刪本批新建的 row。
+    """
     import uuid as _uuid
 
-    from sqlalchemy import delete
+    from sqlalchemy import delete, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.models.price import StockPrice
     from app.models.stock import StockList
 
-    created_symbols: list[str] = []
+    test_created_symbols: list[str] = []
 
     async def _factory(rows: list[dict]) -> list[str]:
         """rows 結構：[{symbol, market, name, industry?, is_active?}, ...]。"""
         async with db_session_maker() as s:
+            symbols = [r["symbol"] for r in rows]
+            # 找出本批中「事前不存在」的，才是真正由本 test 建立、需要清理的
+            pre_existing = set(
+                (await s.execute(select(StockList.symbol).where(StockList.symbol.in_(symbols))))
+                .scalars()
+                .all()
+            )
             for r in rows:
                 sym = r["symbol"]
-                stock = StockList(
-                    symbol=sym,
-                    market=r.get("market", "TWSE"),
-                    name=r.get("name", f"測試{sym}"),
-                    industry=r.get("industry"),
-                    is_active=r.get("is_active", True),
+                stmt = (
+                    pg_insert(StockList)
+                    .values(
+                        symbol=sym,
+                        market=r.get("market", "TWSE"),
+                        name=r.get("name", f"測試{sym}"),
+                        industry=r.get("industry"),
+                        is_active=r.get("is_active", True),
+                    )
+                    .on_conflict_do_nothing(index_elements=["symbol"])
                 )
-                s.add(stock)
-                created_symbols.append(sym)
+                await s.execute(stmt)
+                if sym not in pre_existing:
+                    test_created_symbols.append(sym)
             await s.commit()
-        return created_symbols
+        return [r["symbol"] for r in rows]
 
     yield _factory
 
-    if created_symbols:
+    if test_created_symbols:
         async with db_session_maker() as s:
-            # 先刪 OHLCV / 其他 FK 連動 → 再刪 stock_list
-            await s.execute(delete(StockPrice).where(StockPrice.symbol.in_(created_symbols)))
-            await s.execute(delete(StockList).where(StockList.symbol.in_(created_symbols)))
+            # P11：可能有 router/service 建了 analysis_reports / pending_orders
+            # 直接 FK 到 stock_list.symbol；要先清掉這些後代才能刪 stock_list
+            from app.models.analysis import AnalysisReport
+            from app.models.order import PendingOrder, PortfolioPosition
+
+            await s.execute(delete(StockPrice).where(StockPrice.symbol.in_(test_created_symbols)))
+            await s.execute(
+                delete(PortfolioPosition).where(PortfolioPosition.symbol.in_(test_created_symbols))
+            )
+            await s.execute(
+                delete(PendingOrder).where(PendingOrder.symbol.in_(test_created_symbols))
+            )
+            await s.execute(
+                delete(AnalysisReport).where(AnalysisReport.symbol.in_(test_created_symbols))
+            )
+            await s.execute(delete(StockList).where(StockList.symbol.in_(test_created_symbols)))
             await s.commit()
             _ = _uuid
 
@@ -410,6 +440,220 @@ async def seed_ohlcv(db_session_maker):
             await s.commit()
 
 
+# ════════════════════════════════════════════════════════
+# Phase 11 fixtures — analysis / orders / dlq
+# ════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def seed_analysis(db_session_maker):
+    """建立測試用 analysis_reports 行；caller 提供 user_id + symbol。
+
+    fixture 內部會自動確保 stock_list 中存在對應 symbol（ON CONFLICT IGNORE）。
+    自動清理 debate_history + analysis_reports（不刪 stock_list，由 seed_stocks 管）。
+    """
+    import uuid as _uuid
+    from decimal import Decimal
+
+    from sqlalchemy import delete, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.analysis import AnalysisReport, DebateMessage
+    from app.models.stock import StockList
+
+    created_ids: list[_uuid.UUID] = []
+    auto_seeded_symbols: list[str] = []
+
+    async def _factory(
+        *,
+        user_id,
+        symbol: str = "2330",
+        market: str = "TWSE",
+        status: str = "queued",
+        report_md: str | None = None,
+        signal: str | None = None,
+        confidence: Decimal | None = None,
+    ):
+        async with db_session_maker() as s:
+            # 先確保 stock_list 中有 symbol（pkey 重複 ON CONFLICT DO NOTHING）
+            pre = (
+                await s.execute(select(StockList.symbol).where(StockList.symbol == symbol))
+            ).scalar_one_or_none()
+            if pre is None:
+                await s.execute(
+                    pg_insert(StockList)
+                    .values(symbol=symbol, market=market, name=f"測試{symbol}", is_active=True)
+                    .on_conflict_do_nothing(index_elements=["symbol"])
+                )
+                auto_seeded_symbols.append(symbol)
+            row = AnalysisReport(
+                user_id=user_id,
+                symbol=symbol,
+                market=market,
+                status=status,
+                llm_model="gemini-2.0-flash",
+                report_md=report_md,
+                signal=signal,
+                confidence=confidence,
+            )
+            s.add(row)
+            await s.commit()
+            await s.refresh(row)
+            created_ids.append(row.id)
+            return row.id
+
+    yield _factory
+
+    if created_ids or auto_seeded_symbols:
+        async with db_session_maker() as s:
+            if created_ids:
+                await s.execute(
+                    delete(DebateMessage).where(DebateMessage.analysis_id.in_(created_ids))
+                )
+                await s.execute(delete(AnalysisReport).where(AnalysisReport.id.in_(created_ids)))
+            if auto_seeded_symbols:
+                # 順序：先清 FK 後代再刪 stock_list（router 可能建 analysis_reports / orders）
+                from app.models.order import PendingOrder, PortfolioPosition
+
+                await s.execute(
+                    delete(PortfolioPosition).where(
+                        PortfolioPosition.symbol.in_(auto_seeded_symbols)
+                    )
+                )
+                await s.execute(
+                    delete(PendingOrder).where(PendingOrder.symbol.in_(auto_seeded_symbols))
+                )
+                await s.execute(
+                    delete(AnalysisReport).where(AnalysisReport.symbol.in_(auto_seeded_symbols))
+                )
+                await s.execute(delete(StockList).where(StockList.symbol.in_(auto_seeded_symbols)))
+            await s.commit()
+
+
+@pytest.fixture
+async def seed_pending_order(db_session_maker):
+    """建立 pending_orders（caller 提供 user_id + analysis_id + symbol）。
+
+    fixture 內部會 auto-seed stock_list 中 symbol（idempotent）。
+    """
+    import uuid as _uuid
+    from decimal import Decimal
+
+    from sqlalchemy import delete, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.order import PendingOrder, PortfolioPosition
+    from app.models.stock import StockList
+
+    created_ids: list[_uuid.UUID] = []
+    auto_seeded_symbols: list[str] = []
+
+    async def _factory(
+        *,
+        user_id,
+        symbol: str = "2330",
+        market: str = "TWSE",
+        side: str = "BUY",
+        qty: int = 1000,
+        analysis_id=None,
+        target_price: Decimal | None = Decimal("600.0"),
+        status: str = "PENDING",
+    ):
+        async with db_session_maker() as s:
+            pre = (
+                await s.execute(select(StockList.symbol).where(StockList.symbol == symbol))
+            ).scalar_one_or_none()
+            if pre is None:
+                await s.execute(
+                    pg_insert(StockList)
+                    .values(symbol=symbol, market=market, name=f"測試{symbol}", is_active=True)
+                    .on_conflict_do_nothing(index_elements=["symbol"])
+                )
+                auto_seeded_symbols.append(symbol)
+            row = PendingOrder(
+                user_id=user_id,
+                symbol=symbol,
+                market=market,
+                side=side,
+                qty=qty,
+                analysis_id=analysis_id,
+                target_price=target_price,
+                status=status,
+                version=1,
+            )
+            s.add(row)
+            await s.commit()
+            await s.refresh(row)
+            created_ids.append(row.id)
+            return row.id
+
+    yield _factory
+
+    if created_ids or auto_seeded_symbols:
+        async with db_session_maker() as s:
+            from sqlalchemy import select as _sel
+
+            if created_ids:
+                rows = (
+                    (await s.execute(_sel(PendingOrder).where(PendingOrder.id.in_(created_ids))))
+                    .scalars()
+                    .all()
+                )
+                for r in rows:
+                    await s.execute(
+                        delete(PortfolioPosition).where(
+                            PortfolioPosition.user_id == r.user_id,
+                            PortfolioPosition.symbol == r.symbol,
+                        )
+                    )
+                await s.execute(delete(PendingOrder).where(PendingOrder.id.in_(created_ids)))
+            if auto_seeded_symbols:
+                from app.models.analysis import AnalysisReport as _AR
+
+                await s.execute(delete(_AR).where(_AR.symbol.in_(auto_seeded_symbols)))
+                await s.execute(delete(StockList).where(StockList.symbol.in_(auto_seeded_symbols)))
+            await s.commit()
+
+
+@pytest.fixture
+async def seed_dlq(db_session_maker):
+    """建立 celery_dead_letters 行；自動清理。"""
+    from sqlalchemy import delete
+
+    from app.models.dlq import CeleryDeadLetter
+
+    created_ids: list[int] = []
+
+    async def _factory(
+        *,
+        task_name: str = "test.task",
+        exception_type: str = "RuntimeError",
+        exception: str = "test failure",
+        resolved: bool = False,
+    ):
+        async with db_session_maker() as s:
+            row = CeleryDeadLetter(
+                task_name=task_name,
+                exception_type=exception_type,
+                exception=exception,
+                resolved=resolved,
+                args=[],
+                kwargs={},
+            )
+            s.add(row)
+            await s.commit()
+            await s.refresh(row)
+            created_ids.append(row.id)
+            return row.id
+
+    yield _factory
+
+    if created_ids:
+        async with db_session_maker() as s:
+            await s.execute(delete(CeleryDeadLetter).where(CeleryDeadLetter.id.in_(created_ids)))
+            await s.commit()
+
+
 @pytest.fixture(autouse=True)
 def _flush_auth_redis_dbs(env_vars):
     """每個 test 前用「同步」redis client 清 jwt_blacklist + ws_ticket。
@@ -422,7 +666,7 @@ def _flush_auth_redis_dbs(env_vars):
         pwd = env_vars.get("REDIS_PASSWORD", "")
         host = env_vars.get("REDIS_HOST", "localhost")
         port = int(env_vars.get("REDIS_PORT", "6379"))
-        for db in (2, 3, 5):  # RATELIMIT, JWT_BLACKLIST, WS_TICKET
+        for db in (2, 3, 5, 6):  # RATELIMIT, JWT_BLACKLIST, WS_TICKET, IDEMPOTENCY
             try:
                 client = redis_sync.Redis(
                     host=host, port=port, db=db, password=pwd, socket_connect_timeout=2

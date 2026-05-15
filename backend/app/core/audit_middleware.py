@@ -62,17 +62,25 @@ class AuditMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         # session maker lazy 建（避免 import 期 DB 還沒 ready）
         self._sessionmaker = None
+        self._sessionmaker_engine_id: int | None = None
 
     async def _get_sessionmaker(self):
-        if self._sessionmaker is None:
-            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+        """每次拿 sessionmaker 都檢查綁定的 engine 是否還是目前 rw engine。
 
-            from app.core.database import get_rw_engine
+        為什麼：TestClient lifespan 結束時會 dispose_db_connections 把全域 engine 設 None，
+        下一個 test 起來時 engine 是新物件。若 sessionmaker 還指向舊 engine 會炸
+        "Event loop is closed" 或 "'NoneType' has no attribute 'send'"。
+        """
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-            engine = get_rw_engine()
+        from app.core.database import get_rw_engine
+
+        engine = get_rw_engine()
+        if self._sessionmaker is None or self._sessionmaker_engine_id != id(engine):
             self._sessionmaker = async_sessionmaker(
                 engine, expire_on_commit=False, class_=AsyncSession
             )
+            self._sessionmaker_engine_id = id(engine)
         return self._sessionmaker
 
     async def dispatch(

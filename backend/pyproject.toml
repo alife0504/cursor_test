@@ -52,6 +52,16 @@ dependencies = [
     "bcrypt>=4.2,<5.0",
     # P7：seed/backfill CLI 進度條
     "tqdm>=4.66,<5.0",
+    # P11：PDF 匯出（Playwright + chromium，依 ADR-010）
+    "playwright>=1.45,<2.0",
+    # P11：HTML 模板（PDF / 通知）
+    "jinja2>=3.1,<4.0",
+    # P11：Prometheus metrics（/metrics endpoint）
+    "prometheus-client>=0.20,<1.0",
+    # P11：XLSX 匯出
+    "openpyxl>=3.1,<4.0",
+    # P11：Fernet 加密 LINE / Telegram token
+    "cryptography>=42.0,<46.0",
 ]
 
 [dependency-groups]
