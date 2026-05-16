@@ -16,6 +16,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from app.core.csrf import generate_csrf_token, verify_csrf_token
 from app.core.errors import AuthError, ForbiddenError, LockedError, RateLimitError
@@ -115,7 +116,21 @@ class AuthService:
         user_agent: str | None,
         request_id: str | None = None,
     ) -> LoginResult:
-        """登入 — 含 lockout、session 上限、audit log、next_action 判斷。"""
+        """登入 — 含 lockout、session 上限、audit log、next_action 判斷。
+
+        Phase 12 audit fix #2/#3：用 PG advisory lock (per email/user_id) 防止並發 burst 繞過
+        lockout 與 session 上限。lock 在 transaction commit 時自動釋放。
+        """
+        # Phase 12 audit fix #2: 並發 lockout race
+        # PG advisory lock 以 email 為 key — 並發 login 同 email 會排隊，避免 burst dictionary attack
+        # 可繞過 5 次門檻；email 用 hashtext() 摺成 int4
+        from sqlalchemy import text as sql_text
+
+        await self.session.execute(
+            sql_text("SELECT pg_advisory_xact_lock(hashtext(:e))"),
+            {"e": email.lower()},
+        )
+
         user = await self.user_repo.get_by_email(email)
 
         # 1) user 不存在 → dummy verify 抵抗 timing attack
@@ -292,15 +307,47 @@ class AuthService:
             raise AuthError(message_zh="Token 已被撤銷")
 
         existing = await self.session_repo.get_by_jti(jti)
-        if existing is None or existing.revoked:
+        # Phase 12 audit fix #5: refresh token reuse detection
+        # 若 session 已 revoked（已 rotation 過或被 logout），但對方又送來 = 強烈洩漏訊號
+        # OWASP refresh-token rotation：偵測到 reuse → 撤銷該 user 全部 active session（family revoke）
+        if existing is not None and existing.revoked:
+            try:
+                user_uuid = UUID(sub)
+                revoked_sessions = await self.session_repo.revoke_all_for_user(user_uuid)
+                revoked_count = len(revoked_sessions)
+                logger.critical(
+                    "auth.refresh.token_reuse_detected",
+                    user_id=sub,
+                    jti=jti,
+                    revoked_sessions=revoked_count,
+                )
+                await append_audit(
+                    self.session,
+                    actor_id=user_uuid,
+                    action="auth.token_reuse_detected",
+                    entity_type="user",
+                    entity_id=sub,
+                    details={
+                        "jti": jti,
+                        "revoked_sessions": revoked_count,
+                        "reason": "refresh_token_reuse",
+                    },
+                    ip=ip,
+                    user_agent=user_agent,
+                    request_id=request_id,
+                )
+                await self.session.commit()
+            except (ValueError, TypeError):
+                # sub 非 UUID 不應發生（前面已驗）— 但保險起見不擋 401 流程
+                logger.warning("auth.refresh.reuse_detected_but_bad_sub", sub=sub)
+            raise AuthError(message_zh="Token 已被撤銷（偵測到重複使用，已強制全部登出）")
+        if existing is None:
             raise AuthError(message_zh="Session 不存在或已撤銷")
         if existing.refresh_token_hash != hash_refresh_token(refresh_token):
             # token 內容被改過
             raise AuthError(message_zh="Token 不一致")
 
         # 載入 user 並檢查 active
-        from uuid import UUID
-
         user = await self.user_repo.get_by_id(UUID(sub))
         if user is None or not user.is_active or user.deleted_at is not None:
             raise AuthError(message_zh="帳號已停用")
@@ -357,14 +404,22 @@ class AuthService:
 
         若 refresh_token 缺失或失效，仍視為登出成功（不洩漏訊息給攻擊者）。
         """
-        from uuid import UUID
-
         if not refresh_token:
             return
 
         try:
             payload = self.jwt.decode(refresh_token)
         except AuthError:
+            return
+
+        # Phase 12 audit fix #4: logout 只接受 refresh token；access token 不應寫 blacklist
+        # （避免攻擊者把 access token 灌入 blacklist db3 佔記憶體並令正常 access 失效）
+        if payload.get("type") != "refresh":
+            logger.info(
+                "auth.logout.wrong_token_type",
+                got_type=payload.get("type"),
+                jti=payload.get("jti"),
+            )
             return
 
         jti = str(payload.get("jti") or "")

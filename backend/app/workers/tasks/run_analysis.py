@@ -93,7 +93,11 @@ def _run_with_loop(analysis_id: str) -> dict[str, Any]:
 
 
 async def _async_pipeline(analysis_id: str) -> dict[str, Any]:
-    """async 主流程：取 DB → build graph → ainvoke → 寫回 DB。"""
+    """async 主流程：取 DB → build graph → ainvoke → 寫回 DB。
+
+    Engine 生命週期：本函數內建一份 async ro engine，跑完無論成敗都 dispose
+    （避免 worker_max_tasks_per_child=50 下累積 N 個 idle PG connection）。
+    """
     started_at = datetime.now(tz=UTC)
 
     # ── 1. 從 DB 取 analysis_reports row（同步 session 拿，避免 async ro/rw 衝突）
@@ -110,7 +114,6 @@ async def _async_pipeline(analysis_id: str) -> dict[str, Any]:
 
     # ── 2. 建 graph
     llm: BaseLLMProvider | None = None
-    tools: ToolRegistry | None = None
     try:
         llm = get_llm_provider(settings.LLM_DEFAULT_PROVIDER, settings)
     except Exception as exc:
@@ -118,55 +121,62 @@ async def _async_pipeline(analysis_id: str) -> dict[str, Any]:
         # P12 stub 不一定需要 LLM 可用（Analyst stub 不呼叫 LLM）；繼續跑
 
     # ToolRegistry 需要 ro_sessionmaker；celery 同步 task 中建一份新的 async engine
-    tools = _build_tool_registry()
+    # 用 try/finally 確保 engine dispose（防 connection leak）
+    tools, tool_engine = _build_tool_registry()
+    try:
+        graph = build_graph(
+            symbol=report_data["symbol"],
+            market=report_data["market"],
+            analyst_types=report_data["analyst_types"],
+            debate_rounds=report_data["debate_rounds"],
+            llm=llm,
+            tools=tools,
+        )
 
-    graph = build_graph(
-        symbol=report_data["symbol"],
-        market=report_data["market"],
-        analyst_types=report_data["analyst_types"],
-        debate_rounds=report_data["debate_rounds"],
-        llm=llm,
-        tools=tools,
-    )
+        initial = build_initial_state(
+            symbol=report_data["symbol"],
+            market=report_data["market"],
+            analysis_id=analysis_id,
+            trace_id=report_data.get("trace_id", "") or "",
+            analyst_types=report_data["analyst_types"],
+            llm_model=report_data["llm_model"],
+            debate_rounds=report_data["debate_rounds"],
+        )
 
-    initial = build_initial_state(
-        symbol=report_data["symbol"],
-        market=report_data["market"],
-        analysis_id=analysis_id,
-        trace_id=report_data.get("trace_id", "") or "",
-        analyst_types=report_data["analyst_types"],
-        llm_model=report_data["llm_model"],
-        debate_rounds=report_data["debate_rounds"],
-    )
+        # ── 3. 跑 graph
+        final_state = await graph.ainvoke(initial)
 
-    # ── 3. 跑 graph
-    final_state = await graph.ainvoke(initial)
+        # ── 4. 寫回 DB
+        duration_s = (datetime.now(tz=UTC) - started_at).total_seconds()
+        signal = final_state.get("signal") or {}
+        _update_status(
+            analysis_id,
+            status="completed",
+            completed_at=datetime.now(tz=UTC),
+            report_md=final_state.get("report_md"),
+            signal=signal.get("action"),
+            total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
+        )
 
-    # ── 4. 寫回 DB
-    duration_s = (datetime.now(tz=UTC) - started_at).total_seconds()
-    signal = final_state.get("signal") or {}
-    _update_status(
-        analysis_id,
-        status="completed",
-        completed_at=datetime.now(tz=UTC),
-        report_md=final_state.get("report_md"),
-        signal=signal.get("action"),
-        total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
-    )
+        logger.info(
+            "run_analysis.done analysis_id=%s duration=%.1fs",
+            analysis_id,
+            duration_s,
+        )
 
-    logger.info(
-        "run_analysis.done analysis_id=%s duration=%.1fs",
-        analysis_id,
-        duration_s,
-    )
-
-    return {
-        "analysis_id": analysis_id,
-        "status": "completed",
-        "report_md_len": len(final_state.get("report_md") or ""),
-        "tokens": int(final_state.get("llm_usage_total_tokens", 0) or 0),
-        "duration_s": round(duration_s, 1),
-    }
+        return {
+            "analysis_id": analysis_id,
+            "status": "completed",
+            "report_md_len": len(final_state.get("report_md") or ""),
+            "tokens": int(final_state.get("llm_usage_total_tokens", 0) or 0),
+            "duration_s": round(duration_s, 1),
+        }
+    finally:
+        # 必須 dispose，否則 worker 累積每 task 一個 engine 會吃爆 PG connection
+        try:
+            await tool_engine.dispose()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("run_analysis.tool_engine.dispose_failed error=%s", exc)
 
 
 # ════════════════ Helpers（同步 DB 操作）════════════════
@@ -248,10 +258,14 @@ def _safe_mark_failed(analysis_id: str, error: str) -> None:
         )
 
 
-def _build_tool_registry() -> ToolRegistry:
+def _build_tool_registry() -> tuple[ToolRegistry, Any]:
     """在 celery task 內建一份新的 async ro engine + sessionmaker → ToolRegistry。
 
     跨 task 不共用 engine（避免跨 event loop 衝突，PLAN 14.7 已知陷阱）。
+    Caller 必須在 task 結束時 `await engine.dispose()` 釋放連線池。
+
+    Returns:
+        (ToolRegistry, AsyncEngine) — engine 由 caller 負責 dispose。
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -263,7 +277,7 @@ def _build_tool_registry() -> ToolRegistry:
         pool_pre_ping=True,
     )
     sm = async_sessionmaker(engine, expire_on_commit=False)
-    return ToolRegistry(sm)
+    return ToolRegistry(sm), engine
 
 
 # ── Redis pubsub helper（P14 streaming events 用，P12 預留）─────

@@ -172,32 +172,38 @@ app = FastAPI(
 )
 
 
-# ── Middleware（Phase 9）─────────────────────
-# Starlette 規則：最後 add 的 middleware 最先進、最後出（LIFO）。
+# ── Middleware（Phase 9 + Phase 12 audit fix）─────────────────────
+# Starlette 規則：`add_middleware()` 用 `list.insert(0, ...)` 把新 middleware 放最前
+# → request 進入時從 user_middleware[0] 開始；最後 add 的最外層、第一個 add 的最內層
+#
+# Phase 12 audit fix：RequestID 必須最外層（最後 add），讓所有 response（含 BodySize/CSRF/
+# RateLimit 短路 413/403/429）都能帶到 X-Request-ID；audit middleware 也要外於 short-circuit
+# middleware 才能 log 到「被擋住的攻擊行為」。
 #
 # 預期執行順序（request 進入 → response 出去）：
-#   1. SecurityHeadersMiddleware（最外層；幫 response 加 header）
-#   2. CORSMiddleware（CORS pre-flight）
-#   3. RateLimitMiddleware（Redis-based L1-L3 擋暴衝）
-#   4. CSRFMiddleware（POST/PUT/DELETE 驗 X-CSRF-Token）
-#   5. BodySizeMiddleware（Content-Length > 1MB 直接 413）
-#   6. AuditMiddleware（response 後寫 audit_logs）
-#   7. RequestIDMiddleware（最內層；產 trace_id）
+#   1. RequestIDMiddleware（最外層；產 trace_id；所有 response 必經此處加 X-Request-ID）
+#   2. SecurityHeadersMiddleware（response header 加 CSP / X-Frame-Options 等）
+#   3. CORSMiddleware（CORS pre-flight）
+#   4. AuditMiddleware（包含 short-circuit response 都會寫 audit）
+#   5. RateLimitMiddleware（Redis-based L1-L3 擋暴衝）
+#   6. CSRFMiddleware（POST/PUT/DELETE 驗 X-CSRF-Token）
+#   7. BodySizeMiddleware（最內層；Content-Length > 1MB 直接 413）
 #
 # 因此 add 順序（先 add 的最內層）由內到外：
 add_order_inner_to_outer = [
-    RequestIDMiddleware,  # 最先 add = 最內層
-    AuditMiddleware,
-    BodySizeMiddleware,
+    BodySizeMiddleware,    # 最先 add = 最內層（最接近 endpoint）
     CSRFMiddleware,
     RateLimitMiddleware,
+    AuditMiddleware,       # 在 short-circuit middleware 外層 → 可 log 被擋的 request
+    CORSMiddleware,
+    SecurityHeadersMiddleware,
+    RequestIDMiddleware,   # 最後 add = 最外層 → 所有 response 都帶 X-Request-ID
 ]
 
-app.add_middleware(RequestIDMiddleware)
-app.add_middleware(AuditMiddleware)
 app.add_middleware(BodySizeMiddleware)
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuditMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -207,6 +213,7 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "Content-Type"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIDMiddleware)  # 必須最後 add（最外層）
 
 # 抑制 unused 變數警告（這個 list 只是文件化用）
 _ = add_order_inner_to_outer

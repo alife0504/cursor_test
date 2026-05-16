@@ -31,11 +31,13 @@ logger = get_logger(__name__)
 
 
 # 可 retry 的例外（其他例外不重試，避免重試成本浪費）
+# 包含 HTTPStatusError 以便 5xx / 429 觸發 retry（與下方 raise httpx.HTTPStatusError 對齊）
 _RETRYABLE_EXCEPTIONS = (
     httpx.TimeoutException,
     httpx.ConnectError,
     httpx.RemoteProtocolError,
     httpx.ReadError,
+    httpx.HTTPStatusError,
 )
 
 
@@ -159,7 +161,7 @@ async def request_with_retry(
             except httpx.HTTPStatusError as e:
                 last_exc = e
                 # 5xx / 429 → tenacity 會 retry 直到 max_attempts
-                # 但 retry_if_exception_type 沒包 HTTPStatusError，這裡需要主動 raise 一個 retryable
+                # _RETRYABLE_EXCEPTIONS 已包含 httpx.HTTPStatusError，這裡直接 re-raise
                 logger.warning(
                     "http.retryable_error",
                     source=source_name,
@@ -168,7 +170,7 @@ async def request_with_retry(
                     status=e.response.status_code if e.response else "?",
                     attempt=attempt.retry_state.attempt_number,
                 )
-                raise TimeoutError(str(e)) from e
+                raise
 
     # 不會到這裡（reraise=True 會直接 raise 最後一個例外）
     raise ExternalServiceError(

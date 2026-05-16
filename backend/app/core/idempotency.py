@@ -103,8 +103,22 @@ class IdempotencyService:
             None — 沒見過，caller 可繼續處理 request
             IdempotencyEntry — 已存在且 hash 相同，直接回它的 response
         Raises:
+            ValidationError — anonymous (user_id=None) 不允許用 Idempotency-Key（v1.0 政策）
             IdempotencyConflictError — key 存在但 request_hash 不同（攻擊或 client bug）
+
+        Security note (Phase 12 audit fix)：
+            v1.0 不允許 anonymous client 使用 Idempotency-Key。原因：DB lookup 若不限 user_id，
+            anon 可猜常見 key 拿到別 user 的 cached response。Auth dependency 已保證 endpoint 有 user，
+            這裡作為防呆與顯式 contract。
         """
+        from app.core.errors import ValidationError
+
+        if user_id is None:
+            raise ValidationError(
+                message_zh="Idempotency-Key 僅授權使用者可用（請先登入）",
+                field="Idempotency-Key",
+            )
+
         # 1. 先看 Redis
         rkey = _redis_key(user_id, key)
         redis = await get_redis(RedisDB.IDEMPOTENCY)
@@ -117,6 +131,14 @@ class IdempotencyService:
         if cached:
             try:
                 data = json.loads(cached)
+                # pending placeholder（並發保護） — caller 應回 429 請稍候 retry
+                if data.get("_pending") is True:
+                    logger.info("idempotency.pending_in_progress", key=key)
+                    raise IdempotencyConflictError(
+                        message_zh="同一個 Idempotency-Key 的另一個請求正在處理中，請稍候重試",
+                        idempotency_key=key,
+                        pending=True,
+                    )
                 if data.get("request_hash") != request_hash:
                     logger.warning(
                         "idempotency.hash_mismatch",
@@ -139,14 +161,28 @@ class IdempotencyService:
                 # 退路：刪掉壞的 key
                 await redis.delete(rkey)
 
-        # 2. Redis miss 或壞掉 → 看 DB
-        stmt = select(IdempotencyKey).where(IdempotencyKey.key == key)
-        if user_id is not None:
-            uid = UUID(str(user_id)) if not isinstance(user_id, UUID) else user_id
-            stmt = stmt.where(IdempotencyKey.user_id == uid)
+        # 2. Redis miss 或壞掉 → 看 DB（user_id 已驗非 None）
+        uid = UUID(str(user_id)) if not isinstance(user_id, UUID) else user_id
+        stmt = select(IdempotencyKey).where(
+            IdempotencyKey.key == key,
+            IdempotencyKey.user_id == uid,
+        )
 
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         if row is None:
+            # 3. Redis miss + DB miss → 用 SETNX 寫入 pending placeholder
+            #    後續同 key 並發者會看到 _pending → 409 conflict（中文 retry hint）
+            try:
+                placeholder = json.dumps(
+                    {"_pending": True, "user_id": str(uid)}, ensure_ascii=False
+                )
+                # NX + PX 60_000ms（業務通常 60 秒內結束；若 task 更久，Redis SETNX 失敗也沒關係）
+                got_lock = await redis.set(rkey, placeholder, nx=True, px=60_000)
+                if got_lock:
+                    logger.debug("idempotency.pending_placeholder_set", key=key)
+                # 沒拿到 lock 不代表 race 不存在；caller 跑完 record_response 會覆寫 placeholder
+            except Exception as e:  # pragma: no cover
+                logger.warning("idempotency.placeholder_set_failed", error=str(e), key=key)
             return None
 
         # DB 命中但 hash 不符

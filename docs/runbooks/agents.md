@@ -1,6 +1,6 @@
 # Agents Runbook
 
-> 對應檔案：`backend/app/agents/`、`backend/app/llm/`、`backend/app/workers/tasks/run_analysis.py`  
+> 對應檔案：`backend/app/agents/`、`backend/app/llm/`、`backend/app/workers/tasks/run_analysis.py`
 > 完成 Phase：P12（框架）、P13（Analyst 真實 prompt）、P14（美股 + Fallback Chain + Streaming）
 
 ## 1. 模組總覽

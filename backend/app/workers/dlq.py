@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,9 +23,13 @@ from app.models.dlq import CeleryDeadLetter
 
 logger = get_logger(__name__)
 
-# 寫 DB 失敗的 fallback 檔（避免完全無聲）
+# Phase 12 audit fix：寫 DB 失敗的 fallback 檔（避免完全無聲）
+# 用 tempfile.gettempdir() 取系統 temp dir，跨平台（Windows 沒 /tmp）
 _FALLBACK_FILE = Path(
-    os.environ.get("CELERY_DLQ_FALLBACK_FILE", "/tmp/celery_dlq_fallback.jsonl")  # noqa: S108
+    os.environ.get(
+        "CELERY_DLQ_FALLBACK_FILE",
+        str(Path(tempfile.gettempdir()) / "celery_dlq_fallback.jsonl"),
+    )
 )
 
 # JSON 序列化的 size 上限（args/kwargs 太大就截斷）

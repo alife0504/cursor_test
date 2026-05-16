@@ -1,8 +1,8 @@
 # Phase 12 — LangGraph 基礎 + Plugin + State trim + Tool 註冊
 
-> 狀態：✅ 完成  
-> 分支：`phase/12-langgraph-foundation`  
-> 完成日期：2026-05-16  
+> 狀態：✅ 完成
+> 分支：`phase/12-langgraph-foundation`
+> 完成日期：2026-05-16
 > PLAN.md 章節：第二十七章 ▌Phase 12（必讀第 4.4 / 6.1 / 8.5 / 14.4 / 14.9 / 18.2 / 19 / 20.4）
 
 ---
@@ -203,10 +203,10 @@ class AgentState(TypedDict, total=False):
 
 ## 7. Smoke Test 記錄
 
-✓ `ipython` 中 `build_graph("2330", "TWSE").get_graph().draw_mermaid()` 看 graph 結構  
-✓ stub Analyst 跑一次 analysis：celery worker log 顯示 `run_analysis.start` → `run_analysis.done`  
-✓ `debate_history` 累積 10 筆 → `trim_debate_history` 後變 7 筆（1 summary + 6 recent）  
-✓ ro session 嘗試 INSERT → permission denied / read-only transaction，不會炸服務  
+✓ `ipython` 中 `build_graph("2330", "TWSE").get_graph().draw_mermaid()` 看 graph 結構
+✓ stub Analyst 跑一次 analysis：celery worker log 顯示 `run_analysis.start` → `run_analysis.done`
+✓ `debate_history` 累積 10 筆 → `trim_debate_history` 後變 7 筆（1 summary + 6 recent）
+✓ ro session 嘗試 INSERT → permission denied / read-only transaction，不會炸服務
 
 ---
 

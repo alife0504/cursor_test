@@ -75,10 +75,11 @@ def validate_password(password: str, user_email: str | None = None) -> None:
             missing_categories=missing,
         )
 
-    # 不可包含 email local part（@ 前面），不分大小寫
+    # Phase 12 audit fix：不可包含 email local part（@ 前面），不分大小寫
+    # 移除 len(local) >= 3 條件 — 短帳號（如 "wu"）反而更易被字典攻擊，必須一律檢查
     if user_email and "@" in user_email:
         local = user_email.split("@", 1)[0].strip()
-        if local and len(local) >= 3 and local.lower() in password.lower():
+        if local and len(local) >= 2 and local.lower() in password.lower():
             raise ValidationError(
                 message_zh="密碼不可包含 email 帳號",
                 field="password",

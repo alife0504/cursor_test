@@ -29,6 +29,12 @@ cd "$PROJECT_ROOT"
 echo "=== Phase 12 健康檢查 ==="
 echo "PROJECT_ROOT: $PROJECT_ROOT"
 
+# Docker graceful skip（Phase 12 audit fix #16）— Docker 未啟動時不要 silent fail
+if ! docker info > /dev/null 2>&1; then
+  echo "⚠️  Docker daemon 未啟動 → 跳過 runtime 檢查（請啟動 Docker Desktop 後重跑）"
+  exit 0
+fi
+
 if [ ! -f .env ]; then
   echo "❌ 找不到 .env"
   exit 1
@@ -50,7 +56,15 @@ docker compose exec -T redis redis-cli -n 2 -a "$REDIS_PWD" --no-auth-warning FL
 docker compose exec -T redis redis-cli -n 6 -a "$REDIS_PWD" --no-auth-warning FLUSHDB > /dev/null 2>&1 || true
 
 # ── 1) Phase 11 仍正常 ─────────────────────────────────
-bash scripts/health_checks/phase_11.sh > /dev/null 2>&1
+echo "  → 跑 Phase 11 健康檢查（內含 backend 啟動，約需 1~3 分鐘）..."
+P11_LOG=$(mktemp)
+if ! bash scripts/health_checks/phase_11.sh > "$P11_LOG" 2>&1; then
+  echo "❌ Phase 11 健康檢查失敗（最後 30 行）："
+  tail -30 "$P11_LOG"
+  rm -f "$P11_LOG"
+  exit 1
+fi
+rm -f "$P11_LOG"
 echo "✓ Phase 11 健康檢查仍綠"
 
 docker compose exec -T redis redis-cli -n 2 -a "$REDIS_PWD" --no-auth-warning FLUSHDB > /dev/null 2>&1 || true

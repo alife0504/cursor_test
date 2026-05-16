@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date, timedelta
 from typing import ClassVar
 from uuid import UUID
@@ -26,23 +25,13 @@ from pydantic import BaseModel, field_validator
 from app.core.errors import ValidationError
 
 # ─────────────────────────────────────────────────────────
-# Symbol patterns
+# Symbol patterns — 與 market_dispatcher.py 共用同一定義
+# （Phase 12 audit fix: 兩處 regex 不一致導致 5 碼 ETF 在 validator 通過但 dispatcher 拒收）
 # ─────────────────────────────────────────────────────────
+from app.core.market_dispatcher import TW_SYMBOL_PATTERN, US_SYMBOL_PATTERN
 
-TW_SYMBOL_PATTERN = re.compile(r"^[0-9]{4,6}[A-Z]?$")
-"""TW 股票代號：
-- 4-6 碼數字 + 可選後綴 1 個大寫英文。
-- 4 碼：普通股（2330 / 0050）/ 短碼 ETF
-- 5 碼：常見 ETF（00878 / 00713）
-- 6 碼：較長代號（006208）
-- 後綴：權證 / 特別股代碼（如 0050B / 2330A）
-"""
-
-US_SYMBOL_PATTERN = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
-"""US 股票代號：
-- 1-5 碼大寫字母（AAPL / TSLA）
-- 可選 `.X` 類別碼（BRK.A / BRK.B）
-"""
+# re-export 給原本 import 此模組的呼叫端
+__all_symbol_patterns__ = ["TW_SYMBOL_PATTERN", "US_SYMBOL_PATTERN"]
 
 
 def validate_symbol(symbol: str) -> str:

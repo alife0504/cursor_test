@@ -51,11 +51,12 @@ US_MARKETS: frozenset[Market] = frozenset({Market.NASDAQ, Market.NYSE, Market.AM
 
 
 # ── Symbol regex ─────────────────────────────────────────
+# Phase 12 audit fix #10：與 validators.py 統一單一 pattern。
 # 涵蓋 PLAN 10.2「實際樣態」：
-# TW 一般股 4 碼數字（2330）、ETF 5~6 碼（0050、00878、006208）、特別股 4 碼 + 字母
-#   （2884A）、權證 6 碼數字 + 字母（030001、043333P）
-# 用 `[0-9]{4}[A-Z0-9]?$|^[0-9]{6}[A-Z]?$` 同時涵蓋
-TW_SYMBOL_PATTERN = re.compile(r"^[0-9]{4}[A-Z0-9]?$|^[0-9]{6}[A-Z]?$")
+# - 4 碼：一般股（2330 / 0050）、特別股（2884A、0050B）
+# - 5 碼：常見 ETF（00878、00713）、含字母後綴變體
+# - 6 碼：較長 ETF（006208）、權證 + 字母（030001、043333P）
+TW_SYMBOL_PATTERN = re.compile(r"^[0-9]{4,6}[A-Z]?$")
 
 # US 1~5 碼大寫字母 + 可選 .X 後綴（BRK.B / RDS.A / BF.B 等 dual class）
 US_SYMBOL_PATTERN = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")

@@ -33,6 +33,12 @@ cd "$PROJECT_ROOT"
 echo "=== Phase 11 健康檢查 ==="
 echo "PROJECT_ROOT: $PROJECT_ROOT"
 
+# Docker graceful skip（Phase 12 audit fix #16）— Docker 未啟動時不要 silent fail
+if ! docker info > /dev/null 2>&1; then
+  echo "⚠️  Docker daemon 未啟動 → 跳過 runtime 檢查（請啟動 Docker Desktop 後重跑）"
+  exit 0
+fi
+
 if [ ! -f .env ]; then
   echo "❌ 找不到 .env"
   exit 1

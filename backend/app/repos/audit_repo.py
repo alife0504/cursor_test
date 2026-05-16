@@ -13,8 +13,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -35,54 +33,9 @@ logger = get_logger(__name__)
 INITIAL_PREV_HASH = ""
 
 
-def _coerce_str(value: Any) -> str:
-    """trigger 用 COALESCE(..., '')，Python 端對 NULL / None 也視為空字串。"""
-    if value is None:
-        return ""
-    return str(value)
-
-
-def _serialize_details(details: Any) -> str:
-    """模擬 PG details::text 的轉法。
-
-    PG JSONB 預設用 compact 格式（無空格）、key 字母順序不保證。
-    為避免跨語言序列化不一致，verify_chain 直接讀 DB 算好的 details::text。
-    """
-    if details is None:
-        return ""
-    if isinstance(details, str):
-        return details
-    return json.dumps(details, separators=(", ", ": "), ensure_ascii=False, sort_keys=False)
-
-
-def compute_entry_hash(
-    *,
-    prev_hash: str,
-    row_id: int,
-    actor_id: Any,
-    action: str,
-    entity_type: Any,
-    entity_id: Any,
-    details_text: str,
-    timestamp: datetime,
-) -> str:
-    """Python 端重算 hash（與 trigger 算法對齊）。
-
-    payload 用 `|` 分隔；NULL / None 視為空字串。
-    timestamp 用 PG 的 ISO-like 字串（ts 已 UTC）→ 與 trigger 一致用 to_char。
-    """
-    parts = [
-        prev_hash or "",
-        str(row_id),
-        _coerce_str(actor_id),
-        action or "",
-        _coerce_str(entity_type),
-        _coerce_str(entity_id),
-        details_text or "",
-        timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp),
-    ]
-    payload = "|".join(parts)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+# Phase 12 audit fix: compute_entry_hash + _serialize_details + _coerce_str 為死碼，且
+# Python json.dumps separator 與 PG details::text 不一致；verify_chain 一律走 PG 端
+# digest()（見下方 SQL），這些 helper 全部刪除避免誤用。
 
 
 # ─────────────────────────────────────────────────────────
@@ -238,5 +191,4 @@ class AuditRepository:
 __all__ = [
     "INITIAL_PREV_HASH",
     "AuditRepository",
-    "compute_entry_hash",
 ]
