@@ -14,7 +14,8 @@ from pydantic import Field, field_validator
 
 from app.schemas.common import BaseSchema
 
-ALLOWED_ANALYST_TYPES = {"market", "social", "news", "fundamental"}
+ALLOWED_ANALYST_TYPES = {"market", "sentiment", "news", "fundamental"}
+"""P13 修正：與 SentimentAnalyst.name 對齊（P11 遺留 "social"，會擋掉合法請求）。"""
 DEFAULT_LLM_MODEL = "gemini-2.0-flash"
 
 

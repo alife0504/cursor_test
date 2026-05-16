@@ -1,0 +1,23 @@
+## 個股基本資訊
+- 代號：{symbol}
+- 名稱：{company_name}
+- 市場：{market}
+
+## 各分析師結論摘要
+{analyses_block}
+
+## 辯論進度
+- 當前輪次：第 {round_num} / 共 {total_rounds} 輪
+- 你的角色：{role}（bull / bear）
+
+## 對方上一輪論點（若有）
+{opponent_block}
+
+## 你的歷史論點（若有）
+{self_history_block}
+
+## 你的任務
+請依上述資料，產出本輪{role}論點：
+- 引用分析師結論作為證據（在 evidence_from 中標明）。
+- 反駁對方論點（具體點對點，不要泛泛而談）。
+- **最後輸出** ```json``` 區塊（符合 BullArgument / BearArgument schema）。

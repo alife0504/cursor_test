@@ -1,0 +1,27 @@
+## 個股基本資訊
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+- 市場：{market}
+
+## 近 60 日價量摘要
+- 期間：{date_start} ~ {date_end}
+- 收盤價區間：最低 {price_low} / 最高 {price_high} / 最新 {price_last}
+- 平均成交量（日）：{avg_volume}
+- 累計漲跌幅：{cum_return_pct}%
+
+## 技術指標（後端已計算，**請直接引用，不要重算**）
+- RSI(14)：{rsi}
+- MACD：{macd_line} / Signal：{macd_signal} / Histogram：{macd_hist}
+- KD：K={kd_k} / D={kd_d}
+- BBANDS(20, 2σ)：上軌 {bb_upper} / 中軌 {bb_middle} / 下軌 {bb_lower}
+- MA20：{ma20}
+- MA60：{ma60}
+- 量價背離訊號：{divergence_note}
+
+## 近 10 日 OHLCV（從舊到新）
+{ohlcv_table}
+
+## 你的任務
+請依上述資料，產出技術面分析。
+**最後輸出**：先用繁體中文寫綜述（1~2 段），接著用 ```json``` 區塊輸出符合 MarketAnalysisResult schema 的物件。

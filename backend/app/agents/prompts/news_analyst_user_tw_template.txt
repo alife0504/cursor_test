@@ -1,0 +1,15 @@
+## 個股基本資訊
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+
+## 近 7 日相關新聞（最多 {news_count} 篇；已篩選為與本股相關）
+{news_table}
+
+## 重大公告（近 30 日，公開資訊觀測站）
+{announcements_table}
+
+## 你的任務
+請依上述資料，產出新聞情緒分析。
+**最後輸出**：繁體中文綜述 + ```json``` 區塊（符合 NewsAnalysisResult schema）。
+supporting_articles 僅可從上述新聞清單中挑選。

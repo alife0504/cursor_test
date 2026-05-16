@@ -2,16 +2,16 @@
 
 依 PLAN.md 第 14.9 章 + 第 18.2 章 Plugin Pattern。
 
-設計：
-- 接受 `symbol` + `market` → 自動判 region → 依 ANALYST_REGISTRY 篩出可用 Analyst。
-- 圖結構（P12）：entry → analyst_1 → analyst_2 → ... → manager → END
-  - analyst 之間 sequential（簡化版；P13 改為 parallel + Bull/Bear 辯論）
-  - manager：P12 為 placeholder（只彙整 analyses 為 report_md）；P13 才接 LLM 結構化輸出
-- 不上 checkpointer（P12/P13 跑 in-memory；P14 才用 Redis checkpointer）
-- 過濾邏輯：region 不支援的 Analyst 直接 skip（如 US symbol 跳過 sentiment）
-- 若 `analyst_types` 指定 → 進一步 intersect（白名單）
+P12（前一版）：entry → analyst_1 → ... → placeholder_manager → END
+P13（本版）：entry → analyst_1 → ... → bull → bear → (conditional: 再 bull or → manager) → END
+              ↑ debate_rounds 控制 bull/bear 循環次數
 
-注意：本模組 import time 不會載入 langgraph，避免測試環境沒裝套件時整支 import 失敗。
+設計：
+- analyst 之間 sequential（簡化版；parallel 留 P14）。
+- Bull/Bear 透過 conditional edge 控制輪次（多輪互相反駁）。
+- Manager 是最終的「真實 manager」（取代 P12 的 placeholder_manager）。
+- 若 debate_rounds=0：跳過 Bull/Bear，直接 manager（保留向下相容）。
+- analyst_types=[] 或無支援 Analyst → manager-only graph（report 含「無 Analyst」說明）。
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ from app.agents.analysts import (  # noqa: F401  side-effect: 觸發 register_an
     SentimentAnalyst,
 )
 from app.agents.base_analyst import ANALYST_REGISTRY, BaseAnalyst, get_analysts_for_region
+from app.agents.managers import ResearchManager
+from app.agents.researchers import BearResearcher, BullResearcher
 from app.agents.state import AgentState, make_initial_state
 from app.core.logging_config import get_logger
 from app.core.market_dispatcher import detect_region, market_to_region
@@ -37,14 +39,13 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# ── placeholder manager（P12 用，P13 補真實 LLM 結構化輸出）─────
+# ── placeholder manager（向下相容 P12 測試）─────
 
 
 async def placeholder_manager(state: AgentState) -> dict[str, Any]:
-    """P12 manager stub — 把 analyses dict 彙整成 Markdown report_md。
+    """P12 stub manager — 只在沒注入 llm 時用。
 
-    P13 改為：吃 debate_history + bull/bear arguments → LLM 結構化輸出
-    {signal, confidence, target_price, stop_loss, reasoning, report_md}。
+    P13 起預設改用真實 ResearchManager；本函數保留供 stub graph 測試。
     """
     analyses = state.get("analyses") or {}
     symbol = state.get("symbol", "?")
@@ -54,7 +55,7 @@ async def placeholder_manager(state: AgentState) -> dict[str, Any]:
     lines: list[str] = [
         f"# {symbol} ({market}) 分析報告 [stub]",
         "",
-        "> Phase 12 框架測試報告。實際 LLM 分析將在 Phase 13/14 完成。",
+        "> Phase 12 框架測試報告（無 LLM 注入時的 fallback）。",
         f"> 啟動時間：{started_at}",
         "",
     ]
@@ -102,13 +103,14 @@ def build_graph(
         symbol: 股票代號（推斷 region）。
         market: Market enum 或 str（"TWSE" / "NASDAQ" / ...）。
         analyst_types: 若給 → 過濾只用其中的 Analyst；None → 全部支援的。
-        debate_rounds: P13 才用（Bull/Bear 輪次）。
-        llm: BaseLLMProvider 實例（注入給 Analyst）。
+        debate_rounds: Bull/Bear 辯論輪次（0 = 跳過辯論直接 manager）。
+        llm: BaseLLMProvider 實例（注入給 Analyst / Researcher / Manager）。
+            * None → 用 placeholder_manager（P12 stub 模式，僅單測用）。
         tools: ToolRegistry 實例（注入給 Analyst）。
-        checkpointer: langgraph checkpointer（P12 預設 None；P14 加 Redis）。
+        checkpointer: langgraph checkpointer（None；P14 加 Redis）。
 
     Returns:
-        compiled graph（可呼叫 `.ainvoke(initial_state)`）。
+        compiled graph。
 
     Raises:
         ImportError: langgraph 未安裝。
@@ -118,8 +120,7 @@ def build_graph(
     except ImportError as e:
         raise ImportError("langgraph 未安裝；請執行 `cd backend && uv sync`") from e
 
-    # 1. 決定 region（detect_region 對 symbol，market_to_region 對 market；
-    #    兩者應一致，若不一致以 detect_region(symbol) 為準並警告）
+    # 1. 決定 region
     region_by_symbol = detect_region(symbol)
     try:
         region_by_market = market_to_region(market)
@@ -146,28 +147,62 @@ def build_graph(
             requested=analyst_types,
         )
 
-    # 3. 實例化（依 registry 順序）
+    # 3. 實例化 Analyst
     analysts: list[BaseAnalyst] = [cls(llm=llm, tools=tools) for cls in analyst_classes]
 
     # 4. 建 StateGraph
     graph = StateGraph(AgentState)
 
+    # 5. 決定 manager 模式：有 llm → 真實 ResearchManager；無 llm → placeholder
+    use_real_manager = llm is not None
+    manager_node_name = "manager"
+    if use_real_manager:
+        manager_instance = ResearchManager(llm=llm)
+        graph.add_node(manager_node_name, manager_instance.synthesize)
+    else:
+        graph.add_node(manager_node_name, placeholder_manager)
+
+    # 6. 加 analyst nodes（不變動原有 graph_builder 對 stub graph 的相容性）
     if not analysts:
         # 沒任何 analyst → 直接 entry → manager → END
-        graph.add_node("manager", placeholder_manager)
-        graph.set_entry_point("manager")
-        graph.add_edge("manager", END)
+        graph.set_entry_point(manager_node_name)
+        graph.add_edge(manager_node_name, END)
     else:
         for analyst in analysts:
             graph.add_node(analyst.name, analyst.analyze)
-        graph.add_node("manager", placeholder_manager)
 
-        # sequential：entry → analyst[0] → analyst[1] → ... → manager → END
+        # 7. 加 bull/bear node（僅在 use_real_manager 且 debate_rounds > 0 時）
+        has_debate = use_real_manager and debate_rounds > 0
+        if has_debate:
+            bull = BullResearcher(llm=llm)
+            bear = BearResearcher(llm=llm)
+            graph.add_node("bull", bull.argue)
+            graph.add_node("bear", bear.argue)
+
+        # 8. 連 edge
         graph.set_entry_point(analysts[0].name)
         for i in range(len(analysts) - 1):
             graph.add_edge(analysts[i].name, analysts[i + 1].name)
-        graph.add_edge(analysts[-1].name, "manager")
-        graph.add_edge("manager", END)
+
+        if has_debate:
+            # analyst[-1] → bull → bear → (conditional: bull 再來 or manager)
+            graph.add_edge(analysts[-1].name, "bull")
+            graph.add_edge("bull", "bear")
+
+            def _decide_next(s: AgentState) -> str:
+                """達到 debate_rounds 後 → manager，否則繼續 bull。"""
+                rounds_done = len(s.get("bear_arguments") or [])
+                return manager_node_name if rounds_done >= debate_rounds else "bull"
+
+            graph.add_conditional_edges(
+                "bear",
+                _decide_next,
+                {"bull": "bull", manager_node_name: manager_node_name},
+            )
+        else:
+            graph.add_edge(analysts[-1].name, manager_node_name)
+
+        graph.add_edge(manager_node_name, END)
 
     compiled = graph.compile(checkpointer=checkpointer)
 
@@ -178,6 +213,8 @@ def build_graph(
         region=region.value,
         analysts=[a.name for a in analysts],
         debate_rounds=debate_rounds,
+        use_real_manager=use_real_manager,
+        has_debate=use_real_manager and debate_rounds > 0 and bool(analysts),
         checkpointer=type(checkpointer).__name__ if checkpointer else None,
     )
     return compiled

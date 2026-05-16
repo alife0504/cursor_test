@@ -50,16 +50,26 @@ def _get_service(request: Request, session: AsyncSession) -> AnalysisService:
     return AnalysisService(session, dispatcher=_dispatcher(request))
 
 
-def _enqueue_run_analysis(analysis_id: str) -> None:
+def _enqueue_run_analysis(
+    analysis_id: str,
+    *,
+    analyst_types: list[str] | None = None,
+    debate_rounds: int = 1,
+) -> None:
     """推 celery task；任何 enqueue 錯誤（如 redis 不可用）不應炸 router。
 
     - DB 已寫入 status='queued'，task 失敗交給 orphan cleanup（PLAN 15.4）。
     - 測試環境 / CELERY_TASK_ALWAYS_EAGER → 直接 inline 跑，方便整合測試。
+    - P13：analyst_types / debate_rounds 透過 task kwargs 傳遞
+      （DB 模型未存這兩欄位，audit_logs 讀取脆弱）。
     """
     try:
         from app.workers.tasks.run_analysis import run_analysis as run_analysis_task
 
-        run_analysis_task.delay(analysis_id)
+        kwargs: dict[str, object] = {"debate_rounds": int(debate_rounds)}
+        if analyst_types is not None:
+            kwargs["analyst_types"] = list(analyst_types)
+        run_analysis_task.apply_async(args=[analysis_id], kwargs=kwargs)
     except Exception:  # pragma: no cover - broker 不可用是 ops 問題
         # 不 re-raise；status=queued + orphan cleanup 兜底
         import logging
@@ -113,8 +123,13 @@ async def create_analysis(
     )
 
     # P12：實際推 celery task（在 service commit 完之後）
-    # task 自己會跑 LangGraph + 寫回 status
-    _enqueue_run_analysis(str(report.id))
+    # P13：把 analyst_types + debate_rounds 透過 task kwargs 傳遞
+    # （DB 模型未存這兩個欄位，audit_logs 雖有但讀取脆弱，故用 task 參數）
+    _enqueue_run_analysis(
+        str(report.id),
+        analyst_types=list(payload.analyst_types),
+        debate_rounds=int(payload.debate_rounds),
+    )
 
     body = AnalysisCreateResponse(
         analysis_id=report.id,

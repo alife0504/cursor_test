@@ -162,6 +162,24 @@ async def ro_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+@asynccontextmanager
+async def rw_session() -> AsyncGenerator[AsyncSession, None]:
+    """ta_service_rw 的 async context manager — 非 FastAPI 場景用。
+
+    用法：
+        async with rw_session() as s:
+            s.add(...)
+            await s.commit()
+
+    P13+ Agent / Researcher / Manager 寫 llm_usage 時用。Caller 控制 commit。
+    """
+    if _rw_sessionmaker is None:
+        get_rw_engine()
+    assert _rw_sessionmaker is not None
+    async with _rw_sessionmaker() as session:
+        yield session
+
+
 # ── 同步 engine / session（celery worker + signal handler 用） ─────
 
 _sync_rw_engine: Engine | None = None

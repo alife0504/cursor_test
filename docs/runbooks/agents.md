@@ -7,18 +7,35 @@
 
 ```
 backend/app/agents/
-├── __init__.py           # package
+├── __init__.py
 ├── state.py              # AgentState TypedDict + reducer（add / merge_dict）
 ├── base_analyst.py       # BaseAnalyst ABC + ANALYST_REGISTRY
+├── schemas.py            # P13 — 7 個 Pydantic schema（FinalSignal 等）
+├── prompts_loader.py     # P13 — load_prompt + render_template
+├── prompts/              # P13 — 12 個 .txt 模板
+│   ├── market_analyst_system.txt + ..._user_tw_template.txt
+│   ├── fundamental_analyst_system.txt + ..._user_tw_template.txt
+│   ├── news_analyst_system.txt + ..._user_tw_template.txt
+│   ├── sentiment_analyst_system.txt + ..._user_template.txt
+│   ├── bull_researcher_system.txt
+│   ├── bear_researcher_system.txt
+│   ├── research_manager_system.txt
+│   └── debate_template.txt
+├── llm_helpers.py        # P13 — llm_call_with_schema + record_llm_usage
+├── indicators.py         # P13 — RSI / MACD / KD / BBANDS / MA（純 numpy）
 ├── analysts/
-│   ├── __init__.py       # side-effect: 載入 4 個 Analyst（觸發 register）
 │   ├── market_analyst.py        # 技術面（TW+US）
 │   ├── fundamental_analyst.py   # 基本面（TW+US）
 │   ├── news_analyst.py          # 新聞/公告（TW+US）
 │   └── sentiment_analyst.py     # 籌碼（TW only）
+├── researchers/                  # P13
+│   ├── bull_researcher.py        # Bull researcher 多輪
+│   └── bear_researcher.py        # Bear researcher 多輪
+├── managers/                     # P13
+│   └── research_manager.py       # 綜合 → FinalSignal + report_md
 ├── tools/__init__.py     # ToolRegistry（8 個 method，全部走 ta_agent_ro）
 ├── state_trim.py         # trim_debate_history + estimate_state_size
-└── graph_builder.py      # build_graph + placeholder_manager
+└── graph_builder.py      # build_graph（含 bull/bear/manager + conditional edge）
 
 backend/app/llm/
 ├── __init__.py           # package + re-export
@@ -40,8 +57,7 @@ print(g.get_graph().draw_mermaid())
 "
 ```
 
-輸出大致為：
-
+P12 stub 模式（無 llm）：
 ```mermaid
 graph TD;
 __start__ --> market;
@@ -49,6 +65,20 @@ market --> fundamental;
 fundamental --> news;
 news --> sentiment;
 sentiment --> manager;
+manager --> __end__;
+```
+
+P13 完整模式（注入 llm，debate_rounds=1）：
+```mermaid
+graph TD;
+__start__ --> market;
+market --> fundamental;
+fundamental --> news;
+news --> sentiment;
+sentiment --> bull;
+bull --> bear;
+bear -->|conditional: rounds_done<N| bull;
+bear -->|conditional: done| manager;
 manager --> __end__;
 ```
 
@@ -155,7 +185,47 @@ print(sorted(ANALYST_REGISTRY.keys()))
 ### Q5：cost 為何顯示 0
 - A：`calc_cost()` 未知 model id → 0 + warning。請更新 `gemini_provider.py:pricing` 或檢查 `model` 參數是否拼錯。
 
-## 9. 下一步（P13 / P14）
+## 9. P13 新增的 debug 操作
 
-- P13：把 4 個 Analyst stub 替換為真實 prompt + Tool call；加 Bull/Bear/Manager Researcher。
-- P14：美股 Analyst（共用 class）+ LLM Fallback Chain + WS streaming + LLM 月配額。
+### 9.1 看某個 prompt 模板
+
+```bash
+cd backend && uv run python -c "
+from app.agents.prompts_loader import load_prompt
+print(load_prompt('market_analyst_system'))
+"
+```
+
+### 9.2 看 FinalSignal schema
+
+```bash
+cd backend && uv run python -c "
+import json
+from app.agents.schemas import FinalSignal
+print(json.dumps(FinalSignal.model_json_schema(), ensure_ascii=False, indent=2))
+"
+```
+
+### 9.3 跑單個 Analyst（mock LLM）
+
+見 `tests/integration/test_market_analyst.py` 的 `_FakeLLM` / `_FakeTools` 樣本。
+
+### 9.4 跑真 LLM（@expensive）
+
+```bash
+cd backend && uv run pytest tests/integration/test_real_llm_2330.py \
+  -m "network and expensive" -v
+```
+
+### 9.5 改 prompt 後驗證
+
+- prompts 是 .txt 純文字檔，不需重啟 service（`lru_cache` 在 process lifetime 內生效；celery worker 改 prompt 要重啟）。
+- schemas 修改後跑 `pytest tests/unit/test_schemas.py` 驗 backward compat。
+
+## 10. 下一步（P14）
+
+- 美股 Analyst（用既有 4 個 class，補 US prompt 模板即可）
+- LLM Fallback Chain（google → openai → anthropic）
+- WS streaming：每個 analyst 完成時推 event 到 `analysis:{id}` channel
+- LLM 月配額：跑前查 `llm_monthly_quota.used_usd`、跑後 update
+- Redis checkpointer：state persistence + 中途斷線可續跑

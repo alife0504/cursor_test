@@ -1,23 +1,16 @@
-"""LangGraph 主分析任務 — `run_analysis(analysis_id)`。
+"""LangGraph 主分析任務 — `run_analysis(analysis_id, analyst_types, debate_rounds)`。
 
 依 PLAN.md 第 14.7 / 14.8 章 worker + 第 14.9 章 State + 第 15.4 章 orphan cleanup。
 
-⚠️ Phase 12 階段：
-- 4 種 Analyst 都是 stub（回固定字串）
-- LLM Provider 只接 Gemini（無 fallback）
-- Bull/Bear/Manager 在 P13 才加入 graph
-- 跑 2330 應 status=completed + report_md 為固定模板（不是真實 LLM 分析）
+P13 升級：
+- 4 種 Analyst 從 stub 升級為真實 LLM call。
+- ResearchManager 取代 placeholder_manager。
+- 寫回 DB：signal + report_md + confidence + target_price + stop_loss + take_profit
+  + llm_provider + llm_model + total_tokens + total_cost_usd（從 llm_usage 表彙總）。
+- task kwargs 接受 analyst_types 與 debate_rounds（避開 analysis_reports 缺欄位）。
 
-完整版時程：
-- P13：4 種台股 Analyst 真實 prompt + Bull/Bear/Manager + 結構化輸出
-- P14：美股 Analyst 共用 class + LLM Fallback Chain + WS streaming + 月配額
-
-設計：
-- bind=True 拿到 self；time_limit=1200s (hard) / soft=900s（PLAN 14.8）
-- 失敗 → status='failed' + error_msg；最終 retry 失敗由 task_failure signal 寫 DLQ
-- 並非 retry：LangGraph 邏輯錯誤不該無腦 retry（消耗 LLM cost）；只在明確的暫時錯誤 retry
-- 在 celery 同步上下文中用 single event loop pattern（asyncio.new_event_loop + run_until_complete），
-  避免反覆 asyncio.run() 在同一 process 重建 loop
+未來：
+- P14：LLM Fallback Chain + WS streaming + 月配額。
 """
 
 from __future__ import annotations
@@ -25,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from celery.utils.log import get_task_logger
+from sqlalchemy import func, select
 
 from app.agents.graph_builder import build_graph, build_initial_state
 from app.agents.tools import ToolRegistry
@@ -37,6 +32,7 @@ from app.core.database import sync_rw_session
 from app.llm import get_llm_provider
 from app.llm.base_provider import BaseLLMProvider
 from app.models.analysis import AnalysisReport
+from app.models.quota import LLMUsage
 from app.workers.celery_app import celery_app
 
 logger = get_task_logger(__name__)
@@ -50,38 +46,48 @@ logger = get_task_logger(__name__)
     name="app.workers.tasks.run_analysis.run_analysis",
     time_limit=1200,
     soft_time_limit=900,
-    # 不要 autoretry：LangGraph 失敗多半是邏輯 / LLM quota 問題，retry 浪費錢
     max_retries=0,
 )
-def run_analysis(self: Any, analysis_id: str) -> dict[str, Any]:
+def run_analysis(
+    self: Any,
+    analysis_id: str,
+    analyst_types: list[str] | None = None,
+    debate_rounds: int = 1,
+) -> dict[str, Any]:
     """主分析任務。
 
     Args:
         analysis_id: analysis_reports.id（UUID 字串）。
-
-    Returns:
-        {"analysis_id", "status", "report_md_len", "tokens", "duration_s"}。
+        analyst_types: 要啟用的 Analyst 名稱清單；None / [] → graph 自動全選（依 region 過濾）。
+        debate_rounds: Bull/Bear 辯論輪次（0 = 跳過）。
     """
-    logger.info("run_analysis.start analysis_id=%s", analysis_id)
+    logger.info(
+        "run_analysis.start analysis_id=%s types=%s rounds=%s",
+        analysis_id,
+        analyst_types,
+        debate_rounds,
+    )
 
     try:
-        return _run_with_loop(analysis_id)
+        return _run_with_loop(analysis_id, analyst_types, debate_rounds)
     except Exception as exc:
-        # 任何例外 → 標記為 failed（避免 status 卡 running）
         logger.exception("run_analysis.unhandled analysis_id=%s", analysis_id)
         _safe_mark_failed(analysis_id, str(exc))
         raise
 
 
-def _run_with_loop(analysis_id: str) -> dict[str, Any]:
+def _run_with_loop(
+    analysis_id: str,
+    analyst_types: list[str] | None,
+    debate_rounds: int,
+) -> dict[str, Any]:
     """在新 event loop 中跑 async pipeline。"""
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(_async_pipeline(analysis_id))
+        return loop.run_until_complete(_async_pipeline(analysis_id, analyst_types, debate_rounds))
     finally:
         try:
-            # 給未取消的 task 一個 chance 結束（避免 RuntimeWarning）
             pending = asyncio.all_tasks(loop)
             for t in pending:
                 t.cancel()
@@ -92,43 +98,37 @@ def _run_with_loop(analysis_id: str) -> dict[str, Any]:
             asyncio.set_event_loop(None)
 
 
-async def _async_pipeline(analysis_id: str) -> dict[str, Any]:
-    """async 主流程：取 DB → build graph → ainvoke → 寫回 DB。
-
-    Engine 生命週期：本函數內建一份 async ro engine，跑完無論成敗都 dispose
-    （避免 worker_max_tasks_per_child=50 下累積 N 個 idle PG connection）。
-    """
+async def _async_pipeline(
+    analysis_id: str,
+    analyst_types: list[str] | None,
+    debate_rounds: int,
+) -> dict[str, Any]:
     started_at = datetime.now(tz=UTC)
 
-    # ── 1. 從 DB 取 analysis_reports row（同步 session 拿，避免 async ro/rw 衝突）
+    # 1. 取 DB row
     report_data = _fetch_pending_report(analysis_id)
     if report_data is None:
         raise RuntimeError(f"analysis_reports id={analysis_id} 不存在")
 
-    # 標記為 running
-    _update_status(
-        analysis_id,
-        status="running",
-        started_at=started_at,
-    )
+    _update_status(analysis_id, status="running", started_at=started_at)
 
-    # ── 2. 建 graph
-    llm: BaseLLMProvider | None = None
+    # 2. 拿 llm（必須有；若 init 失敗 → mark failed）
+    llm: BaseLLMProvider
     try:
         llm = get_llm_provider(settings.LLM_DEFAULT_PROVIDER, settings)
     except Exception as exc:
-        logger.warning("run_analysis.llm.init_failed error=%s", exc)
-        # P12 stub 不一定需要 LLM 可用（Analyst stub 不呼叫 LLM）；繼續跑
+        logger.exception("run_analysis.llm.init_failed")
+        _safe_mark_failed(analysis_id, f"LLM init failed: {exc}")
+        raise
 
-    # ToolRegistry 需要 ro_sessionmaker；celery 同步 task 中建一份新的 async engine
-    # 用 try/finally 確保 engine dispose（防 connection leak）
+    # 3. 建 tool registry + graph
     tools, tool_engine = _build_tool_registry()
     try:
         graph = build_graph(
             symbol=report_data["symbol"],
             market=report_data["market"],
-            analyst_types=report_data["analyst_types"],
-            debate_rounds=report_data["debate_rounds"],
+            analyst_types=analyst_types or None,
+            debate_rounds=int(debate_rounds),
             llm=llm,
             tools=tools,
         )
@@ -138,30 +138,33 @@ async def _async_pipeline(analysis_id: str) -> dict[str, Any]:
             market=report_data["market"],
             analysis_id=analysis_id,
             trace_id=report_data.get("trace_id", "") or "",
-            analyst_types=report_data["analyst_types"],
+            analyst_types=analyst_types,
             llm_model=report_data["llm_model"],
-            debate_rounds=report_data["debate_rounds"],
+            debate_rounds=int(debate_rounds),
         )
 
-        # ── 3. 跑 graph
-        final_state = await graph.ainvoke(initial)
+        # recursion_limit 設大一點（多輪辯論可能多 hop）
+        final_state = await graph.ainvoke(initial, config={"recursion_limit": 25})
 
-        # ── 4. 寫回 DB
+        # 4. 寫回 DB
         duration_s = (datetime.now(tz=UTC) - started_at).total_seconds()
-        signal = final_state.get("signal") or {}
-        _update_status(
-            analysis_id,
-            status="completed",
-            completed_at=datetime.now(tz=UTC),
+        signal_dict: dict[str, Any] = final_state.get("signal") or {}
+
+        _update_completed(
+            analysis_id=analysis_id,
+            signal_dict=signal_dict,
             report_md=final_state.get("report_md"),
-            signal=signal.get("action"),
+            llm_provider=getattr(llm, "name", None),
+            llm_model=getattr(llm, "default_model", None),
             total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
         )
 
         logger.info(
-            "run_analysis.done analysis_id=%s duration=%.1fs",
+            "run_analysis.done analysis_id=%s duration=%.1fs action=%s confidence=%s",
             analysis_id,
             duration_s,
+            signal_dict.get("action"),
+            signal_dict.get("confidence"),
         )
 
         return {
@@ -170,41 +173,31 @@ async def _async_pipeline(analysis_id: str) -> dict[str, Any]:
             "report_md_len": len(final_state.get("report_md") or ""),
             "tokens": int(final_state.get("llm_usage_total_tokens", 0) or 0),
             "duration_s": round(duration_s, 1),
+            "action": signal_dict.get("action"),
         }
     finally:
-        # 必須 dispose，否則 worker 累積每 task 一個 engine 會吃爆 PG connection
         try:
             await tool_engine.dispose()
         except Exception as exc:  # pragma: no cover
             logger.warning("run_analysis.tool_engine.dispose_failed error=%s", exc)
 
 
-# ════════════════ Helpers（同步 DB 操作）════════════════
+# ════════════════ Helpers ════════════════
 
 
 def _fetch_pending_report(analysis_id: str) -> dict[str, Any] | None:
-    """從 DB 取 analysis_reports row（同步 session，celery context）。"""
     with sync_rw_session() as s:
         row = s.get(AnalysisReport, UUID(analysis_id))
         if row is None:
             return None
-        # 取出後立即解構（避免 session close 後 lazy load）
         return {
             "id": str(row.id),
             "symbol": row.symbol,
             "market": row.market,
             "status": row.status,
             "llm_model": row.llm_model or settings.LLM_DEFAULT_MODEL,
-            # P12 stub：先用簡單 default；P13 起改從 audit details / 額外欄位讀
-            "analyst_types": _default_analyst_types(),
-            "debate_rounds": 1,
             "trace_id": "",
         }
-
-
-def _default_analyst_types() -> list[str]:
-    """P12 stub：預設啟用全部 analyst（讓 graph 自己依 region 過濾）。"""
-    return ["market", "fundamental", "news", "sentiment"]
 
 
 def _update_status(
@@ -212,13 +205,8 @@ def _update_status(
     *,
     status: str,
     started_at: datetime | None = None,
-    completed_at: datetime | None = None,
-    report_md: str | None = None,
-    signal: str | None = None,
-    total_tokens: int | None = None,
     error_msg: str | None = None,
 ) -> None:
-    """更新 analysis_reports（同步 session）。"""
     with sync_rw_session() as s:
         row = s.get(AnalysisReport, UUID(analysis_id))
         if row is None:
@@ -227,28 +215,88 @@ def _update_status(
         row.status = status
         if started_at is not None:
             row.started_at = started_at
-        if completed_at is not None:
-            row.completed_at = completed_at
-        if report_md is not None:
-            row.report_md = report_md
-        if signal is not None:
-            row.signal = signal
-        if total_tokens is not None:
-            row.total_tokens = int(total_tokens)
         if error_msg is not None:
-            row.error_msg = error_msg[:8000]  # 防超欄寬
+            row.error_msg = error_msg[:8000]
         s.commit()
 
 
-def _safe_mark_failed(analysis_id: str, error: str) -> None:
-    """try/except 包裹的 failed marker（避免 task 雪上加霜炸再炸）。"""
+def _update_completed(
+    *,
+    analysis_id: str,
+    signal_dict: dict[str, Any],
+    report_md: str | None,
+    llm_provider: str | None,
+    llm_model: str | None,
+    total_tokens: int,
+) -> None:
+    """寫回 completed 狀態 + signal 拆解 + 從 llm_usage 表彙總 cost。"""
+    with sync_rw_session() as s:
+        row = s.get(AnalysisReport, UUID(analysis_id))
+        if row is None:
+            logger.warning("run_analysis.update_completed.row_missing id=%s", analysis_id)
+            return
+        row.status = "completed"
+        row.completed_at = datetime.now(tz=UTC)
+        row.report_md = report_md or row.report_md
+        row.llm_provider = llm_provider or row.llm_provider
+        row.llm_model = llm_model or row.llm_model
+        row.total_tokens = int(total_tokens)
+
+        # signal 拆解
+        action = signal_dict.get("action")
+        confidence_raw = signal_dict.get("confidence")
+        if isinstance(action, str) and action in ("BUY", "SELL", "HOLD"):
+            row.signal = action
+        if confidence_raw is not None:
+            try:
+                # FinalSignal 的 confidence 是 0~100 (int)，DB 欄位是 Numeric(5,4)（0~1.0）
+                conf_int = int(confidence_raw)
+                row.confidence = (Decimal(conf_int) / Decimal("100")).quantize(Decimal("0.0001"))
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "run_analysis.confidence_parse_failed",
+                    raw=confidence_raw,
+                    error=str(exc),
+                )
+
+        # 價位
+        row.target_price = _decimal_or_none(signal_dict.get("target_price_low"))
+        # 取 high 作為 take_profit，low 作為 target_price 中位
+        tp_high = _decimal_or_none(signal_dict.get("target_price_high"))
+        if tp_high is not None:
+            row.take_profit = tp_high
+        row.stop_loss = _decimal_or_none(signal_dict.get("stop_loss"))
+
+        # 彙總 cost = llm_usage WHERE analysis_id 的 sum
+        cost_sum = s.execute(
+            select(func.coalesce(func.sum(LLMUsage.cost_usd), 0)).where(
+                LLMUsage.analysis_id == UUID(analysis_id)
+            )
+        ).scalar()
+        row.total_cost_usd = Decimal(cost_sum or 0).quantize(Decimal("0.000001"))
+
+        s.commit()
+
+
+def _decimal_or_none(v: Any) -> Decimal | None:
+    if v is None:
+        return None
     try:
-        _update_status(
-            analysis_id,
-            status="failed",
-            completed_at=datetime.now(tz=UTC),
-            error_msg=error,
-        )
+        return Decimal(str(v))
+    except Exception:
+        return None
+
+
+def _safe_mark_failed(analysis_id: str, error: str) -> None:
+    try:
+        with sync_rw_session() as s:
+            row = s.get(AnalysisReport, UUID(analysis_id))
+            if row is None:
+                return
+            row.status = "failed"
+            row.completed_at = datetime.now(tz=UTC)
+            row.error_msg = error[:8000]
+            s.commit()
     except Exception as exc:  # pragma: no cover
         logger.critical(
             "run_analysis.mark_failed.failed analysis_id=%s error=%s mark_error=%s",
@@ -262,10 +310,6 @@ def _build_tool_registry() -> tuple[ToolRegistry, Any]:
     """在 celery task 內建一份新的 async ro engine + sessionmaker → ToolRegistry。
 
     跨 task 不共用 engine（避免跨 event loop 衝突，PLAN 14.7 已知陷阱）。
-    Caller 必須在 task 結束時 `await engine.dispose()` 釋放連線池。
-
-    Returns:
-        (ToolRegistry, AsyncEngine) — engine 由 caller 負責 dispose。
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -280,11 +324,10 @@ def _build_tool_registry() -> tuple[ToolRegistry, Any]:
     return ToolRegistry(sm), engine
 
 
-# ── Redis pubsub helper（P14 streaming events 用，P12 預留）─────
+# ── Redis pubsub helper（P14 streaming events 用）─────
 
 
 def _publish_event(analysis_id: str, event: dict[str, Any]) -> None:
-    """publish 一則 event 到 `analysis:{id}` channel。P14 才會用上。"""
     try:
         import redis
 
