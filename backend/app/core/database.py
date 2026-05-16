@@ -20,7 +20,7 @@ lifespan shutdown：
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Iterator
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.event import listens_for
@@ -136,6 +136,25 @@ async def get_rw_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def get_ro_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency：開一個 RO session（Agent / Tool 用）。"""
+    if _ro_sessionmaker is None:
+        get_ro_engine()
+    assert _ro_sessionmaker is not None
+    async with _ro_sessionmaker() as session:
+        yield session
+
+
+@asynccontextmanager
+async def ro_session() -> AsyncGenerator[AsyncSession, None]:
+    """ta_agent_ro 的 async context manager — Agent / Tool / 非 FastAPI 場景用。
+
+    用法：
+        async with ro_session() as session:
+            repo = OHLCVRepository(session)
+            rows = await repo.get_range(...)
+
+    安全核心：所有 Agent Tool 必須走此 session（read-only），
+    防 prompt injection 注入 INSERT/UPDATE/DELETE。
+    """
     if _ro_sessionmaker is None:
         get_ro_engine()
     assert _ro_sessionmaker is not None
@@ -288,6 +307,7 @@ __all__ = [
     "get_rw_engine",
     "get_rw_session",
     "get_sync_rw_engine",
+    "ro_session",
     "sync_rw_session",
     "test_db_connection",
 ]

@@ -30,8 +30,11 @@ def test_backend_app_directory_exists() -> None:
 def test_backend_subdirectories_complete() -> None:
     """app/ 下必須有所有 v7.0 規範子目錄（依第二十二章）。
 
-    註：v7.0 P5 起 data_sources/base 由「placeholder 目錄」改為 base.py 檔案
-    （ABC + 註冊機制集中於單檔），因此此測試只檢查 tw/ 與 us/ 目錄。
+    註：
+    - v7.0 P5 起 data_sources/base 由「placeholder 目錄」改為 base.py 檔案
+      （ABC + 註冊機制集中於單檔），故此測試只檢查 tw/ 與 us/ 目錄。
+    - v7.0 P12 起 agents/tools 由「tw / us 子目錄」改為單一 __init__.py
+      （ToolRegistry + 8 個 method 集中於單檔），故不再要求 tw/ us/ 子目錄。
     """
     required = [
         "api/v1",
@@ -44,8 +47,7 @@ def test_backend_subdirectories_complete() -> None:
         "agents/analysts",
         "agents/researchers",
         "agents/managers",
-        "agents/tools/tw",
-        "agents/tools/us",
+        "agents/tools",
         "data_sources/tw",
         "data_sources/us",
         "llm",

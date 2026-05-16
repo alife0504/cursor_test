@@ -62,6 +62,12 @@ dependencies = [
     "openpyxl>=3.1,<4.0",
     # P11：Fernet 加密 LINE / Telegram token
     "cryptography>=42.0,<46.0",
+    # P12：LangGraph + LangChain Core + Gemini Provider + token counting
+    # 注意：langgraph pin <0.3（0.3 大改 API）；langchain-core 配合 langgraph 0.2.x 需 0.3.x
+    "langgraph>=0.2.50,<0.3",
+    "langchain-core>=0.3,<0.4",
+    "langchain-google-genai>=2.0,<3.0",
+    "tiktoken>=0.7,<1.0",
 ]
 
 [dependency-groups]

@@ -47,6 +47,8 @@ celery_app: Celery = Celery(
         "app.workers.tasks.financial",
         "app.workers.tasks.cleanup",
         "app.workers.tasks.verify_audit",
+        # P12: LangGraph 主分析任務
+        "app.workers.tasks.run_analysis",
     ],
 )
 

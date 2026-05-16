@@ -50,6 +50,25 @@ def _get_service(request: Request, session: AsyncSession) -> AnalysisService:
     return AnalysisService(session, dispatcher=_dispatcher(request))
 
 
+def _enqueue_run_analysis(analysis_id: str) -> None:
+    """推 celery task；任何 enqueue 錯誤（如 redis 不可用）不應炸 router。
+
+    - DB 已寫入 status='queued'，task 失敗交給 orphan cleanup（PLAN 15.4）。
+    - 測試環境 / CELERY_TASK_ALWAYS_EAGER → 直接 inline 跑，方便整合測試。
+    """
+    try:
+        from app.workers.tasks.run_analysis import run_analysis as run_analysis_task
+
+        run_analysis_task.delay(analysis_id)
+    except Exception:  # pragma: no cover - broker 不可用是 ops 問題
+        # 不 re-raise；status=queued + orphan cleanup 兜底
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "analysis.enqueue.failed", extra={"analysis_id": analysis_id}
+        )
+
+
 # ════════════════ POST / ════════════════
 
 
@@ -92,6 +111,11 @@ async def create_analysis(
         debate_rounds=payload.debate_rounds,
         request_id=_trace_id(request),
     )
+
+    # P12：實際推 celery task（在 service commit 完之後）
+    # task 自己會跑 LangGraph + 寫回 status
+    _enqueue_run_analysis(str(report.id))
+
     body = AnalysisCreateResponse(
         analysis_id=report.id,
         status=report.status,
