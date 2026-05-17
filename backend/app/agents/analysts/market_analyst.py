@@ -42,6 +42,7 @@ class MarketAnalyst(BaseAnalyst):
     async def analyze(self, state: AgentState) -> dict[str, Any]:
         symbol = state.get("symbol", "?")
         analysis_id = state.get("analysis_id")
+        region = (state.get("region") or "TW").upper()
 
         # 無 llm/tools → 回 stub（向下相容 P12 測試）
         if self.llm is None or self.tools is None:
@@ -59,6 +60,7 @@ class MarketAnalyst(BaseAnalyst):
                 message_zh=f"{symbol} 無 OHLCV 資料（近 60 日）",
                 analyst="market",
                 symbol=symbol,
+                region=region,
             )
 
         # 2. 後端算技術指標（純 numpy）
@@ -69,9 +71,14 @@ class MarketAnalyst(BaseAnalyst):
         # 公司資訊（補上 prompt 的 company_name / industry）
         company = await self.tools.get_company_info(symbol)
 
-        # 3. 渲染 user prompt
+        # 3. 渲染 user prompt（依 region 切台股/美股模板，欄位完全相容）
+        template_name = (
+            "market_analyst_user_us_template"
+            if region == "US"
+            else "market_analyst_user_tw_template"
+        )
         user_prompt = render_template(
-            "market_analyst_user_tw_template",
+            template_name,
             symbol=symbol,
             company_name=company.get("name") or symbol,
             industry=company.get("industry") or "未提供",

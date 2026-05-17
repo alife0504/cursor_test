@@ -43,6 +43,7 @@ class NewsAnalyst(BaseAnalyst):
     async def analyze(self, state: AgentState) -> dict[str, Any]:
         symbol = state.get("symbol", "?")
         analysis_id = state.get("analysis_id")
+        region = (state.get("region") or "TW").upper()
 
         if self.llm is None or self.tools is None:
             text = (
@@ -80,9 +81,12 @@ class NewsAnalyst(BaseAnalyst):
                 "llm_usage_total_tokens": int(state.get("llm_usage_total_tokens", 0) or 0),
             }
 
-        # 渲染 prompt
+        # 渲染 prompt（依 region 切台股/美股；欄位 schema 完全相容）
+        template_name = (
+            "news_analyst_user_us_template" if region == "US" else "news_analyst_user_tw_template"
+        )
         user_prompt = render_template(
-            "news_analyst_user_tw_template",
+            template_name,
             symbol=symbol,
             company_name=company.get("name") or symbol,
             industry=company.get("industry") or "未提供",

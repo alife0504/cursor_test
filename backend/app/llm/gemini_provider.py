@@ -18,6 +18,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from app.core.circuit_breaker import CircuitBreaker, get_or_create_breaker
 from app.core.errors import ExternalServiceError
 from app.core.logging_config import get_logger
 from app.llm.base_provider import (
@@ -57,6 +58,8 @@ class GeminiProvider(BaseLLMProvider):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._client_cache: dict[str, Any] = {}
+        # P14：CircuitBreaker — 與 fallback_chain 共用 registry（key = "llm.google"）
+        self.cb: CircuitBreaker = get_or_create_breaker("llm.google")
 
     def _build_client(self, model: str, temperature: float, max_tokens: int) -> Any:
         """Lazy 建 ChatGoogleGenerativeAI client（按 model 快取）。"""

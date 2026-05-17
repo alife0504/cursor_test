@@ -110,7 +110,9 @@ async def llm_call_with_schema(
     """跑 LLM 並用 Pydantic schema 驗證結果；驗證失敗時自動 repair retry。
 
     Args:
-        llm: BaseLLMProvider 實例。
+        llm: BaseLLMProvider 實例，或 `LLMFallbackChain`（P14 起；介面相容）。
+            * 傳 chain 時，每次 retry 各自走 chain.generate → fallback 自動觸發；
+            * caller 想知道實際 used provider，呼叫後讀 `getattr(llm, "last_used_provider", None)`。
         system: System prompt。
         user: User prompt。
         schema: 預期的 Pydantic Model class。

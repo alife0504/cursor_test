@@ -74,6 +74,7 @@ from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ws_ticket import WSTicketService
 from app.data_sources.tw import get_tw_sources
 from app.data_sources.us import get_us_sources
+from app.llm import get_llm_chain
 
 # 先 configure_logging 避免 import 期間的 log 沒設定好
 configure_logging()
@@ -152,6 +153,28 @@ async def lifespan(app: FastAPI):
         logger.critical("auth.services.init_failed", error=str(e))
         raise ExternalServiceError(message_zh="Auth 服務初始化失敗", source="auth") from e
 
+    # P14：建 LLM Fallback Chain + 每個 provider 跑 readiness ping
+    # PYTEST_RUNNING 跳過真實 ping（避免 unit/integration test 燒配額）
+    try:
+        app.state.llm_chain = get_llm_chain(settings)
+        if not settings.PYTEST_RUNNING:
+            for name, provider in app.state.llm_chain.providers.items():
+                try:
+                    ok = await provider.health_check()
+                except Exception as exc:  # pragma: no cover
+                    ok = False
+                    logger.warning("llm.health.exception", provider=name, error=str(exc))
+                logger.info("llm.health.checked", provider=name, ok=ok)
+        logger.info(
+            "llm_chain.ready",
+            primary=app.state.llm_chain.primary,
+            providers=list(app.state.llm_chain.providers.keys()),
+        )
+    except ValueError as e:
+        # 無任何 LLM provider 配置 → prod 應該 fatal；dev 也阻塞啟動（避免 silent 失敗）
+        logger.critical("llm_chain.no_provider", error=str(e))
+        raise ExternalServiceError(message_zh=str(e), source="llm") from e
+
     yield
 
     logger.info("app.shutdown")
@@ -191,13 +214,13 @@ app = FastAPI(
 #
 # 因此 add 順序（先 add 的最內層）由內到外：
 add_order_inner_to_outer = [
-    BodySizeMiddleware,    # 最先 add = 最內層（最接近 endpoint）
+    BodySizeMiddleware,  # 最先 add = 最內層（最接近 endpoint）
     CSRFMiddleware,
     RateLimitMiddleware,
-    AuditMiddleware,       # 在 short-circuit middleware 外層 → 可 log 被擋的 request
+    AuditMiddleware,  # 在 short-circuit middleware 外層 → 可 log 被擋的 request
     CORSMiddleware,
     SecurityHeadersMiddleware,
-    RequestIDMiddleware,   # 最後 add = 最外層 → 所有 response 都帶 X-Request-ID
+    RequestIDMiddleware,  # 最後 add = 最外層 → 所有 response 都帶 X-Request-ID
 ]
 
 app.add_middleware(BodySizeMiddleware)

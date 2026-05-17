@@ -1,22 +1,17 @@
 """LangGraph 主分析任務 — `run_analysis(analysis_id, analyst_types, debate_rounds)`。
 
-依 PLAN.md 第 14.7 / 14.8 章 worker + 第 14.9 章 State + 第 15.4 章 orphan cleanup。
+依 PLAN.md 第 14.4 / 14.7 / 14.8 章 worker + 第 14.9 章 State + 第 15.4 章 orphan cleanup。
 
-P13 升級：
-- 4 種 Analyst 從 stub 升級為真實 LLM call。
-- ResearchManager 取代 placeholder_manager。
-- 寫回 DB：signal + report_md + confidence + target_price + stop_loss + take_profit
-  + llm_provider + llm_model + total_tokens + total_cost_usd（從 llm_usage 表彙總）。
-- task kwargs 接受 analyst_types 與 debate_rounds（避開 analysis_reports 缺欄位）。
-
-未來：
-- P14：LLM Fallback Chain + WS streaming + 月配額。
+P14 升級：
+- LLM Fallback Chain：用 `get_llm_chain(settings)` 取代 single provider，自動切備援。
+- WS streaming：開頭 publish `started` / 結束 publish `completed` 或 `failed`（每個
+  node 完成的 event 由 graph_builder 的 `_stream_wrap` 自動發出）。
+- pending_order 自動建立：signal=BUY/SELL → `signal_to_pending_order` 建單。
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -26,12 +21,20 @@ from celery.utils.log import get_task_logger
 from sqlalchemy import func, select
 
 from app.agents.graph_builder import build_graph, build_initial_state
+from app.agents.managers.orders_decision import signal_to_pending_order
+from app.agents.streaming import (
+    EVENT_COMPLETED,
+    EVENT_FAILED,
+    EVENT_STARTED,
+    publish_event_sync,
+)
 from app.agents.tools import ToolRegistry
 from app.core.config import settings
 from app.core.database import sync_rw_session
-from app.llm import get_llm_provider
-from app.llm.base_provider import BaseLLMProvider
+from app.llm import get_llm_chain
+from app.llm.fallback_chain import LLMFallbackChain
 from app.models.analysis import AnalysisReport
+from app.models.order import PendingOrder
 from app.models.quota import LLMUsage
 from app.workers.celery_app import celery_app
 
@@ -112,13 +115,27 @@ async def _async_pipeline(
 
     _update_status(analysis_id, status="running", started_at=started_at)
 
-    # 2. 拿 llm（必須有；若 init 失敗 → mark failed）
-    llm: BaseLLMProvider
+    # P14：publish "started" event（fire-and-forget；失敗不擋）
+    publish_event_sync(
+        analysis_id,
+        EVENT_STARTED,
+        {
+            "symbol": report_data["symbol"],
+            "market": report_data["market"],
+            "analyst_types": list(analyst_types or []),
+            "debate_rounds": int(debate_rounds),
+            "started_at": started_at.isoformat(),
+        },
+    )
+
+    # 2. 建 LLM Fallback Chain（P14；取代 P12 single provider）
+    chain: LLMFallbackChain
     try:
-        llm = get_llm_provider(settings.LLM_DEFAULT_PROVIDER, settings)
+        chain = get_llm_chain(settings)
     except Exception as exc:
-        logger.exception("run_analysis.llm.init_failed")
-        _safe_mark_failed(analysis_id, f"LLM init failed: {exc}")
+        logger.exception("run_analysis.llm_chain.init_failed")
+        _safe_mark_failed(analysis_id, f"LLM chain init failed: {exc}")
+        publish_event_sync(analysis_id, EVENT_FAILED, {"error": f"LLM chain init failed: {exc}"})
         raise
 
     # 3. 建 tool registry + graph
@@ -129,7 +146,7 @@ async def _async_pipeline(
             market=report_data["market"],
             analyst_types=analyst_types or None,
             debate_rounds=int(debate_rounds),
-            llm=llm,
+            llm=chain,
             tools=tools,
         )
 
@@ -144,27 +161,77 @@ async def _async_pipeline(
         )
 
         # recursion_limit 設大一點（多輪辯論可能多 hop）
-        final_state = await graph.ainvoke(initial, config={"recursion_limit": 25})
+        try:
+            final_state = await graph.ainvoke(initial, config={"recursion_limit": 25})
+        except Exception as exc:
+            logger.exception("run_analysis.graph.failed analysis_id=%s", analysis_id)
+            _safe_mark_failed(analysis_id, f"graph failed: {exc}")
+            publish_event_sync(analysis_id, EVENT_FAILED, {"error": str(exc)[:500]})
+            raise
 
         # 4. 寫回 DB
         duration_s = (datetime.now(tz=UTC) - started_at).total_seconds()
         signal_dict: dict[str, Any] = final_state.get("signal") or {}
 
+        # provider 取「最後一次成功的 provider」（fallback chain 可能切過）
+        used_provider = getattr(chain, "last_used_provider", None) or getattr(
+            chain, "primary", "google"
+        )
+        used_model = report_data["llm_model"]
+
         _update_completed(
             analysis_id=analysis_id,
             signal_dict=signal_dict,
             report_md=final_state.get("report_md"),
-            llm_provider=getattr(llm, "name", None),
-            llm_model=getattr(llm, "default_model", None),
+            llm_provider=used_provider,
+            llm_model=used_model,
             total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
         )
 
+        # 5. P14：建 pending_order（signal=BUY/SELL）
+        pending_order_id: str | None = None
+        try:
+            order = signal_to_pending_order(
+                signal_dict,
+                analysis_id=analysis_id,
+                user_id=report_data["user_id"],
+                symbol=report_data["symbol"],
+                market=report_data["market"],
+            )
+            if order is not None:
+                _persist_pending_order(order)
+                pending_order_id = str(order.id)
+        except Exception as exc:
+            # pending_order 失敗不擋整個 analysis；只 log warning
+            logger.warning(
+                "run_analysis.pending_order.failed analysis_id=%s error=%s",
+                analysis_id,
+                exc,
+            )
+
+        # 6. publish "completed" event
+        publish_event_sync(
+            analysis_id,
+            EVENT_COMPLETED,
+            {
+                "action": signal_dict.get("action"),
+                "confidence": signal_dict.get("confidence"),
+                "report_excerpt": (final_state.get("report_md") or "")[:500],
+                "used_provider": used_provider,
+                "duration_s": round(duration_s, 1),
+                "tokens": int(final_state.get("llm_usage_total_tokens", 0) or 0),
+                "pending_order_id": pending_order_id,
+            },
+        )
+
         logger.info(
-            "run_analysis.done analysis_id=%s duration=%.1fs action=%s confidence=%s",
+            "run_analysis.done analysis_id=%s duration=%.1fs action=%s confidence=%s used=%s order=%s",
             analysis_id,
             duration_s,
             signal_dict.get("action"),
             signal_dict.get("confidence"),
+            used_provider,
+            pending_order_id,
         )
 
         return {
@@ -174,6 +241,8 @@ async def _async_pipeline(
             "tokens": int(final_state.get("llm_usage_total_tokens", 0) or 0),
             "duration_s": round(duration_s, 1),
             "action": signal_dict.get("action"),
+            "used_provider": used_provider,
+            "pending_order_id": pending_order_id,
         }
     finally:
         try:
@@ -192,12 +261,20 @@ def _fetch_pending_report(analysis_id: str) -> dict[str, Any] | None:
             return None
         return {
             "id": str(row.id),
+            "user_id": str(row.user_id),
             "symbol": row.symbol,
             "market": row.market,
             "status": row.status,
             "llm_model": row.llm_model or settings.LLM_DEFAULT_MODEL,
             "trace_id": "",
         }
+
+
+def _persist_pending_order(order: PendingOrder) -> None:
+    """寫入 pending_orders（sync session）。"""
+    with sync_rw_session() as s:
+        s.add(order)
+        s.commit()
 
 
 def _update_status(
@@ -324,23 +401,7 @@ def _build_tool_registry() -> tuple[ToolRegistry, Any]:
     return ToolRegistry(sm), engine
 
 
-# ── Redis pubsub helper（P14 streaming events 用）─────
-
-
-def _publish_event(analysis_id: str, event: dict[str, Any]) -> None:
-    try:
-        import redis
-
-        client = redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            password=settings.REDIS_PASSWORD.get_secret_value(),
-            db=0,
-        )
-        channel = f"analysis:{analysis_id}"
-        client.publish(channel, json.dumps(event, ensure_ascii=False, default=str))
-    except Exception as exc:  # pragma: no cover
-        logger.warning("run_analysis.publish_event.failed error=%s", exc)
+# Streaming publish 改走 app.agents.streaming.publish_event_sync（P14）
 
 
 __all__ = ["run_analysis"]

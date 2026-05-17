@@ -29,6 +29,12 @@ from app.agents.base_analyst import ANALYST_REGISTRY, BaseAnalyst, get_analysts_
 from app.agents.managers import ResearchManager
 from app.agents.researchers import BearResearcher, BullResearcher
 from app.agents.state import AgentState, make_initial_state
+from app.agents.streaming import (
+    EVENT_ANALYST_COMPLETED,
+    EVENT_DEBATE_ARGUMENT,
+    EVENT_SYNTHESIS_COMPLETED,
+    publish_event,
+)
 from app.core.logging_config import get_logger
 from app.core.market_dispatcher import detect_region, market_to_region
 
@@ -37,6 +43,64 @@ if TYPE_CHECKING:
     from app.llm.base_provider import BaseLLMProvider
 
 logger = get_logger(__name__)
+
+
+# ── streaming wrapper（P14：每個 node 完成後 publish redis pubsub event）─────
+
+
+def _stream_wrap(node_func: Any, *, event: str, node_name: str) -> Any:
+    """把 graph node 包成「執行 + publish event」。
+
+    Args:
+        node_func: 原始 node coroutine（吃 state → dict）。
+        event: 對應的 streaming event 名稱（analyst_completed / debate_argument / synthesis_completed）。
+        node_name: 寫進 data 的識別名。
+
+    Returns:
+        async 包裝後的 coroutine（與原 node 介面相容）。
+    """
+
+    async def _wrapped(state: AgentState) -> dict[str, Any]:
+        result = await node_func(state)
+        analysis_id = state.get("analysis_id")
+        if analysis_id:
+            # 從 result 取摘要（避免送整段 analyses[name]，太大）
+            data: dict[str, Any] = {"node": node_name}
+            if event == EVENT_ANALYST_COMPLETED:
+                analyses = result.get("analyses") or {}
+                # 取本 analyst 寫入 key 的長度做摘要
+                content = analyses.get(node_name) or ""
+                data["result_length"] = len(content) if isinstance(content, str) else 0
+                data["preview"] = content[:200] if isinstance(content, str) else ""
+            elif event == EVENT_DEBATE_ARGUMENT:
+                # round 數從 result 嘗試取
+                history = result.get("debate_history") or []
+                if history:
+                    last = history[-1]
+                    data["role"] = last.get("role")
+                    data["round"] = last.get("round")
+                    content = last.get("content") or ""
+                    data["preview"] = content[:200] if isinstance(content, str) else ""
+            elif event == EVENT_SYNTHESIS_COMPLETED:
+                signal = result.get("signal") or {}
+                data["action"] = signal.get("action")
+                data["confidence"] = signal.get("confidence")
+                report = result.get("report_md") or ""
+                data["report_length"] = len(report) if isinstance(report, str) else 0
+            try:
+                await publish_event(analysis_id, event, data)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(
+                    "graph.stream.publish_failed",
+                    analysis_id=str(analysis_id),
+                    event_name=event,
+                    node=node_name,
+                    error=str(exc),
+                )
+        return result
+
+    _wrapped.__name__ = getattr(node_func, "__name__", node_name)  # type: ignore[attr-defined]
+    return _wrapped
 
 
 # ── placeholder manager（向下相容 P12 測試）─────
@@ -158,26 +222,46 @@ def build_graph(
     manager_node_name = "manager"
     if use_real_manager:
         manager_instance = ResearchManager(llm=llm)
-        graph.add_node(manager_node_name, manager_instance.synthesize)
+        graph.add_node(
+            manager_node_name,
+            _stream_wrap(
+                manager_instance.synthesize,
+                event=EVENT_SYNTHESIS_COMPLETED,
+                node_name=manager_node_name,
+            ),
+        )
     else:
         graph.add_node(manager_node_name, placeholder_manager)
 
-    # 6. 加 analyst nodes（不變動原有 graph_builder 對 stub graph 的相容性）
+    # 6. 加 analyst nodes（P14：每個 node 加 streaming wrapper publish event）
     if not analysts:
         # 沒任何 analyst → 直接 entry → manager → END
         graph.set_entry_point(manager_node_name)
         graph.add_edge(manager_node_name, END)
     else:
         for analyst in analysts:
-            graph.add_node(analyst.name, analyst.analyze)
+            graph.add_node(
+                analyst.name,
+                _stream_wrap(
+                    analyst.analyze,
+                    event=EVENT_ANALYST_COMPLETED,
+                    node_name=analyst.name,
+                ),
+            )
 
         # 7. 加 bull/bear node（僅在 use_real_manager 且 debate_rounds > 0 時）
         has_debate = use_real_manager and debate_rounds > 0
         if has_debate:
             bull = BullResearcher(llm=llm)
             bear = BearResearcher(llm=llm)
-            graph.add_node("bull", bull.argue)
-            graph.add_node("bear", bear.argue)
+            graph.add_node(
+                "bull",
+                _stream_wrap(bull.argue, event=EVENT_DEBATE_ARGUMENT, node_name="bull"),
+            )
+            graph.add_node(
+                "bear",
+                _stream_wrap(bear.argue, event=EVENT_DEBATE_ARGUMENT, node_name="bear"),
+            )
 
         # 8. 連 edge
         graph.set_entry_point(analysts[0].name)

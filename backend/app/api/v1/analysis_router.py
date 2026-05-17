@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse
 from app.api.dependencies import admin_only, get_current_user
 from app.core.cursor import Cursor, build_page_response, clamp_limit
 from app.core.database import get_rw_session
-from app.core.errors import ValidationError
+from app.core.errors import QuotaExceededError, ValidationError
 from app.core.idempotency import IdempotencyService, compute_request_hash
 from app.core.response_envelope import envelope_success
 from app.core.validators import validate_uuid
@@ -30,6 +30,7 @@ from app.schemas.analysis import (
     DebateMessageOut,
 )
 from app.services.analysis_service import AnalysisService
+from app.services.quota_service import QuotaService
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -106,10 +107,22 @@ async def create_analysis(
         request_hash=req_hash,
     )
     if existing is not None:
-        # Idempotent replay：顯式回 200（避免 decorator status_code=201 蓋過去）
+        # Idempotent replay → 不重複扣 quota（response 已 cache）
         return JSONResponse(
             status_code=200,
             content=envelope_success(existing.response, trace_id=_trace_id(request)),
+        )
+
+    # P14：月配額檢查（在 idempotency 之後，避免 replay 也擋）
+    # PYTEST_RUNNING 不跳過：integration test 需驗證 402；單測直接 mock service。
+    # 用 router 注入的 session 避免跨 event loop 開新 pool。
+    quota = QuotaService()
+    allowed, used, limit = await quota.check_user_can_analyze(user.id, session=session)
+    if not allowed:
+        raise QuotaExceededError(
+            message_zh=f"本月 LLM 預算已用完（{used} / {limit} USD）",
+            used_usd=str(used),
+            limit_usd=str(limit),
         )
 
     service = _get_service(request, session)

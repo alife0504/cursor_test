@@ -43,7 +43,7 @@ class FundamentalAnalyst(BaseAnalyst):
 
     async def analyze(self, state: AgentState) -> dict[str, Any]:
         symbol = state.get("symbol", "?")
-        region = state.get("region", "TW")
+        region = (state.get("region") or "TW").upper()
         analysis_id = state.get("analysis_id")
 
         if self.llm is None or self.tools is None:
@@ -80,8 +80,21 @@ class FundamentalAnalyst(BaseAnalyst):
 
         ratios = _compute_ratios(financials, monthly)
 
+        # 依 region 切模板（欄位 schema 完全相容）
+        template_name = (
+            "fundamental_analyst_user_us_template"
+            if region == "US"
+            else "fundamental_analyst_user_tw_template"
+        )
+        monthly_table_str = (
+            _format_monthly_table(monthly)
+            if monthly
+            else (
+                "(美股無月度營收公告制度；以季度財報為主)" if region == "US" else "(無月營收資料)"
+            )
+        )
         user_prompt = render_template(
-            "fundamental_analyst_user_tw_template",
+            template_name,
             symbol=symbol,
             company_name=company.get("name") or symbol,
             industry=company.get("industry") or "未提供",
@@ -89,9 +102,7 @@ class FundamentalAnalyst(BaseAnalyst):
             capital=_fmt(company.get("capital")),
             employees=_fmt(company.get("employees"), int_=True),
             financials_table=_format_financials_table(financials),
-            monthly_revenue_table=_format_monthly_table(monthly)
-            if monthly
-            else "(US 個股無台股月營收)",
+            monthly_revenue_table=monthly_table_str,
             eps_ttm=_fmt(ratios.get("eps_ttm")),
             pe_ratio=_fmt(ratios.get("pe_ratio")),
             industry_pe_hint=_fmt(ratios.get("industry_pe_hint")),
