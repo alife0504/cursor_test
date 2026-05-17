@@ -122,7 +122,7 @@ function LoginPageInner() {
         <CardDescription>{t("app.tagline")}</CardDescription>
       </CardHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <CardContent className="flex flex-col gap-4">
             <FormField
               control={form.control}

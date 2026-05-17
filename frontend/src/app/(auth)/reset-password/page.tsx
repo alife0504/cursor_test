@@ -101,7 +101,7 @@ function ResetPasswordPageInner() {
         <CardDescription>{t("onboarding.change_pw.rules")}</CardDescription>
       </CardHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <CardContent className="flex flex-col gap-4">
             {!token && (
               <p className="text-sm text-destructive">

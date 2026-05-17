@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+// 強制未登入狀態(覆寫 globalSetup 的 admin storageState)
+test.use({ storageState: { cookies: [], origins: [] } });
+
 // Phase 15 § X:Auth 流程 smoke
 // 預先條件:
 //   - frontend dev server 在 http://localhost:3000

@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Playwright(auth state 含 admin cookie,不該進 git)
+/tests/e2e/.auth/
+/test-results/
+/playwright-report/
+/playwright/.cache/
