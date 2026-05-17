@@ -231,3 +231,165 @@ export interface MarketOverview {
   // 後端 P10 stub:結構彈性,前端容忍未知欄位
   [k: string]: unknown;
 }
+
+// ════════════════ Phase 17 ════════════════
+// 三大法人 row（對應 backend/schemas/market.py InstitutionalRow）
+export interface InstitutionalRow {
+  symbol: string;
+  date: string;
+  foreign_buy?: string | null;
+  foreign_sell?: string | null;
+  foreign_net?: string | null;
+  trust_buy?: string | null;
+  trust_sell?: string | null;
+  trust_net?: string | null;
+  dealer_buy?: string | null;
+  dealer_sell?: string | null;
+  dealer_net?: string | null;
+}
+
+export interface InstitutionalResponse {
+  date: string | null;
+  rows: InstitutionalRow[];
+}
+
+// Screener row（對應 backend/schemas/screener.py ScreenerRow）
+export interface ScreenerRow {
+  symbol: string;
+  name?: string | null;
+  market?: string | null;
+  industry?: string | null;
+  close?: string | null;
+  pe?: string | null;
+  dividend_yield?: string | null;
+  eps_growth?: string | null;
+  rsi?: string | null;
+  market_cap?: string | null;
+  volume?: number | null;
+}
+
+export interface ScreenerFilters {
+  market?: "TW" | "US";
+  PE_min?: number | null;
+  PE_max?: number | null;
+  dividend_yield_min?: number | null;
+  eps_growth_min?: number | null;
+  RSI_min?: number | null;
+  RSI_max?: number | null;
+  market_cap_min?: number | null;
+  industry?: string | null;
+  sort?: string;
+  order?: "asc" | "desc";
+}
+
+// 個股 news / announcement
+export interface NewsItem {
+  id?: string;
+  symbol?: string | null;
+  title: string;
+  summary?: string | null;
+  source?: string | null;
+  url?: string | null;
+  published_at: string;
+  sentiment_label?: "very_positive" | "positive" | "neutral" | "negative" | "very_negative" | string | null;
+  sentiment_score?: string | number | null;
+}
+
+export interface AnnouncementItem {
+  id?: string;
+  symbol?: string | null;
+  market?: string | null;
+  type?: string | null;
+  title: string;
+  source?: string | null;
+  url?: string | null;
+  published_at: string;
+}
+
+// Notifications（對齊 backend/app/schemas/notifications.py）
+export type NotificationChannel = "line" | "telegram" | "email" | "webhook";
+export type NotificationEvent =
+  | "analysis.completed"
+  | "analysis.failed"
+  | "order.approved"
+  | "order.rejected"
+  | "system.alert"
+  | "test";
+
+export interface NotificationSettings {
+  user_id: string;
+  line_token_masked?: string | null;
+  telegram_chat_id?: string | null;
+  email_enabled: boolean;
+  enabled_channels?: string[] | null;
+  enabled_events?: string[] | null;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  updated_at: string;
+}
+
+export interface NotificationSettingsUpdate {
+  line_token?: string | null;
+  telegram_chat_id?: string | null;
+  email_enabled?: boolean | null;
+  enabled_channels?: string[] | null;
+  enabled_events?: string[] | null;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+}
+
+export interface NotificationLog {
+  id: number;
+  user_id?: string | null;
+  channel: string;
+  event_type: string;
+  payload: Record<string, unknown> | unknown[];
+  status: string;
+  error_msg?: string | null;
+  retry_count: number;
+  sent_at: string;
+}
+
+// Admin / system
+export interface SystemMetricsSummary {
+  api_availability?: number | null;
+  avg_latency_ms?: number | null;
+  analyses_today?: number | null;
+  llm_cost_today_usd?: string | number | null;
+  disk_usage_pct?: number | null;
+  queue_length?: number | null;
+  [k: string]: unknown;
+}
+
+export interface SystemInfo {
+  version: string;
+  env: string;
+  started_at: string;
+  [k: string]: unknown;
+}
+
+// DLQ row（對齊 backend/schemas/admin.py DeadLetterOut）
+export interface DLQItem {
+  id: number;
+  failed_at: string;
+  task_name: string;
+  task_id?: string | null;
+  args?: unknown;
+  kwargs?: Record<string, unknown> | null;
+  exception_type?: string | null;
+  exception?: string | null;
+  retry_count: number;
+  resolved: boolean;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
+  resolution_notes?: string | null;
+}
+
+// Calendar event（mock for v1.0）
+export interface CalendarEvent {
+  date: string;
+  symbol: string;
+  name?: string | null;
+  type: "earnings" | "ex_dividend" | "shareholder_meeting" | string;
+  title: string;
+}

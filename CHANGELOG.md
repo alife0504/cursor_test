@@ -8,6 +8,37 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased] — TradingAgents-TW v1.0 development
 
+### Added (Phase 17)
+
+- **前端進階 10 頁(接後端):**
+  - `/market/overview`、`/market/institutional`(TW 三大法人)
+  - `/screener/filter`(PE / Yield / EPS / RSI / 市值多條件 + localStorage 儲存)
+  - `/news/sentiment`(個股 5 級情緒分佈)、`/news/announcements`
+  - `/portfolio/positions`(從 APPROVED orders 聚合,client-side)、`/portfolio/history`
+  - `/notifications`(LINE Notify token / Telegram chat_id / 事件訂閱 / 測試發送 / 通知 log)
+  - `/admin/system`(API/延遲/磁碟/佇列卡片 + 24h mock 走勢)
+  - `/admin/pipeline`(Celery DLQ 列表 + resolve/requeue 含 ConfirmDialog 顯示原始 traceback)
+- **前端進階 5 頁(Mock,v1.1 完整實作):**
+  - `/market/calendar`(月曆 view + 12 mock events / 月)
+  - `/screener/compare`(最多 5 支並排比較,內建 mock 字典)
+  - `/statistics/accuracy`(confidence ≥ 0.6 粗估命中率;v1.1 等後端 actual_return_30d)
+  - `/statistics/models`(LLM 模型用量 group by;client-side 從 /analysis 聚合)
+  - `/statistics/backtest`(策略/期間 + deterministic mock equity curve & drawdown)
+- **6 個 React Query hooks**:useScreener / useNews(三大法人+stock news+stock announcements+calendar)/ usePortfolio(computePositions + useTradeHistory)/ useNotifications / useSystem(metrics+info+DLQ)/ useStatistics
+- **共用元件**:`<BarChart />`、`<PieChart />`(內含 inner client component + ssr:false dynamic 包裝,避開 recharts 4.x defaultProps 與 Next.js dynamic LoaderComponent 型別衝突);`<MockBanner />`(含必含 "Mock"+"v1.1" 字串,供 health_check grep)
+- **Sidebar 升級**:全 18 頁實作完畢,移除 `stub` badge;5 個 mock 頁加 `mock` badge(hover 提示 v1.1 將完整實作)
+- **48 個新 unit test**(累積 135 → 183);3 個新 E2E spec(screener-filter / notifications-settings / admin-system)
+- **`scripts/health_checks/phase_17.sh`** 13 項自動化檢查
+- **docs/phase_reports/PHASE_17.md** + **docs/runbooks/frontend_pages.md**(每頁資料來源 + mock 替換指引)
+
+### v1.1 Todo(由 P17 留下)
+
+- 後端 `actual_return_30d` endpoint → 真實準確率取代 confidence 粗估
+- 後端 `portfolio_positions` 直接 endpoint → 取代 client-side 聚合(訂單量大時)
+- 後端 BacktestService → 取代 `/statistics/backtest` 的 mock
+- `/market/calendar`、`/screener/compare`、`/news/{sentiment,announcements}` 全市場聚合 endpoint
+- `/admin/pipeline` 手動觸發 task button → 後端 admin-only POST endpoint
+
 ### Added (v0.3.0 - Phase 1 完成)
 
 - **v7.0 完整實施計劃**：`PLAN.md` 重構為 21 個 Phase（P0-P20）詳細 prompt

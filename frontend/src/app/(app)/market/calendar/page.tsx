@@ -1,12 +1,174 @@
-import { PageStub } from "@/components/common/PageStub";
-import { t } from "@/i18n/messages";
+"use client";
 
-export default function Page() {
+import { useMemo, useState } from "react";
+
+import { EmptyState } from "@/components/common/EmptyState";
+import { MockBanner } from "@/components/common/MockBanner";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+// Phase 17 § D:財報日曆(mock,v1.1)
+//   - 月曆 view
+//   - mock:未來 30 天 fake events
+//   - 標示 "Mock - v1.1"
+
+interface MockEvent {
+  date: string; // yyyy-mm-dd
+  symbol: string;
+  name: string;
+  type: "earnings" | "ex_dividend" | "shareholder_meeting";
+  title: string;
+}
+
+const MOCK_SYMBOLS: Array<[string, string]> = [
+  ["2330", "台積電"],
+  ["2317", "鴻海"],
+  ["2454", "聯發科"],
+  ["2412", "中華電"],
+  ["1303", "南亞"],
+  ["AAPL", "Apple"],
+  ["MSFT", "Microsoft"],
+  ["NVDA", "NVIDIA"],
+];
+
+const TYPE_LABEL: Record<MockEvent["type"], string> = {
+  earnings: "法說 / 財報",
+  ex_dividend: "除權息",
+  shareholder_meeting: "股東會",
+};
+const TYPE_COLOR: Record<MockEvent["type"], string> = {
+  earnings: "bg-blue-500/20 text-blue-700 dark:text-blue-200",
+  ex_dividend: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-200",
+  shareholder_meeting: "bg-amber-500/20 text-amber-700 dark:text-amber-200",
+};
+
+function buildMockEvents(year: number, month: number): MockEvent[] {
+  // deterministic mock,基於 year-month seed
+  const events: MockEvent[] = [];
+  const types: MockEvent["type"][] = [
+    "earnings",
+    "ex_dividend",
+    "shareholder_meeting",
+  ];
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  for (let i = 0; i < 12; i++) {
+    const day = ((i * 7 + (year + month)) % daysInMonth) + 1;
+    const [sym, name] = MOCK_SYMBOLS[i % MOCK_SYMBOLS.length];
+    const type = types[i % 3];
+    events.push({
+      date: `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      symbol: sym,
+      name,
+      type,
+      title: `${name} ${TYPE_LABEL[type]}`,
+    });
+  }
+  return events;
+}
+
+export default function MarketCalendarPage() {
+  const today = new Date();
+  const [cursor, setCursor] = useState({
+    year: today.getFullYear(),
+    month: today.getMonth(),
+  });
+
+  const events = useMemo(
+    () => buildMockEvents(cursor.year, cursor.month),
+    [cursor.year, cursor.month],
+  );
+
+  const daysInMonth = new Date(cursor.year, cursor.month + 1, 0).getDate();
+  const firstDay = new Date(cursor.year, cursor.month, 1).getDay();
+  const cells: Array<{ day?: number; events: MockEvent[] }> = [];
+  for (let i = 0; i < firstDay; i++) cells.push({ events: [] });
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${cursor.year}-${String(cursor.month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    cells.push({
+      day: d,
+      events: events.filter((e) => e.date === dateStr),
+    });
+  }
+
+  const prevMonth = () =>
+    setCursor((c) =>
+      c.month === 0 ? { year: c.year - 1, month: 11 } : { ...c, month: c.month - 1 },
+    );
+  const nextMonth = () =>
+    setCursor((c) =>
+      c.month === 11 ? { year: c.year + 1, month: 0 } : { ...c, month: c.month + 1 },
+    );
+
   return (
-    <PageStub
-      title={t("nav.market.calendar")}
-      description="財報日曆(P17 先 mock,v1.1 接真實資料)"
-      plannedPhase="P17"
-    />
+    <div className="flex flex-col gap-4">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">財報日曆</h1>
+        <p className="text-sm text-muted-foreground">
+          法說會、除權息、股東會時程
+        </p>
+      </div>
+
+      <MockBanner trackingRef="v1.1 接 GET /api/v1/market/calendar 真實資料" />
+
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">
+          {cursor.year} 年 {cursor.month + 1} 月
+        </h3>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={prevMonth}>← 上月</Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCursor({ year: today.getFullYear(), month: today.getMonth() })}
+          >
+            今天
+          </Button>
+          <Button variant="outline" size="sm" onClick={nextMonth}>下月 →</Button>
+        </div>
+      </div>
+
+      {events.length === 0 ? (
+        <EmptyState title="本月無排程事件" />
+      ) : (
+        <div className="grid grid-cols-7 gap-1 text-xs">
+          {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
+            <div key={d} className="p-1 text-center font-medium text-muted-foreground">
+              {d}
+            </div>
+          ))}
+          {cells.map((cell, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                "min-h-[80px] rounded-md border p-1",
+                cell.day ? "bg-card" : "bg-muted/30",
+              )}
+            >
+              {cell.day ? (
+                <>
+                  <div className="text-right text-xs text-muted-foreground tabular-nums">
+                    {cell.day}
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    {cell.events.map((e, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "truncate rounded px-1 py-0.5 text-[10px]",
+                          TYPE_COLOR[e.type],
+                        )}
+                        title={e.title}
+                      >
+                        {e.symbol} {e.name}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

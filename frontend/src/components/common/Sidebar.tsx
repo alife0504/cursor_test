@@ -45,8 +45,10 @@ interface NavLeaf {
   href: string;
   labelKey: string;
   icon: LucideIcon;
-  /** P16 已完整實作的頁;沒這個欄位的頁是 P17 stub */
+  /** P16/P17 已完整實作的頁;沒這個欄位的頁是 stub */
   implemented?: boolean;
+  /** v1.0 為 mock data,v1.1 才接後端 */
+  mock?: boolean;
   /** 只有 ADMIN 看得到的 leaf;對應 PLAN § 19.1 RBAC */
   adminOnly?: boolean;
 }
@@ -59,7 +61,10 @@ interface NavGroup {
 }
 type NavItem = NavLeaf | NavGroup;
 
-// PLAN § 21:18 頁;P16 完整實作 8 頁,其餘為 P17 stub
+// PLAN § 21:18 頁全部完成
+//   - P16 完整接後端 8 頁
+//   - P17 完整接後端 10 頁:market(2) + screener/filter + news(2) + portfolio(2) + notifications + admin(2)
+//   - P17 mock(v1.1 才補真實) 5 頁:market/calendar / screener/compare / statistics/accuracy / statistics/models / statistics/backtest
 const NAV: NavItem[] = [
   {
     href: "/dashboard",
@@ -71,9 +76,9 @@ const NAV: NavItem[] = [
     labelKey: "nav.market",
     icon: BarChart3,
     children: [
-      { href: "/market/overview", labelKey: "nav.market.overview", icon: TrendingUp },
-      { href: "/market/institutional", labelKey: "nav.market.institutional", icon: PieChart },
-      { href: "/market/calendar", labelKey: "nav.market.calendar", icon: CalendarDays },
+      { href: "/market/overview", labelKey: "nav.market.overview", icon: TrendingUp, implemented: true },
+      { href: "/market/institutional", labelKey: "nav.market.institutional", icon: PieChart, implemented: true },
+      { href: "/market/calendar", labelKey: "nav.market.calendar", icon: CalendarDays, implemented: true, mock: true },
     ],
   },
   {
@@ -86,8 +91,8 @@ const NAV: NavItem[] = [
         icon: Star,
         implemented: true,
       },
-      { href: "/screener/filter", labelKey: "nav.screener.filter", icon: Filter },
-      { href: "/screener/compare", labelKey: "nav.screener.compare", icon: GitCompareArrows },
+      { href: "/screener/filter", labelKey: "nav.screener.filter", icon: Filter, implemented: true },
+      { href: "/screener/compare", labelKey: "nav.screener.compare", icon: GitCompareArrows, implemented: true, mock: true },
     ],
   },
   {
@@ -112,34 +117,34 @@ const NAV: NavItem[] = [
     labelKey: "nav.statistics",
     icon: LineChart,
     children: [
-      { href: "/statistics/accuracy", labelKey: "nav.statistics.accuracy", icon: TrendingUp },
-      { href: "/statistics/models", labelKey: "nav.statistics.models", icon: ListChecks },
-      { href: "/statistics/backtest", labelKey: "nav.statistics.backtest", icon: CandlestickChart },
+      { href: "/statistics/accuracy", labelKey: "nav.statistics.accuracy", icon: TrendingUp, implemented: true, mock: true },
+      { href: "/statistics/models", labelKey: "nav.statistics.models", icon: ListChecks, implemented: true },
+      { href: "/statistics/backtest", labelKey: "nav.statistics.backtest", icon: CandlestickChart, implemented: true, mock: true },
     ],
   },
   {
     labelKey: "nav.portfolio",
     icon: Briefcase,
     children: [
-      { href: "/portfolio/positions", labelKey: "nav.portfolio.positions", icon: Wallet },
+      { href: "/portfolio/positions", labelKey: "nav.portfolio.positions", icon: Wallet, implemented: true },
       {
         href: "/portfolio/orders",
         labelKey: "nav.portfolio.orders",
         icon: ListChecks,
         implemented: true,
       },
-      { href: "/portfolio/history", labelKey: "nav.portfolio.history", icon: History },
+      { href: "/portfolio/history", labelKey: "nav.portfolio.history", icon: History, implemented: true },
     ],
   },
   {
     labelKey: "nav.news",
     icon: Newspaper,
     children: [
-      { href: "/news/sentiment", labelKey: "nav.news.sentiment", icon: Newspaper },
-      { href: "/news/announcements", labelKey: "nav.news.announcements", icon: Megaphone },
+      { href: "/news/sentiment", labelKey: "nav.news.sentiment", icon: Newspaper, implemented: true },
+      { href: "/news/announcements", labelKey: "nav.news.announcements", icon: Megaphone, implemented: true },
     ],
   },
-  { href: "/notifications", labelKey: "nav.notifications", icon: Bell },
+  { href: "/notifications", labelKey: "nav.notifications", icon: Bell, implemented: true },
   {
     labelKey: "nav.admin",
     icon: Cog,
@@ -164,12 +169,15 @@ const NAV: NavItem[] = [
         labelKey: "nav.admin.system",
         icon: Cog,
         adminOnly: true,
+        implemented: true,
+        mock: true,
       },
       {
         href: "/admin/pipeline",
         labelKey: "nav.admin.pipeline",
         icon: Database,
         adminOnly: true,
+        implemented: true,
       },
     ],
   },
@@ -199,6 +207,13 @@ function NavLeafLink({
       {!item.implemented ? (
         <span className="rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground">
           stub
+        </span>
+      ) : item.mock ? (
+        <span
+          className="rounded bg-yellow-500/20 px-1 py-0.5 text-[10px] uppercase text-yellow-700 dark:text-yellow-200"
+          title="Mock 資料 - v1.1 將完整實作"
+        >
+          mock
         </span>
       ) : null}
     </Link>
