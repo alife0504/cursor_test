@@ -13,7 +13,9 @@ test.describe("Auth flow", () => {
   test("未登入訪問 /dashboard → 重導到 /login", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole("heading", { name: "登入" })).toBeVisible();
+    // shadcn nova CardTitle 是 <div data-slot="card-title">,不是 heading
+    await expect(page.getByRole("button", { name: "登入" })).toBeVisible();
+    await expect(page.getByLabel("電子郵件")).toBeVisible();
   });
 
   test("錯密碼顯示錯誤訊息", async ({ page }) => {

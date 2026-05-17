@@ -49,16 +49,26 @@ interface LoginEnvelope {
   data?: { access_token?: string };
 }
 
+// /auth/login 本身就是「登入動作」,401 表示密碼錯誤,不要去 refresh
+// /auth/refresh / /auth/logout 也不要(避免無窮迴圈)
+const AUTH_PATHS_NO_REFRESH = ["/auth/login", "/auth/refresh", "/auth/logout"];
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
 
-    // 不嘗試 refresh:沒 config / 已經 retry / refresh call 本身失敗
+    // 不嘗試 refresh:沒 config / 已經 retry / refresh call 本身 / login/logout 動作
     if (!original || original._retry || original._isRefreshCall) {
       throw error;
     }
     if (error.response?.status !== 401) {
+      throw error;
+    }
+    if (
+      original.url &&
+      AUTH_PATHS_NO_REFRESH.some((p) => original.url!.includes(p))
+    ) {
       throw error;
     }
 
