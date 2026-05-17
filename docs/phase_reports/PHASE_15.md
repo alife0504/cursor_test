@@ -169,6 +169,13 @@ Next 14 App Router 嚴格要求 `useSearchParams()` 包在 `<Suspense>` 內,
 6. **E2E auth.spec.ts 第三個 case 需要 backend + 真 admin 帳密**:本機可跑,CI 要先把 backend 起來再 playwright test。
 7. **Hydration warning 可能還在**:client 第一次 mount 切時區的 `<DateFormat />` 已處理;但其他元件(如 next-themes 切 dark/light)在 SSR 也可能有 warning,需要實際 browser DevTools 驗證。
 8. **17.x React + base-ui peer**:nova preset 元件雖然 typecheck 通過,實際使用時若元件有 base-ui hook 行為,可能在 Strict Mode 下二次渲染有 console 警告,P16 用到實際頁面再 case by case 處理。
+9. **Tailwind 兩個 ambiguous-class warning**(不影響功能,只是 build / dev 編譯時印 warning):
+   - `duration-[0.35s]` / `ease-[cubic-bezier(0.22,1,0.36,1)]`
+   - 來自 shadcn nova preset 內建元件(probably toast / sheet 動畫)
+   - shadcn 在 Tailwind v4 設計,v3 解析 arbitrary value 與其他 utility 衝突
+   - 修法:升 Tailwind v4(成本大、其他 shadcn 元件需重新對齊),或忽略
+   - 影響:dev / build console 多兩行 warning,實際 CSS 仍正確輸出
+   - 決定:接受,P16/P17 視需要再升 v4
 
 ---
 
