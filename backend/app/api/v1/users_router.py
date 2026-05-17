@@ -26,6 +26,7 @@ from app.schemas.users import (
     UserResetPasswordResponse,
     UserUpdateRequest,
 )
+from app.services.quota_service import QuotaService
 from app.services.user_service import UserService
 
 if TYPE_CHECKING:
@@ -52,6 +53,29 @@ def _to_public(user) -> dict:
         last_login_at=user.last_login_at,
         created_at=getattr(user, "created_at", None),
     ).model_dump(mode="json")
+
+
+@router.get("/me/quota", summary="目前登入者本月 LLM 月配額用量")
+async def my_quota(
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """回傳當月已用 / 限額 / 百分比；dashboard LLM 月用量 progress bar 用。"""
+    quota = QuotaService()
+    allowed, used, limit = await quota.check_user_can_analyze(user.id, session=session)
+    used_str = str(used)
+    limit_str = str(limit)
+    pct = float(used / limit) if limit and limit > 0 else 0.0
+    return envelope_success(
+        {
+            "used_usd": used_str,
+            "limit_usd": limit_str,
+            "allowed": allowed,
+            "percentage": round(min(pct, 1.0) * 100, 2),
+        },
+        trace_id=_trace_id(request),
+    )
 
 
 @router.get("", summary="列出使用者（admin only，cursor 分頁）")

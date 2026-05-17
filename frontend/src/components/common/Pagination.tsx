@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface CursorPaginationProps {
-  /** 目前頁面的下一頁 cursor;null 表示沒有下一頁 */
-  nextCursor: string | null;
+  /** 目前頁面的下一頁 cursor;null 表示沒有下一頁(可選,僅作 debug) */
+  nextCursor?: string | null;
   hasMore: boolean;
   onNext: () => void;
   onPrev?: () => void;
