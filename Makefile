@@ -8,7 +8,10 @@
         migration-status migration-history migration-redo \
         up-workers workers-logs workers-restart down-workers \
         seed-stocks seed-admin backfill verify-data celery-shell \
-        celery-purge celery-inspect
+        celery-purge celery-inspect \
+        frontend-install frontend-dev frontend-build frontend-start \
+        frontend-test frontend-typecheck frontend-lint frontend-e2e \
+        frontend-image frontend-up frontend-down
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -168,3 +171,38 @@ clean:  ## 清快取
 	find . -type d -name ".ruff_cache" -not -path "./legacy/*" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -not -path "./legacy/*" -exec rm -rf {} + 2>/dev/null || true
 	@echo "✓ Cache cleared"
+
+# ── Frontend Next.js（P15 新增） ───────────────────
+
+frontend-install:  ## frontend: npm ci
+	cd frontend && npm ci
+
+frontend-dev:  ## frontend: dev mode（http://localhost:3000）
+	cd frontend && npm run dev
+
+frontend-build:  ## frontend: production build
+	cd frontend && npm run build
+
+frontend-start:  ## frontend: 啟動已 build 的 production server
+	cd frontend && npm start
+
+frontend-test:  ## frontend: vitest 單元測試
+	cd frontend && npm test
+
+frontend-typecheck:  ## frontend: tsc --noEmit
+	cd frontend && npx tsc --noEmit
+
+frontend-lint:  ## frontend: next lint
+	cd frontend && npm run lint
+
+frontend-e2e:  ## frontend: playwright(需先 dev 起來)
+	cd frontend && npm run e2e
+
+frontend-image:  ## Build frontend Docker image
+	docker build -t tradingagents-frontend:dev ./frontend
+
+frontend-up:  ## docker compose 啟動 frontend service(profile)
+	docker compose --profile frontend up -d frontend
+
+frontend-down:  ## docker compose 停止 frontend service
+	docker compose --profile frontend stop frontend

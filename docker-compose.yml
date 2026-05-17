@@ -216,6 +216,36 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
+  # ── Frontend Next.js（P15 加，用 profile 避免預設啟動）─────────────
+  # 預設不啟動;只在 `docker compose --profile frontend up` 時才會起來。
+  # 開發者通常還是用 `npm run dev`(熱重載快),這個 service 主要用於整合測試 / prod 模擬。
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ta-frontend
+    image: tradingagents-frontend:dev
+    profiles: ["frontend"]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # 在 docker network 內 backend 用 service name
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_API_BASE_URL: /api/v1
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+      NEXT_PUBLIC_DEFAULT_TIMEZONE: Asia/Taipei
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   timescaledb_data:
     name: tradingagents_timescaledb_data

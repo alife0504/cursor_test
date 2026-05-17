@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.gitignore
+.env.local
+.env.local.example
+README.md
+Dockerfile
+.dockerignore
+tests
+playwright.config.ts
+playwright-report
+test-results
