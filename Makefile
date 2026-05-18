@@ -11,7 +11,8 @@
         celery-purge celery-inspect \
         frontend-install frontend-dev frontend-build frontend-start \
         frontend-test frontend-typecheck frontend-lint frontend-e2e \
-        frontend-image frontend-up frontend-down
+        frontend-image frontend-up frontend-down \
+        images-build bandit trivy-scan
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -206,3 +207,29 @@ frontend-up:  ## docker compose 啟動 frontend service(profile)
 
 frontend-down:  ## docker compose 停止 frontend service
 	docker compose --profile frontend stop frontend
+
+# ── Phase 18: 安全掃描相關 ─────────────────────
+
+images-build:  ## P18: build backend + frontend image 並 tag :latest（給 Trivy 掃描用）
+	docker build -t tradingagents-backend:latest -f backend/Dockerfile .
+	docker build -t tradingagents-frontend:latest -f frontend/Dockerfile ./frontend
+
+bandit:  ## P18: 對 backend/app/ 跑 bandit static analysis
+	cd backend && uv run bandit -r app/ -c .bandit -f json -o /tmp/bandit_report.json
+	@echo "→ HIGH severity 必須為 0：" && python -c "import json,sys; d=json.load(open(r'/tmp/bandit_report.json')); h=[r for r in d['results'] if r['issue_severity']=='HIGH']; print(f'  HIGH={len(h)}'); sys.exit(0 if len(h)==0 else 1)"
+
+trivy-scan: images-build  ## P18: 對 backend + frontend image 跑 Trivy HIGH+CRITICAL（用 docker 跑 trivy）
+	# 用容器化 trivy 避免 host 必須裝。--ignore-unfixed: 上游無 patch 的不擋
+	# 注意：需 docker engine 起來；Windows / Docker Desktop 直接掛 //var/run/docker.sock
+	docker run --rm \
+	  -v //var/run/docker.sock:/var/run/docker.sock \
+	  -v $(HOME)/.cache/trivy:/root/.cache/trivy \
+	  aquasec/trivy:latest image \
+	    --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+	    tradingagents-backend:latest
+	docker run --rm \
+	  -v //var/run/docker.sock:/var/run/docker.sock \
+	  -v $(HOME)/.cache/trivy:/root/.cache/trivy \
+	  aquasec/trivy:latest image \
+	    --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+	    tradingagents-frontend:latest

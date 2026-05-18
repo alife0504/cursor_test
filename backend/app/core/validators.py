@@ -148,6 +148,76 @@ def validate_url_length(url: str, *, max_length: int = MAX_URL_LENGTH) -> str:
     return url
 
 
+# P18：SSRF 防護 — 拒絕內部 IP / file:// / gopher:// 等危險 scheme/host
+_SSRF_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_SSRF_BLOCKED_HOSTS = frozenset(
+    {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",  # noqa: S104 — 這是 blocklist，故意列上 0.0.0.0 避開 SSRF
+        # 雲端 metadata service
+        "169.254.169.254",
+        "metadata.google.internal",
+    }
+)
+
+
+def validate_safe_url(url: str, *, allow_loopback: bool = False) -> str:
+    """SSRF-safe URL 驗證（PLAN 19.2）。
+
+    拒絕：
+    - 非 http/https scheme（file://、gopher://、ftp:// 等）
+    - localhost / 127.x / ::1 / 169.254.169.254（AWS metadata）
+    - 私有網段 10/8、172.16-31/12、192.168/16（除非 allow_loopback）
+    - 空 host
+
+    Args:
+        allow_loopback：True 時允許 127.x（測試用）。
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+
+    if not isinstance(url, str) or not url.strip():
+        raise ValidationError(message_zh="URL 不可為空", field="url")
+    validate_url_length(url)
+
+    try:
+        parsed = urlparse(url)
+    except ValueError as e:
+        raise ValidationError(message_zh=f"URL 解析失敗：{e}", field="url") from e
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _SSRF_ALLOWED_SCHEMES:
+        raise ValidationError(
+            message_zh=f"URL scheme 不允許：{scheme}（只接受 http/https）",
+            field="url",
+        )
+
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValidationError(message_zh="URL 缺少 host", field="url")
+
+    if host in _SSRF_BLOCKED_HOSTS and not allow_loopback:
+        raise ValidationError(message_zh=f"URL host 不允許：{host}", field="url")
+
+    # 嘗試解析成 IP，若是內部網段 → 擋
+    try:
+        ip = ipaddress.ip_address(host)
+        if not allow_loopback and (
+            ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved
+        ):
+            raise ValidationError(
+                message_zh=f"URL 指向內部網段：{host}",
+                field="url",
+            )
+    except ValueError:
+        # 不是 IP literal，是 hostname → 過
+        pass
+
+    return url
+
+
 # ─────────────────────────────────────────────────────────
 # Content-Type
 # ─────────────────────────────────────────────────────────
@@ -279,6 +349,7 @@ __all__ = [
     "html_escape",
     "validate_content_type",
     "validate_date_range",
+    "validate_safe_url",
     "validate_sort_field",
     "validate_sort_order",
     "validate_symbol",

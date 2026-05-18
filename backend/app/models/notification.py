@@ -87,6 +87,8 @@ class NotificationSetting(Base):
 
     line_token_encrypted: Mapped[str | None] = mapped_column(Text)
     """Fernet 加密後的 LINE Notify token（PLAN 19.4）。"""
+    telegram_bot_token_encrypted: Mapped[str | None] = mapped_column(Text)
+    """Phase 18 加：Fernet 加密的 Telegram Bot Token（機敏；與 chat_id 分開）。"""
     telegram_chat_id: Mapped[str | None] = mapped_column(String(50))
     email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 

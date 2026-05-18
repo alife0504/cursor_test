@@ -24,14 +24,14 @@ psql_pg() {
 
 PG=$(grep ^POSTGRES_SUPERUSER_PASSWORD= .env | cut -d= -f2)
 
-# 1. 確保 alembic head 是 0014
+# 1. 確保 alembic head ≥ 0014（P5 baseline；後續 phase 會推進 head）
 HEAD=$(cd backend && uv run alembic current 2>&1 | grep -oE "[0-9]{4}" | tail -1)
 cd "$PROJECT_ROOT"
-if [ "$HEAD" != "0014" ]; then
-  echo "❌ alembic head = $HEAD（預期 0014）"
+if [ -z "$HEAD" ] || [ "$HEAD" \< "0014" ]; then
+  echo "❌ alembic head = $HEAD（預期 ≥ 0014）"
   exit 1
 fi
-echo "✓ alembic head = 0014"
+echo "✓ alembic head = $HEAD (≥ 0014 P5 baseline)"
 
 # 2. financial_statements 表存在
 COUNT=$(psql_pg "$PG" postgres "SELECT count(*) FROM information_schema.tables WHERE table_name='financial_statements'")

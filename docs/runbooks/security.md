@@ -85,3 +85,72 @@ audit chain 不依賴 SECRET_KEY，rotation 不會影響 audit。
 - 立即跑 `verify_audit_chain.py --since <recent>` 確認
 - 通知 admin（P18 LINE/Telegram）
 - 不要立刻 restart 服務（先保留現場）
+
+---
+
+## 9. Phase 18 — 密碼安全 SOP
+
+> PLAN 第 19.1 章。所有政策已實作於 `app/core/password_policy.py` + `app/models/user.PasswordHistory`。
+
+- **複雜度**：≥ 12 字元 + 4 類字元（大寫 / 小寫 / 數字 / 特殊符號）
+- **bcrypt cost = 12**（`app/core/security.hash_password`）
+- **密碼歷史**：最近 5 次不可重複（`password_history` 表，change-password / reset-password 時比對）
+- **Lockout**：5 次失敗 → 15 分鐘鎖（rate_limit L2 + user.lockout_until）
+- **強制改密碼**：
+  - 由 admin 建立的初始密碼：`must_change_password=True`，首次登入後強制改
+  - **90 天強制週期：v1.0 暫不啟用**（自用單機）
+  - v1.1 可開：在 `app/core/password_policy.py` 加 `MAX_AGE_DAYS = 90` 並用 celery beat 每天掃描
+
+---
+
+## 10. Phase 18 — CSP nonce 排錯
+
+dev 模式 CSP 含 `unsafe-eval`（Next.js HMR 需要）。Prod 模式由後端
+`SecurityHeadersMiddleware.dispatch` 為每 request 產生 nonce 並寫到
+`Content-Security-Policy` header（`script-src 'nonce-<xxx>' 'strict-dynamic'`）。
+
+### 排錯
+- **prod 啟用後 inline script 全被擋**：確認前端的 `<Script>` 都帶 `nonce={...}` 且該 nonce 從 SSR 的 request header 讀
+- **每次 request CSP nonce 都一樣**：middleware 沒跑（看 main.py middleware 順序）
+- **想暫時關掉**：`.env` 設 `CSP_PROD_ENABLED=false`，重啟（**不建議在 prod**）
+
+### 驗證
+```bash
+# dev：CSP 應該含 unsafe-eval
+curl -sI http://localhost:8000/health/live | grep -i content-security-policy
+
+# prod：CSP 應該含 nonce-<value>
+APP_ENV=prod CSP_PROD_ENABLED=true curl -sI http://localhost:8000/health/live | grep -i content-security-policy
+```
+
+---
+
+## 11. Phase 18 — Notification dispatcher 排錯
+
+通知串接：事件 → `dispatcher.dispatch_*` → notifier.send → log + DLQ。
+
+### 沒收到通知
+1. **查 settings**：DB `SELECT * FROM notification_settings WHERE user_id = ?`
+   - `line_token_encrypted` / `telegram_bot_token_encrypted` 不為 null
+   - `enabled_events` 包含該事件（或為 `null` = 全訂閱）
+2. **查 log**：`SELECT * FROM notification_log WHERE user_id = ? ORDER BY sent_at DESC`
+   - 有 `status='failed'` → 看 `error_msg`
+3. **查 DLQ**：`SELECT * FROM celery_dead_letters WHERE task_name = 'notify' AND resolved = false`
+4. **dispatch 沒跑到**：看 backend log 有沒有 `NotificationDispatcher.background.failed`
+5. **quiet hours**：`quiet_hours_start` ~ `quiet_hours_end` 內 INFO/WARN 跳過，CRITICAL 仍發
+
+### 手動 dispatch 測試
+```python
+import asyncio
+from app.notifications import NotifyEvent, NotifyLevel, get_dispatcher
+
+dispatcher = get_dispatcher()
+results = dispatcher.dispatch_sync(NotifyEvent(
+    event_type="test",
+    user_id=<your-uuid>,
+    title="手動測試",
+    body="ad-hoc test",
+    level=NotifyLevel.INFO,
+))
+print(results)
+```

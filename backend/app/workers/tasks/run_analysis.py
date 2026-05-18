@@ -224,6 +224,40 @@ async def _async_pipeline(
             },
         )
 
+        # 6.5. P18: 通知用戶分析完成（fire-and-forget；dispatcher 失敗不擋）
+        try:
+            from app.notifications import NotifyEvent, NotifyLevel, get_dispatcher
+
+            user_uuid = UUID(report_data["user_id"]) if report_data.get("user_id") else None
+            if user_uuid is not None:
+                action = signal_dict.get("action") or "HOLD"
+                confidence = signal_dict.get("confidence")
+                title = f"分析完成 — {report_data['symbol']} ({action})"
+                body_lines = [
+                    f"標的：{report_data['symbol']}（{report_data['market']}）",
+                    f"建議：{action}" + (f"  信心：{confidence}" if confidence is not None else ""),
+                    f"耗時：{round(duration_s, 1)}s",
+                    f"使用模型：{used_provider} / {used_model}",
+                ]
+                if pending_order_id:
+                    body_lines.append(f"已建立待核准訂單：{pending_order_id}")
+                get_dispatcher().dispatch_sync(
+                    NotifyEvent(
+                        event_type="analysis.completed",
+                        user_id=user_uuid,
+                        title=title,
+                        body="\n".join(body_lines),
+                        level=NotifyLevel.SUCCESS,
+                        metadata={"trace_id": analysis_id, "symbol": report_data["symbol"]},
+                    )
+                )
+        except Exception as exc:
+            logger.warning(
+                "run_analysis.notify.dispatch_failed analysis_id=%s error=%s",
+                analysis_id,
+                exc,
+            )
+
         logger.info(
             "run_analysis.done analysis_id=%s duration=%.1fs action=%s confidence=%s used=%s order=%s",
             analysis_id,

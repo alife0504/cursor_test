@@ -116,6 +116,8 @@ class CircuitBreaker:
                     )
                     self._state = CircuitState.OPEN
                     self._opened_at = time.monotonic()
+                    # P18: 廣播 CRITICAL 通知（所有訂閱者）
+                    self._fire_open_notification()
 
     async def reset(self) -> None:
         """手動 reset（運維 / 測試用）。"""
@@ -124,6 +126,39 @@ class CircuitBreaker:
             self._failure_count = 0
             self._opened_at = None
             logger.info("circuit_breaker.manually_reset", name=self.name)
+
+    def _fire_open_notification(self) -> None:
+        """P18：CB 進入 OPEN 時 fire-and-forget 通知。
+
+        - 在 async lock 中呼叫；只能用 sync API（不能 await dispatcher）
+        - 用 dispatch_in_background；若無 event loop 則跳過（不應發生在 async context）
+        - 全部 try/except，CB state 變更不能因通知失敗而 rollback
+        """
+        try:
+            from app.notifications import NotifyEvent, NotifyLevel, get_dispatcher
+
+            dispatcher = get_dispatcher()
+            event = NotifyEvent(
+                event_type="system.alert",
+                user_id=None,  # 系統廣播
+                title=f"🚨 服務熔斷器開啟 — {self.name}",
+                body=(
+                    f"來源：{self.name}\n"
+                    f"連續失敗次數：{self._failure_count}\n"
+                    f"閾值：{self.failure_threshold}\n"
+                    f"預計嘗試恢復：{self.timeout_seconds}s 後\n\n"
+                    f"請檢查該下游服務或 API key。"
+                ),
+                level=NotifyLevel.CRITICAL,
+                metadata={"breaker_name": self.name},
+            )
+            dispatcher.dispatch_in_background(event)
+        except Exception as exc:
+            logger.warning(
+                "circuit_breaker.notify_open.failed",
+                name=self.name,
+                error=str(exc),
+            )
 
     def __repr__(self) -> str:
         return (

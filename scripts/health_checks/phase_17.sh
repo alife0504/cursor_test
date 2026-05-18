@@ -167,7 +167,7 @@ echo "✓ 3 個共用元件存在"
 
 # 12. Sidebar 已標 mock
 echo "[12] Sidebar 含 mock badge..."
-if grep -q '"mock"' "$FRONTEND/src/components/common/Sidebar.tsx"; then
+if grep -qE 'mock: true|>mock<|>\s*mock\s*<' "$FRONTEND/src/components/common/Sidebar.tsx"; then
   echo "✓ Sidebar 含 mock badge"
 else
   echo "✗ Sidebar 沒有 mock 標示"

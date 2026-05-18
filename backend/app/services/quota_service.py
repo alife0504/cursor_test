@@ -119,6 +119,7 @@ class QuotaService:
                 used=str(used),
                 limit=str(limit),
             )
+            _quota_notify("exceeded", user_id, used, limit)
         elif limit > 0 and (used / limit) >= Decimal("0.8"):
             logger.warning(
                 "quota.warning_80pct",
@@ -127,6 +128,7 @@ class QuotaService:
                 limit=str(limit),
                 used_pct=str((used / limit * Decimal("100")).quantize(Decimal("0.1"))),
             )
+            _quota_notify("warning_80pct", user_id, used, limit)
         return allowed, used, limit
 
     async def record_usage(
@@ -197,6 +199,59 @@ def _uuid_or_none(v: UUID | str | None) -> UUID | None:
         return UUID(str(v))
     except (ValueError, TypeError):
         return None
+
+
+# ════════════════ P18 quota 通知（含 in-process dedupe）════════════════
+
+# (user_id, kind, ym) → 已通知時間（同月 24h dedupe）
+_QUOTA_NOTIFY_DEDUPE: dict[tuple[str, str, str], float] = {}
+_QUOTA_DEDUPE_TTL_SEC = 24 * 3600
+
+
+def _quota_notify(kind: str, user_id: UUID, used: Decimal, limit: Decimal) -> None:
+    """同 user 同 kind 在同月份內 24h 只送一次（in-process）。
+
+    註：多 worker 場景每個 worker 各自 dedupe（v1.0 自用可接受）。
+    若多 worker 共享需求高 → 改 redis SETNX。
+    """
+    import time as _time
+
+    try:
+        from app.notifications import NotifyEvent, NotifyLevel, get_dispatcher
+
+        now_dt = datetime.now(tz=UTC)
+        ym = f"{now_dt.year:04d}{now_dt.month:02d}"
+        key = (str(user_id), kind, ym)
+        last = _QUOTA_NOTIFY_DEDUPE.get(key)
+        now_ts = _time.time()
+        if last is not None and (now_ts - last) < _QUOTA_DEDUPE_TTL_SEC:
+            return
+        _QUOTA_NOTIFY_DEDUPE[key] = now_ts
+
+        if kind == "exceeded":
+            title = "🚨 LLM 月配額已用盡"
+            level = NotifyLevel.CRITICAL
+        else:
+            title = "⚠️ LLM 月配額已達 80%"
+            level = NotifyLevel.WARN
+        body = (
+            f"使用：${used:.2f}\n"
+            f"上限：${limit:.2f}\n"
+            f"百分比：{(used / limit * Decimal('100')).quantize(Decimal('0.1'))}%"
+        )
+        get_dispatcher().dispatch_in_background(
+            NotifyEvent(
+                event_type="system.alert",
+                user_id=user_id,
+                title=title,
+                body=body,
+                level=level,
+                metadata={"quota_kind": kind, "used": str(used), "limit": str(limit)},
+            )
+        )
+    except Exception as exc:
+        # 通知是 best-effort（不影響配額檢查；debug 等級 log 即可）
+        logger.debug("quota_notify.skipped", error=str(exc))
 
 
 __all__ = ["QuotaService"]

@@ -12,27 +12,40 @@ const nextConfig = {
     ];
   },
 
-  // Phase 15:基礎安全標頭(prod 應再加 nonce-based CSP,目前 dev/prod 共用一份)
+  // Phase 18:安全標頭 + CSP
+  // - dev: 寬鬆,允許 unsafe-eval(Next.js HMR / SWC dev mode 必要)
+  // - prod: CSP 由 backend SecurityHeadersMiddleware 下 per-request nonce
+  //         前端不再下重複的 CSP header,避免雙重設定衝突
   async headers() {
     const isProd = process.env.NODE_ENV === "production";
-    const csp = [
-      "default-src 'self'",
-      `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"}`,
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https:",
-      "font-src 'self' data:",
-      "connect-src 'self' http: https: ws: wss:",
-      "frame-ancestors 'none'",
-    ].join("; ");
+    const baseHeaders = [
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+      },
+    ];
+    if (!isProd) {
+      const cspDev = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "connect-src 'self' http: https: ws: wss:",
+        "frame-ancestors 'none'",
+      ].join("; ");
+      baseHeaders.push({
+        key: "Content-Security-Policy",
+        value: cspDev,
+      });
+    }
     return [
       {
         source: "/(.*)",
-        headers: [
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "X-Frame-Options", value: "DENY" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Content-Security-Policy", value: csp },
-        ],
+        headers: baseHeaders,
       },
     ];
   },

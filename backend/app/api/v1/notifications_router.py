@@ -64,7 +64,7 @@ async def update_settings(
 # ════════════════ Test ════════════════
 
 
-@router.post("/test", summary="送一則測試通知（不真打外部）")
+@router.post("/test", summary="送一則測試通知（dry_run=True 時不真打外部）")
 async def send_test(
     payload: NotificationTestRequest,
     request: Request,
@@ -76,6 +76,7 @@ async def send_test(
         user,
         channel=payload.channel,
         message=payload.message,
+        dry_run=payload.dry_run,
         request_id=_trace_id(request),
     )
     return envelope_success(

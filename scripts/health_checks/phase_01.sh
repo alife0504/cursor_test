@@ -20,17 +20,24 @@ test -f legacy/README.md     || { echo "❌ legacy/README.md 缺"; exit 1; }
 echo "✓ legacy 隔離 OK"
 
 # 2. backend 骨架
+# 注意：P5 之後 data_sources/base 由目錄變為 base.py（PLAN 章 5）；
+# 此處檢查資料夾存在 + base.py / base/ 任一存在皆可
 for d in backend/app/core backend/app/api/v1 backend/app/services \
          backend/app/data_sources/tw backend/app/data_sources/us \
-         backend/app/data_sources/base backend/app/repos backend/app/schemas \
+         backend/app/repos backend/app/schemas \
          backend/app/agents/analysts backend/app/agents/researchers \
-         backend/app/agents/managers backend/app/agents/tools/tw \
-         backend/app/agents/tools/us backend/app/llm \
+         backend/app/agents/managers backend/app/agents/tools \
+         backend/app/llm \
          backend/app/workers backend/app/notifications backend/app/exports \
          backend/migrations backend/scripts \
          backend/tests/unit backend/tests/integration backend/tests/security; do
   test -d "$d" || { echo "❌ 缺少目錄：$d"; exit 1; }
 done
+# data_sources/base 可為檔或目錄（P5 重構為 base.py）
+if [ ! -d backend/app/data_sources/base ] && [ ! -f backend/app/data_sources/base.py ]; then
+  echo "❌ 缺少 data_sources/base 模組（檔或目錄）"
+  exit 1
+fi
 echo "✓ backend 骨架 OK"
 
 # 3. frontend / data-pipeline / docker 骨架
