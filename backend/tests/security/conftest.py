@@ -1,4 +1,9 @@
-"""Security tests 共用 fixture — 直接 import integration conftest 的 fixture。"""
+"""Security tests 共用 fixture — 直接 import integration conftest 的 fixture。
+
+Phase 20 修正：原本只 import 部分 fixture，導致 test_owasp_top10 / test_secret_handling
+等使用 login_helper / flush_rate_limit / seed_* 時 pytest 找不到 fixture 而 ERROR。
+這裡補齊所有 security/ 下測試會用到的 fixture。
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,8 @@ from tests.integration.conftest import (  # type: ignore[import-not-found]
     auth_client,
     db_session_maker,
     env_vars,
+    flush_rate_limit,
+    login_helper,
     make_test_user,
     pg_db,
     pg_host,
@@ -25,6 +32,10 @@ from tests.integration.conftest import (  # type: ignore[import-not-found]
     qdrant_port,
     redis_host,
     redis_port,
+    seed_analysis,
+    seed_ohlcv,
+    seed_pending_order,
+    seed_stocks,
 )
 
 # 抑制 unused import warning（pytest 透過名稱找 fixture）
@@ -35,6 +46,8 @@ _ = (
     auth_client,
     db_session_maker,
     env_vars,
+    flush_rate_limit,
+    login_helper,
     make_test_user,
     pg_db,
     pg_host,
@@ -43,5 +56,9 @@ _ = (
     qdrant_port,
     redis_host,
     redis_port,
+    seed_analysis,
+    seed_ohlcv,
+    seed_pending_order,
+    seed_stocks,
     pytest,
 )

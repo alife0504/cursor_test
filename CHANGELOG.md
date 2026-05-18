@@ -6,7 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
-## [Unreleased] — TradingAgents-TW v1.0 development
+## [1.0.0] — 2026-05-18 — TradingAgents-TW Release
+
+> **Release Ready** — 21 個 Phase（P0-P20）全部完成；716 後端 tests + 183 前端 unit + 57 E2E 全綠。
+>
+> 詳細：[docs/PROJECT_FINAL_REPORT.md](docs/PROJECT_FINAL_REPORT.md)
+
+### Added (Phase 20)
+
+- **scripts/health_checks/all.sh** — 一鍵跑 19 phase health checks + backend pytest + frontend test + bandit + detect-secrets
+- **scripts/health_checks/phase_20.sh** — Phase 20 自家 14 項健康檢查
+- **scripts/check_obsidian_installed.sh** — 跨平台檢查 Obsidian 安裝（Windows / Linux / macOS）
+- **backend/tests/integration/test_final_smoke.py** — 5 個 v1.0 最終 smoke test（login / dashboard / analysis / audit chain / slo report）
+- **docs/PROJECT_FINAL_REPORT.md** — v1.0 結案報告（最重要交付物）
+- **docs/connection-guide.md** — 第一次裝機完整 10 步驟指南
+- **docs/user-guide.md** — 18 頁前端操作 + 15 條 FAQ
+- **docs/runbooks/obsidian_setup.md** — Obsidian 個人筆記整合手冊（v1.0 手動 / v1.1 自動）
+- **docs/phase_reports/PHASE_20.md** — Phase 20 完成報告
+
+### Changed (Phase 20)
+
+- **README.md** — 全面升級為 v1.0 完整版（v0.3.0 → v1.0）
+- **docs/phase_progress.md** — P20 ✅ 標記，21 個 Phase 全部完成
+- **backend/tests/integration/conftest.py** — 加 `_reset_redis_pools_per_test` autouse fixture，修正用 `asyncio.run()` 跑 LangGraph 的測試把 redis pool 綁到臨時 loop，導致下個 test ERROR/FAIL 的跨 event-loop 污染
+- **backend/tests/security/conftest.py** — 補齊 `login_helper / flush_rate_limit / seed_*` 等 fixture import，修正 OWASP / secret handling tests 的 "fixture not found" ERROR
+
+### Fixed (Phase 20)
+
+- backend full pytest 從 `1 failed, 715 passed, 10 errors` → **`716 passed, 3 skipped, 0 fail, 0 error`**（修正以上 conftest 兩個 bug）
+- ruff check 在 `app/ tests/` 全綠（移除 unused noqa / unused import）
+
+### Security
+
+- 已沿用 Phase 18 的 OWASP / bandit HIGH=0 / detect-secrets baseline / Trivy 規則
+- v1.0 接受的風險清單見 [SECURITY.md](SECURITY.md)
+
+### Release artifacts
+
+- Git tag: `v1.0.0`
+- 累積測試：**716 後端 + 183 前端 unit + 57 E2E**（遠超 P20 基準 545+）
+- 累積 Phase tag：`phase-00-complete` ~ `phase-20-complete` + `v1.0.0`
+- 21 個 Phase 報告：`docs/phase_reports/PHASE_00.md` ~ `PHASE_20.md`
+- 19 個 health check + `all.sh` + `phase_20.sh`：`scripts/health_checks/`
+
+---
+
+## [Unreleased] — TradingAgents-TW v1.0 development（已併入 [1.0.0]，保留歷史紀錄）
 
 ### Added (Phase 17)
 

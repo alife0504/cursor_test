@@ -157,6 +157,29 @@ def _skip_if_docker_down() -> None:
         )
 
 
+@pytest.fixture(autouse=True)
+def _reset_redis_pools_per_test():
+    """Phase 20 修正 — function-scoped autouse：清理跨 event-loop 殘留的 Redis pool。
+
+    背景：部分整合測試用 `asyncio.run()` 直接跑 LangGraph（test_full_tw_pipeline /
+    test_us_full_pipeline / test_cross_market_e2e / test_analysis_pipeline_stub）。
+    graph_builder._stream_wrap 會呼叫 publish_event() → get_redis(PUBSUB)，把
+    Redis pool 綁到 asyncio.run 的「臨時 event loop」。loop 結束後 pool 仍留在
+    app.core.redis_client._pools 全域 dict；下個 test（走 TestClient 的 lifespan）
+    重用就會炸 "Future attached to different loop"，造成隨機 ERROR/FAIL。
+
+    解法：每個 test 結束後 clear() `_pools` 全域 dict（不真正關閉連線，避免
+    從錯的 loop call aclose），下次 get_redis_pool() 會 lazy 重建 fresh pool。
+    """
+    yield
+    try:
+        from app.core import redis_client as _rc
+
+        _rc._pools.clear()
+    except Exception:  # noqa: S110 — 測試清理用，忽略失敗無礙
+        pass
+
+
 @pytest.fixture
 async def db_session_maker():
     """每個 test 開獨立 async engine，避免 TestClient 與 pytest-asyncio 跨 loop。

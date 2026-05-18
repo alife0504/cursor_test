@@ -19,6 +19,12 @@ from app.llm.base_provider import LLMResponse, TokenUsage
 pytestmark = pytest.mark.integration
 
 
+# Phase 20 修正：清理跨 event-loop 殘留的 Redis pool 已移至
+# tests/integration/conftest.py 作為全域 autouse fixture（_reset_redis_pools_per_test），
+# 涵蓋本檔 + test_us_full_pipeline / test_cross_market_e2e / test_analysis_pipeline_stub
+# 所有用 asyncio.run() 跑 LangGraph 的測試。
+
+
 # 各 schema 的 fixture payload（會被 _ScriptedLLM 用）
 
 VALID_MARKET = {
