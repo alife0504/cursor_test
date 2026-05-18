@@ -1,5 +1,4 @@
-# TradingAgents-TW Makefile (v0.3.0 - Phase 3)
-# 後續 Phase 會擴充（init-db/seed/backfill/frontend-dev/...）
+# TradingAgents-TW Makefile (v0.4.0 - Phase 19)
 
 .PHONY: help lint format test secrets-scan precommit clean \
         up down logs restart ps psql redis-cli qdrant-status \
@@ -12,7 +11,10 @@
         frontend-install frontend-dev frontend-build frontend-start \
         frontend-test frontend-typecheck frontend-lint frontend-e2e \
         frontend-image frontend-up frontend-down \
-        images-build bandit trivy-scan
+        images-build bandit trivy-scan \
+        prod-up prod-down prod-logs prod-ps prod-restart \
+        backup restore verify-backup slo-report dr-drill-a \
+        generate-cert
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -233,3 +235,42 @@ trivy-scan: images-build  ## P18: 對 backend + frontend image 跑 Trivy HIGH+CR
 	  aquasec/trivy:latest image \
 	    --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
 	    tradingagents-frontend:latest
+
+# ── Phase 19: Prod 部署 + 備份/還原/DR ─────────────
+
+generate-cert:  ## P19: 產生 self-signed cert（dev/staging 用）
+	bash scripts/generate_self_signed_cert.sh
+
+prod-up:  ## P19: 啟動 prod stack（compose -f docker-compose.prod.yml up -d）
+	docker compose -f docker-compose.prod.yml up -d
+	@echo "等待 healthcheck（60s）..."
+	@sleep 5 && docker compose -f docker-compose.prod.yml ps
+
+prod-down:  ## P19: 停止 prod stack（保留 volume）
+	docker compose -f docker-compose.prod.yml down
+
+prod-logs:  ## P19: tail prod logs
+	docker compose -f docker-compose.prod.yml logs -f
+
+prod-ps:  ## P19: 看 prod 服務狀態
+	docker compose -f docker-compose.prod.yml ps
+
+prod-restart:  ## P19: 重啟 prod stack
+	docker compose -f docker-compose.prod.yml restart
+
+backup:  ## P19: 跑備份（PG + Qdrant → GPG）
+	bash scripts/backup.sh
+
+restore:  ## P19: 還原備份 — make restore FILE=docker/backups/full_xxx.tar.gz.gpg
+	@if [ -z "$(FILE)" ]; then echo "用法：make restore FILE=docker/backups/full_xxx.tar.gz.gpg"; exit 1; fi
+	bash scripts/restore.sh $(FILE)
+
+verify-backup:  ## P19: 驗證備份可還原 — make verify-backup FILE=...
+	@if [ -z "$(FILE)" ]; then echo "用法：make verify-backup FILE=docker/backups/full_xxx.tar.gz.gpg"; exit 1; fi
+	bash scripts/verify_backup.sh $(FILE)
+
+slo-report:  ## P19: 跑 SLO 報表（輸出到 docs/slo_reports/YYYY-MM-DD.json）
+	cd backend && uv run python ../scripts/slo_report.py
+
+dr-drill-a:  ## P19: DR 演練 A（DB 損毀）— 會清空 DB volume！
+	bash scripts/dr_drill_a.sh

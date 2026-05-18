@@ -78,3 +78,11 @@ celery.log
 
 # ── Claude Code worktrees（執行時臨時建立） ──────────
 .claude/worktrees/
+
+# ── Phase 19: runtime 報表（每日跑出來，不進 git） ──────
+docs/slo_reports/*.json
+docs/dr_drills/*.md
+docs/dr_drills/*.log
+# 但保留 .gitkeep 讓目錄存在
+!docs/slo_reports/.gitkeep
+!docs/dr_drills/.gitkeep
