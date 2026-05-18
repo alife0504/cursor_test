@@ -1,0 +1,60 @@
+# TradingAgents-TW Pre-commit hooks (v0.3.0 - Phase 1)
+# 使用：cd backend && uv run pre-commit install
+# 後續 Phase 會擴充（如 prettier 啟用、bandit 加 stage 等）
+
+repos:
+  # ── 基礎清理 ──
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '^(legacy/|.*\.lock$|PLAN\.v6\.0\.backup\.md$)'
+      - id: end-of-file-fixer
+        exclude: '^(legacy/|.*\.lock$|PLAN\.v6\.0\.backup\.md$)'
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]   # 2 MB（PLAN.md 約 0.5 MB，OK）
+      - id: detect-private-key
+
+  # ── Python: ruff（lint + format） ──
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  # ── Secret 偵測 ──
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '^(legacy/|PLAN\.v6\.0\.backup\.md$|.*\.lock$|backend/uv\.lock$)'
+
+  # ── 前端 prettier（P15 啟用）──
+  # 暫時註解，P15 frontend 設定完成後啟用
+  # - repo: https://github.com/pre-commit/mirrors-prettier
+  #   rev: v3.1.0
+  #   hooks:
+  #     - id: prettier
+  #       files: ^frontend/
+
+# 全域排除：legacy/、build artefacts、lockfile
+exclude: |
+  (?x)^(
+    legacy/.*|
+    .*\.egg-info/.*|
+    \.venv/.*|
+    venv/.*|
+    node_modules/.*|
+    \.next/.*|
+    PLAN\.v6\.0\.backup\.md|
+    PLAN\.md
+  )$

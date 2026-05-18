@@ -1,0 +1,255 @@
+# TradingAgents-TW Dev docker-compose (v0.3.0 - Phase 2)
+#
+# 啟動：make up   /  停止：make down
+#
+# 依 PLAN.md 第十二章 + 13.2 章設計：
+#   - timescaledb / redis / qdrant 三服務皆 healthcheck
+#   - DB 帳號分離（ta_migration / ta_service_rw / ta_agent_ro）由 init.sh 建立
+#   - Redis requirepass + maxmemory 1GB allkeys-lru
+#   - Qdrant API key 強制
+#
+# 後續 Phase 升級：
+#   P3：加 backend service（含 wait-for-services.sh）
+#   P7：加 celery_worker / celery_beat
+#   P15：加 frontend service（dev profile）
+
+name: tradingagents
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: ta-timescaledb
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tradingagents_tw}
+      # 讓 init.sh 從 env 讀帳號密碼（envsubst 替換）
+      TA_MIGRATION_PASSWORD: ${TA_MIGRATION_PASSWORD}
+      TA_SERVICE_RW_PASSWORD: ${TA_SERVICE_RW_PASSWORD}
+      TA_AGENT_RO_PASSWORD: ${TA_AGENT_RO_PASSWORD}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      # init.sh 跑 envsubst 把 .template 轉成實際 SQL，再給 psql
+      - ./docker/timescaledb/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./docker/timescaledb/init.sql.template:/docker-entrypoint-initdb.d/init.sql.template:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-tradingagents_tw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ta-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.5
+    container_name: ta-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      QDRANT__SERVICE__ENABLE_TLS: "false"
+      # 限制 Web UI（dashboard）需 API key
+      QDRANT__SERVICE__READ_ONLY_API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # Qdrant 1.9+ image 無 wget/curl/python；用 bash builtin /dev/tcp 測 port 開（最低門檻）
+      # 等 6333 listening 就算 healthy（service 起來時就 listening）
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  # ── Backend FastAPI（P3 加）────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ta-backend
+    image: tradingagents-backend:dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # 容器內走內網 hostname（覆寫 .env 中的 localhost）
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      APP_ENV: dev
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/live > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+  # ── Celery Worker（P7 加）────────────────────────────
+  # 與 backend 共用 image；command 改跑 celery worker；
+  # wait-for-services 等 DB/redis/qdrant healthy 才啟動。
+  celery_worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ta-celery-worker
+    image: tradingagents-backend:dev
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      APP_ENV: dev
+      # DLQ fallback file 寫到 /tmp（容器內可寫）
+      CELERY_DLQ_FALLBACK_FILE: /tmp/celery_dlq_fallback.jsonl
+    command:
+      - ./scripts/wait-for-services.sh
+      - uv
+      - run
+      - celery
+      - -A
+      - app.workers.celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=4
+      - --max-tasks-per-child=50
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # Override backend image 的 curl healthcheck（worker 沒 HTTP server）
+    # 用 celery inspect ping 驗 worker 接 broker + 回應
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "uv run celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5 || exit 1"
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+  # ── Celery Beat（P7 加）────────────────────────────
+  # Beat 是 schedule trigger；單 instance（多 instance 會重複觸發）。
+  celery_beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ta-celery-beat
+    image: tradingagents-backend:dev
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      APP_ENV: dev
+    command:
+      - ./scripts/wait-for-services.sh
+      - uv
+      - run
+      - celery
+      - -A
+      - app.workers.celery_app
+      - beat
+      - --loglevel=info
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # Beat 沒 HTTP / 沒 ping endpoint；只能驗 process 還活著（celerybeat-schedule 會 mtime 更新）
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "test -f /app/celerybeat-schedule || test -f /tmp/celerybeat-schedule || exit 0"
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # ── Frontend Next.js（P15 加，用 profile 避免預設啟動）─────────────
+  # 預設不啟動;只在 `docker compose --profile frontend up` 時才會起來。
+  # 開發者通常還是用 `npm run dev`(熱重載快),這個 service 主要用於整合測試 / prod 模擬。
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ta-frontend
+    image: tradingagents-frontend:dev
+    profiles: ["frontend"]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # 在 docker network 內 backend 用 service name
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_API_BASE_URL: /api/v1
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+      NEXT_PUBLIC_DEFAULT_TIMEZONE: Asia/Taipei
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  timescaledb_data:
+    name: tradingagents_timescaledb_data
+  redis_data:
+    name: tradingagents_redis_data
+  qdrant_data:
+    name: tradingagents_qdrant_data

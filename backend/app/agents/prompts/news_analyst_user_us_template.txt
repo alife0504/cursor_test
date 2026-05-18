@@ -1,0 +1,21 @@
+## 個股基本資訊（美股）
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+
+## 近 7 日相關新聞（最多 {news_count} 篇；資料源：Finnhub / Alpha Vantage / yfinance）
+{news_table}
+
+## 重大公告（近 30 日，主要為 SEC 8-K / 10-Q / 10-K 等）
+{announcements_table}
+
+## 美股新聞解讀重點
+- earnings beat/miss、guidance raise/cut 對股價的影響通常即時，且常出現 after-hours 缺口。
+- 法人評級調整（upgrade / downgrade by 主要投行）對短線情緒拉動明顯。
+- 美股新聞較常見 short seller report、SEC investigation、product recall 等個股事件，請對極端訊息評估其可信度（看 source）。
+- 宏觀層面：Fed 利率決議、CPI、NFP 報告會對「整體美股」影響，個股新聞應與宏觀環境合併判讀。
+
+## 你的任務
+請依上述資料，產出新聞情緒分析（用美股市場慣用框架）。
+**最後輸出**：繁體中文綜述 + ```json``` 區塊（符合 NewsAnalysisResult schema）。
+supporting_articles 僅可從上述新聞清單中挑選。

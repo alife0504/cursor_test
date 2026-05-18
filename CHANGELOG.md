@@ -1,0 +1,376 @@
+# Changelog
+
+All notable changes to TradingAgents are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Breaking changes within the 0.x line are called out explicitly.
+
+## [1.0.0] — 2026-05-18 — TradingAgents-TW Release
+
+> **Release Ready** — 21 個 Phase（P0-P20）全部完成；716 後端 tests + 183 前端 unit + 57 E2E 全綠。
+>
+> 詳細：[docs/PROJECT_FINAL_REPORT.md](docs/PROJECT_FINAL_REPORT.md)
+
+### Added (Phase 20)
+
+- **scripts/health_checks/all.sh** — 一鍵跑 19 phase health checks + backend pytest + frontend test + bandit + detect-secrets
+- **scripts/health_checks/phase_20.sh** — Phase 20 自家 14 項健康檢查
+- **scripts/check_obsidian_installed.sh** — 跨平台檢查 Obsidian 安裝（Windows / Linux / macOS）
+- **backend/tests/integration/test_final_smoke.py** — 5 個 v1.0 最終 smoke test（login / dashboard / analysis / audit chain / slo report）
+- **docs/PROJECT_FINAL_REPORT.md** — v1.0 結案報告（最重要交付物）
+- **docs/connection-guide.md** — 第一次裝機完整 10 步驟指南
+- **docs/user-guide.md** — 18 頁前端操作 + 15 條 FAQ
+- **docs/runbooks/obsidian_setup.md** — Obsidian 個人筆記整合手冊（v1.0 手動 / v1.1 自動）
+- **docs/phase_reports/PHASE_20.md** — Phase 20 完成報告
+
+### Changed (Phase 20)
+
+- **README.md** — 全面升級為 v1.0 完整版（v0.3.0 → v1.0）
+- **docs/phase_progress.md** — P20 ✅ 標記，21 個 Phase 全部完成
+- **backend/tests/integration/conftest.py** — 加 `_reset_redis_pools_per_test` autouse fixture，修正用 `asyncio.run()` 跑 LangGraph 的測試把 redis pool 綁到臨時 loop，導致下個 test ERROR/FAIL 的跨 event-loop 污染
+- **backend/tests/security/conftest.py** — 補齊 `login_helper / flush_rate_limit / seed_*` 等 fixture import，修正 OWASP / secret handling tests 的 "fixture not found" ERROR
+
+### Fixed (Phase 20)
+
+- backend full pytest 從 `1 failed, 715 passed, 10 errors` → **`716 passed, 3 skipped, 0 fail, 0 error`**（修正以上 conftest 兩個 bug）
+- ruff check 在 `app/ tests/` 全綠（移除 unused noqa / unused import）
+
+### Security
+
+- 已沿用 Phase 18 的 OWASP / bandit HIGH=0 / detect-secrets baseline / Trivy 規則
+- v1.0 接受的風險清單見 [SECURITY.md](SECURITY.md)
+
+### Release artifacts
+
+- Git tag: `v1.0.0`
+- 累積測試：**716 後端 + 183 前端 unit + 57 E2E**（遠超 P20 基準 545+）
+- 累積 Phase tag：`phase-00-complete` ~ `phase-20-complete` + `v1.0.0`
+- 21 個 Phase 報告：`docs/phase_reports/PHASE_00.md` ~ `PHASE_20.md`
+- 19 個 health check + `all.sh` + `phase_20.sh`：`scripts/health_checks/`
+
+---
+
+## [Unreleased] — TradingAgents-TW v1.0 development（已併入 [1.0.0]，保留歷史紀錄）
+
+### Added (Phase 17)
+
+- **前端進階 10 頁(接後端):**
+  - `/market/overview`、`/market/institutional`(TW 三大法人)
+  - `/screener/filter`(PE / Yield / EPS / RSI / 市值多條件 + localStorage 儲存)
+  - `/news/sentiment`(個股 5 級情緒分佈)、`/news/announcements`
+  - `/portfolio/positions`(從 APPROVED orders 聚合,client-side)、`/portfolio/history`
+  - `/notifications`(LINE Notify token / Telegram chat_id / 事件訂閱 / 測試發送 / 通知 log)
+  - `/admin/system`(API/延遲/磁碟/佇列卡片 + 24h mock 走勢)
+  - `/admin/pipeline`(Celery DLQ 列表 + resolve/requeue 含 ConfirmDialog 顯示原始 traceback)
+- **前端進階 5 頁(Mock,v1.1 完整實作):**
+  - `/market/calendar`(月曆 view + 12 mock events / 月)
+  - `/screener/compare`(最多 5 支並排比較,內建 mock 字典)
+  - `/statistics/accuracy`(confidence ≥ 0.6 粗估命中率;v1.1 等後端 actual_return_30d)
+  - `/statistics/models`(LLM 模型用量 group by;client-side 從 /analysis 聚合)
+  - `/statistics/backtest`(策略/期間 + deterministic mock equity curve & drawdown)
+- **6 個 React Query hooks**:useScreener / useNews(三大法人+stock news+stock announcements+calendar)/ usePortfolio(computePositions + useTradeHistory)/ useNotifications / useSystem(metrics+info+DLQ)/ useStatistics
+- **共用元件**:`<BarChart />`、`<PieChart />`(內含 inner client component + ssr:false dynamic 包裝,避開 recharts 4.x defaultProps 與 Next.js dynamic LoaderComponent 型別衝突);`<MockBanner />`(含必含 "Mock"+"v1.1" 字串,供 health_check grep)
+- **Sidebar 升級**:全 18 頁實作完畢,移除 `stub` badge;5 個 mock 頁加 `mock` badge(hover 提示 v1.1 將完整實作)
+- **48 個新 unit test**(累積 135 → 183);3 個新 E2E spec(screener-filter / notifications-settings / admin-system)
+- **`scripts/health_checks/phase_17.sh`** 13 項自動化檢查
+- **docs/phase_reports/PHASE_17.md** + **docs/runbooks/frontend_pages.md**(每頁資料來源 + mock 替換指引)
+
+### v1.1 Todo(由 P17 留下)
+
+- 後端 `actual_return_30d` endpoint → 真實準確率取代 confidence 粗估
+- 後端 `portfolio_positions` 直接 endpoint → 取代 client-side 聚合(訂單量大時)
+- 後端 BacktestService → 取代 `/statistics/backtest` 的 mock
+- `/market/calendar`、`/screener/compare`、`/news/{sentiment,announcements}` 全市場聚合 endpoint
+- `/admin/pipeline` 手動觸發 task button → 後端 admin-only POST endpoint
+
+### Added (v0.3.0 - Phase 1 完成)
+
+- **v7.0 完整實施計劃**：`PLAN.md` 重構為 21 個 Phase（P0-P20）詳細 prompt
+- **Phase 1：原版遷移 + 新骨架 + 工程規範**
+  - 原版 v0.2.4 套件碼遷移至 `legacy/`，確保新版完全隔離
+  - 新後端骨架：`backend/app/{api,core,repos,services,domain,models,schemas,agents,data_sources,llm,workers,notifications,exports}/`
+  - 前端骨架：`frontend/src/{app,components,lib,store,hooks,i18n}/`
+  - 資料管線骨架：`data-pipeline/{schemas,scripts}/`
+  - Docker 骨架：`docker/{timescaledb,nginx/certs,backups,playwright}/`
+- **工程規範文件**：`docs/engineering-standards.md`、`docs/setup.md`、`docs/contributing.md`
+- **CI/CD 雛形**：`.github/workflows/ci.yml`（lint + secret scan + pre-commit）+ `security.yml`（bandit + gitleaks + CodeQL）
+- **Pre-commit hooks**：ruff、detect-secrets、trailing-whitespace、check-yaml/json/toml
+- **`.env.example`**：列齊 v1.0 所有欄位（依 Phase 補值時程標註）
+- **`backend/pyproject.toml` + `uv.lock`**：FastAPI / Pydantic v2 / SQLAlchemy 2.0 async / structlog 等依賴
+- **5 個 unit test 雛形**：`test_skeleton.py` 等（驗證骨架 + 模組可 import）
+- **Phase 健康檢查腳本**：`scripts/health_checks/phase_01.sh`
+- **Phase 進度追蹤**：`docs/phase_progress.md` + `docs/phase_reports/PHASE_01.md`
+
+### Changed
+
+- **`README.md`** 改寫為新版（原版備份至 `legacy/README_original.md`）
+- **`.gitignore`** 升級（涵蓋 .venv / node_modules / .env / docker/backups / IDE 等）
+- **`.vscode/settings.json`** 排除 `legacy/` 等目錄避免搜尋雜訊
+
+### Migration Notes
+
+- `git checkout pre-tw-edition-backup` 可回到改造前狀態
+- 原版套件碼在 `legacy/`，**不可直接 import**（架構已大改）
+- Phase 13 LangGraph Agent 系統時可參考 `legacy/tradingagents/agents/` 的結構
+
+---
+
+## [0.2.4] — 2026-04-25
+
+### Added
+
+- **Structured-output decision agents.** Research Manager, Trader, and Portfolio
+  Manager now use `llm.with_structured_output(Schema)` on their primary call
+  and return typed Pydantic instances. Each provider's native structured-output
+  mode is used (`json_schema` for OpenAI / xAI, `response_schema` for Gemini,
+  tool-use for Anthropic, function-calling for OpenAI-compatible providers).
+  Render helpers preserve the existing markdown shape so memory log, CLI
+  display, and saved reports keep working unchanged. (#434)
+- **LangGraph checkpoint resume** — opt-in via `--checkpoint`. State is saved
+  after each node so crashed or interrupted runs resume from the last
+  successful step. Per-ticker SQLite databases under
+  `~/.tradingagents/cache/checkpoints/`. `--clear-checkpoints` resets them. (#594)
+- **Persistent decision log** replacing the per-agent BM25 memory. Decisions
+  are stored automatically at the end of `propagate()`; the next same-ticker
+  run resolves prior pending entries with realised return, alpha vs SPY, and
+  a one-paragraph reflection. Override path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
+  Optional `memory_log_max_entries` config caps resolved entries; pending
+  entries are never pruned. (#578, #563, #564, #579)
+- **DeepSeek, Qwen (Alibaba DashScope), GLM (Zhipu), and Azure OpenAI**
+  providers, plus dynamic OpenRouter model selection.
+- **Docker support** — multi-stage build with separate dev and runtime images.
+- **`scripts/smoke_structured_output.py`** — diagnostic that exercises the
+  three structured-output agents against any provider so contributors can
+  verify their setup with one command.
+- **5-tier rating scale** (Buy / Overweight / Hold / Underweight / Sell) used
+  consistently by Research Manager, Portfolio Manager, signal processor, and
+  the memory log; Trader keeps 3-tier (Buy / Hold / Sell) since transaction
+  direction is naturally ternary.
+- **Pytest fixtures** — lazy LLM client imports plus placeholder API keys so
+  the test suite runs cleanly without credentials. (#588)
+
+### Changed
+
+- **`backend_url` default is now `None`** rather than the OpenAI URL. Each
+  provider client falls back to its native default. The previous default
+  leaked the OpenAI URL into non-OpenAI clients (e.g. Gemini), producing
+  malformed request URLs for Python users who switched providers without
+  overriding `backend_url`. The CLI flow is unaffected.
+- All file I/O passes explicit `encoding="utf-8"` so Windows users no longer
+  hit `UnicodeEncodeError` with the cp1252 default. (#543, #550, #576)
+- Cache and log directories moved to `~/.tradingagents/` to resolve Docker
+  permission issues. (#519)
+- `SignalProcessor` reads the rating from the Portfolio Manager's rendered
+  markdown via a deterministic heuristic — no extra LLM call.
+- OpenAI structured-output calls default to `method="function_calling"` to
+  avoid noisy `PydanticSerializationUnexpectedValue` warnings emitted by
+  langchain-openai's Responses-API parse path. Same typed result, no warnings.
+
+### Fixed
+
+- Empty memory no longer triggers fabricated past-lessons in agent prompts;
+  the memory-log redesign makes this structurally impossible since only the
+  Portfolio Manager consults memory and only when entries exist. (#572)
+- Tool-call logging processes every chunk message, not just the last one, and
+  memory score normalization handles empty score arrays. (#534, #531)
+
+### Removed
+
+- `FinancialSituationMemory` (the per-agent BM25 system) and the dead
+  `reflect_and_remember()` plumbing; subsumed by the persistent decision log.
+- Hardcoded Google endpoint that caused 404 when `langchain-google-genai`
+  changed its API path. (#493, #496)
+
+### Contributors
+
+Thanks to everyone who shaped this release through code, design, and reports:
+
+- [@claytonbrown](https://github.com/claytonbrown) — checkpoint resume (#594), test fixtures (#588), design feedback on cost tracking (#582) and structured validation (#583)
+- [@Bcardo](https://github.com/Bcardo) — memory-log redesign (#579), empty-memory hallucination report (#572), encoding fix proposal (#570)
+- [@voidborne-d](https://github.com/voidborne-d) — memory persistence design (#564), portfolio manager state fix (#503)
+- [@mannubaveja007](https://github.com/mannubaveja007) — structured-output feature request (#434)
+- [@kelder66](https://github.com/kelder66) — RAM-only memory issue (#563)
+- [@Gujiassh](https://github.com/Gujiassh) — tool-call logging fix (#534), test stub PR (#533)
+- [@iuyup](https://github.com/iuyup) — memory score normalization fix (#531)
+- [@kaihg](https://github.com/kaihg) — Google base_url fix (#496)
+- [@32ryh98yfe](https://github.com/32ryh98yfe) — Gemini 404 report (#493)
+- [@uppb](https://github.com/uppb) — OpenRouter dynamic model selection (#482)
+- [@guoz14](https://github.com/guoz14) — OpenRouter limited-model report (#337)
+- [@samchenku](https://github.com/samchenku) — indicator name normalization (#490)
+- [@JasonOA888](https://github.com/JasonOA888) — y_finance pandas import fix (#488)
+- [@tiffanychum](https://github.com/tiffanychum) — stale import cleanup (#499)
+- [@zaizou](https://github.com/zaizou) — Docker permission issue (#519)
+- [@Stosman123](https://github.com/Stosman123), [@mauropuga](https://github.com/mauropuga), [@hotwind2015](https://github.com/hotwind2015) — Windows encoding bug reports (#543, #550, #576)
+- [@nnishad](https://github.com/nnishad), [@atharvajoshi01](https://github.com/atharvajoshi01) — encoding fix proposals (#568, #549)
+
+## [0.2.3] — 2026-03-29
+
+### Added
+
+- **Multi-language output** for analyst reports and final decisions, with a
+  CLI selector. Internal agent debate stays in English for reasoning quality. (#472)
+- **GPT-5.4 family models** in the default catalog, with deep/quick model split.
+- **Unified model catalog** as a single source of truth for CLI options and
+  provider validation.
+
+### Changed
+
+- `base_url` is forwarded to Google and Anthropic clients so corporate proxies
+  work consistently across providers. (#427)
+- Standardised the Google `api_key` parameter to the unified `api_key` form.
+
+### Fixed
+
+- Backtesting fetchers no longer leak look-ahead data when `curr_date` is in
+  the middle of a fetched window. (#475)
+- Invalid indicator names from the LLM are caught at the tool boundary instead
+  of crashing the run. (#429)
+- yfinance news fetchers respect the same exponential-backoff retry as price
+  fetchers. (#445)
+
+### Contributors
+
+- [@ahmedk20](https://github.com/ahmedk20) — multi-language output (#472)
+- [@CadeYu](https://github.com/CadeYu) — model catalog typing (#464)
+- [@javierdejesusda](https://github.com/javierdejesusda) — unified Google API key parameter (#453)
+- [@voidborne-d](https://github.com/voidborne-d) — yfinance news retry (#445)
+- [@kostakost2](https://github.com/kostakost2) — look-ahead bias report (#475)
+- [@lu-zhengda](https://github.com/lu-zhengda) — proxy/base_url support request (#427)
+- [@VamsiKrishna2021](https://github.com/VamsiKrishna2021) — invalid indicator crash report (#429)
+
+## [0.2.2] — 2026-03-22
+
+### Added
+
+- **Five-tier rating scale** (Buy / Overweight / Hold / Underweight / Sell)
+  introduced for the Portfolio Manager.
+- **Anthropic effort level** support for Claude models.
+- **OpenAI Responses API** path for native OpenAI models.
+
+### Changed
+
+- `risk_manager` renamed to `portfolio_manager` to match the role description
+  shown in the CLI display.
+- Exchange-qualified tickers (e.g. `7203.T`, `BRK.B`) preserved across all
+  agent prompts and tool calls.
+- Process-level UTF-8 default attempted for cross-platform consistency
+  (note: this approach did not actually take effect; replaced in v0.2.4 with
+  explicit per-call `encoding="utf-8"` arguments).
+
+### Fixed
+
+- yfinance rate-limit errors are retried with exponential backoff. (#426)
+- HTTP client SSL customisation is supported for environments that need
+  custom certificate bundles. (#379)
+- Report-section writes handle list-of-string content gracefully.
+
+### Contributors
+
+- [@CadeYu](https://github.com/CadeYu) — exchange-qualified ticker preservation (#413)
+- [@yang1002378395-cmyk](https://github.com/yang1002378395-cmyk) — HTTP client SSL customisation (#379)
+
+## [0.2.1] — 2026-03-15
+
+### Security
+
+- Patched `langchain-core` vulnerability (LangGrinch). (#335)
+- Removed `chainlit` dependency affected by CVE-2026-22218.
+
+### Added
+
+- `pyproject.toml` build-system configuration; the project now installs via
+  modern packaging tooling.
+
+### Removed
+
+- `setup.py` — dependencies consolidated to `pyproject.toml`.
+
+### Fixed
+
+- Risk manager reads the correct fundamental report source. (#341)
+- All `open()` calls receive an explicit UTF-8 encoding (initial pass).
+- `get_indicators` tool handles comma-separated indicator names from the LLM. (#368)
+- `Propagation` initialises every debate-state field so risk debaters never
+  see missing keys.
+- Stock data parsing tolerates malformed CSVs and NaN values.
+- Conditional debate logic respects the configured round count. (#361)
+
+### Contributors
+
+- [@RinZ27](https://github.com/RinZ27) — `langchain-core` security patch (#335)
+- [@Ljx-007](https://github.com/Ljx-007) — risk manager fundamental-report fix (#341)
+- [@makk9](https://github.com/makk9) — debate-rounds config issue (#361)
+
+## [0.2.0] — 2026-02-04
+
+This is the largest release since the initial public version. The framework
+moved from single-provider to a multi-provider architecture and grew several
+production-ready surfaces.
+
+### Added
+
+- **Multi-provider LLM support** (OpenAI, Google, Anthropic, xAI, OpenRouter,
+  Ollama) via a factory pattern, with provider-specific thinking configurations.
+- **Alpha Vantage** integration as a configurable primary data provider, with
+  yfinance as a community-stability fallback.
+- **Footer statistics** in the CLI: real-time tracking of LLM calls, tool
+  calls, and token usage via LangChain callbacks.
+- **Post-analysis report saving** — the framework writes per-section markdown
+  files (analyst reports, debate transcripts, final decision) when a run
+  completes.
+- **Announcements panel** — fetches updates from `api.tauric.ai/v1/announcements`
+  for the CLI welcome screen.
+- **Tool fallbacks** so a single vendor outage does not stop the pipeline.
+
+### Changed
+
+- Risky / Safe risk debaters renamed to **Aggressive / Conservative** for
+  consistency with the displayed agent labels.
+- Default data vendor switched to balance reliability and quota across
+  community deployments.
+- Ollama and OpenRouter model lists updated; default endpoints clarified.
+
+### Fixed
+
+- Analyst status tracking and message deduplication in the live display.
+- Infinite-loop guard in the agent loop; reflection and logging hardened.
+- Various data-vendor implementation bugs and tool-signature mismatches.
+
+### Contributors
+
+This release is the first with substantial outside contributions; many community
+PRs from late 2025 also landed here.
+
+- [@luohy15](https://github.com/luohy15) — Alpha Vantage data-vendor integration (#235)
+- [@EdwardoSunny](https://github.com/EdwardoSunny) — yfinance fetching optimisations (#245)
+- [@Mirza-Samad-Ahmed-Baig](https://github.com/Mirza-Samad-Ahmed-Baig) — infinite-loop guard, reflection, and logging fixes (#89)
+- [@ZeroAct](https://github.com/ZeroAct) — saved results path support (#29)
+- [@Zhongyi-Lu](https://github.com/Zhongyi-Lu) — `.env` gitignore (#49)
+- [@csoboy](https://github.com/csoboy) — local Ollama setup (#53)
+- [@chauhang](https://github.com/chauhang) — initial Docker support attempt (#47, later reverted; the merged Docker support shipped in v0.2.4)
+
+## [0.1.1] — 2025-06-07
+
+### Removed
+
+- Static site assets that had been bundled with v0.1.0; the public site now
+  lives separately.
+
+## [0.1.0] — 2025-06-05
+
+### Added
+
+- **Initial public release** of the TradingAgents multi-agent trading
+  framework: market / sentiment / news / fundamentals analysts; bull and bear
+  researchers; trader; aggressive, conservative, and neutral risk debaters;
+  portfolio manager. LangGraph orchestration, yfinance data, per-agent
+  BM25 memory, single-provider OpenAI integration, interactive CLI.
+
+[0.2.4]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/TauricResearch/TradingAgents/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/TauricResearch/TradingAgents/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/TauricResearch/TradingAgents/releases/tag/v0.1.0

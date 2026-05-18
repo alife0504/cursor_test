@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(mkdir -p \"C:/Projects/TradingAgents-TW\")",
+      "Read(//c/Projects/**)",
+      "Bash(docker --version)",
+      "Bash(npm --version)",
+      "Bash(uv --version)",
+      "Bash(pip show *)",
+      "Bash(winget list *)",
+      "Bash(uv python *)",
+      "Bash(git checkout *)",
+      "Bash(git mv *)",
+      "Bash(rm -rf build/ tradingagents.egg-info/)",
+      "Bash(ls -d venv)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(uv lock *)",
+      "Bash(uv sync *)",
+      "Bash(uv run *)",
+      "Bash(python -c \"import json; data=json.load\\(open\\('.secrets.baseline'\\)\\); print\\(len\\(data.get\\('results',{}\\)\\)\\)\")",
+      "Bash(chmod +x \"C:/Projects/TradingAgents/scripts/health_checks/phase_01.sh\")",
+      "Bash(bash \"C:/Projects/TradingAgents/scripts/health_checks/phase_01.sh\")",
+      "Bash(bash scripts/health_checks/phase_01.sh)"
+    ]
+  }
+}
