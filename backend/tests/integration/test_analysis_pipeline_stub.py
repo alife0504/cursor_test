@@ -12,6 +12,7 @@ from datetime import datetime
 
 import pytest
 
+from app.agents.analyst_outputs import build_analyst_outputs
 from app.agents.graph_builder import build_graph, build_initial_state
 
 pytestmark = pytest.mark.integration
@@ -42,6 +43,10 @@ def test_tw_pipeline_includes_all_four_analysts() -> None:
     # placeholder_manager 應產出 report_md（且含 [stub] 標籤）
     assert final.get("report_md")
     assert "[stub]" in final["report_md"]
+    # v1.0.2：final analyses 能被轉成前端 analyst_outputs（stub → report_md fallback）
+    outputs = build_analyst_outputs(analyses)
+    assert set(outputs.keys()) == set(analyses.keys())
+    assert "[stub]" in outputs["market"]["report_md"]
 
 
 def test_us_pipeline_excludes_sentiment() -> None:

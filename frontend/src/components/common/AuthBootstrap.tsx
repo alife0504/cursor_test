@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { api, type ApiEnvelope } from "@/lib/api";
+import { api, refreshAccessToken, type ApiEnvelope } from "@/lib/api";
 import { useAuthStore, type AuthUser } from "@/store/auth";
 
 // (app) layout 進入時:
@@ -12,7 +12,6 @@ import { useAuthStore, type AuthUser } from "@/store/auth";
 export function AuthBootstrap() {
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
-  const setAccessToken = useAuthStore((s) => s.setAccessToken);
   const setUser = useAuthStore((s) => s.setUser);
 
   useEffect(() => {
@@ -21,12 +20,8 @@ export function AuthBootstrap() {
     (async () => {
       try {
         if (!accessToken) {
-          // 沒 token → 用 refresh cookie 換一個
-          const r = await api.post<ApiEnvelope<{ access_token: string }>>(
-            "/auth/refresh",
-          );
-          const token = r.data?.data?.access_token;
-          if (token && !cancelled) setAccessToken(token);
+          // 沒 token → 用 refresh cookie 換一個（走共用 mutex，與 interceptor 不互相競態）
+          await refreshAccessToken();
         }
         if (!user) {
           const r = await api.get<ApiEnvelope<AuthUser>>("/auth/me");

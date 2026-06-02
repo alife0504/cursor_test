@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [1.0.2] — 2026-06-03 — 功能接通 + 認證穩定性 + 登入頁精修
+
+> 以 Opus 4.8 視角延續 v1.0.1：聚焦「把宣稱完成但實際失效的功能真正接通」、修補一個會導致閒置後被強制登出的認證隱憂，並精修登入體驗。
+> 驗證：後端新增 11 測試（單元 10 + 整合 1）全綠、`pytest --collect-only` 731 無 import 錯誤；前端 typecheck 0 errors、vitest 209 passed、next build 成功。
+
+### Fixed — 核心功能缺口（v1.0.1 宣稱完成但實際失效）
+- **`analyst_outputs` 從未寫入 DB**：分析詳情頁的 AnalystResultCard 永遠 fallback「結構化資料尚未取得」。
+  - 新增 [analyst_outputs.py](backend/app/agents/analyst_outputs.py)：把 LangGraph `final_state["analyses"]`（各 analyst 結構化 JSON）轉成前端 `AnalystOutput`（score / signal / key_points / report_md / metrics），含 stub 純文字 fallback。
+  - `run_analysis._update_completed` 寫入 `analyst_outputs`，並在 `analyst_types` 為空（auto-select）時用實際跑過的 analyst 回填。
+- **大盤指數 KPI 永遠是「—」**：KpiRow 讀 `market.data.index`（物件）但後端只回 `indices`（名稱清單）且無報價。
+  - [KpiRow.tsx](frontend/src/components/dashboard/KpiRow.tsx)：後端無報價時改從指數 OHLCV 序列推導 close + 當日漲跌%；無資料時顯示誠實的「指數資料待接入」而非誤導性副標。
+
+### Fixed — 認證穩定性（隱憂，會導致被強制登出）
+- **Refresh 風暴 → 強制全部登出**：多查詢頁面（如儀表板）在 access token 過期後會同時噴多個 401。原本每個 401 各自呼叫 `/auth/refresh`，但後端 refresh token 是單次輪替，並發 refresh 會被「重用偵測」判為攻擊 → **強制撤銷所有 session**。使用者閒置約 15 分鐘後重整就可能整個被登出。
+  - [api.ts](frontend/src/lib/api.ts)：新增共用 in-flight refresh promise（mutex），並發 401 共用同一次 refresh。
+  - [AuthBootstrap.tsx](frontend/src/components/common/AuthBootstrap.tsx)：改走同一個共用 `refreshAccessToken()`，與 interceptor 不再互相競態。
+
+### Added — Dev/Demo 工具
+- [seed_index_ohlcv.py](data-pipeline/scripts/seed_index_ohlcv.py) + `make seed-index`：寫入 TAIEX / TPEX 指數 OHLCV（`source=dev-seed`、強制非 prod），讓本機儀表板立即有資料、sparkline 不再空白。正式環境真實大盤回填仍列 v1.1。
+
+### Changed — 登入頁精修
+- [(auth)/layout.tsx](frontend/src/app/(auth)/layout.tsx)：左側品牌 hero 改為垂直置中焦點、加入 eyebrow 標籤、放大標題、補足 4 個賣點（含資安賣點呼應 Secure Edition）、賣點改用不同圖示，修正原本「上方大片留白、頭重腳輕」的版面失衡。
+
+### v1.1 待辦（本次審視再確認）
+- 大盤 TAIEX / TPEX 真實行情回填（TWSE / TPEX 指數歷史）取代 dev-seed。
+- `analyst_outputs` 已可寫入；待真實 LLM 分析跑過後於詳情頁驗證實際呈現。
+- 已登入頁面（dashboard / 分析詳情 / 各表格頁）的逐頁視覺精修，待乾淨後端環境完整走訪後進行。
+
+---
+
 ## [1.0.1] — 2026-06-02 — UX & Design System Upgrade
 
 > 不破壞 v1.0 範圍下，依 Opus 4.8 全面審視 v1.0、聚焦「日後操作更順手、更專業、更美觀」的改善版本。

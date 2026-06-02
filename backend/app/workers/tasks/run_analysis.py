@@ -20,6 +20,7 @@ from uuid import UUID
 from celery.utils.log import get_task_logger
 from sqlalchemy import func, select
 
+from app.agents.analyst_outputs import build_analyst_outputs
 from app.agents.graph_builder import build_graph, build_initial_state
 from app.agents.managers.orders_decision import signal_to_pending_order
 from app.agents.streaming import (
@@ -186,6 +187,7 @@ async def _async_pipeline(
             llm_provider=used_provider,
             llm_model=used_model,
             total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
+            analyses=final_state.get("analyses") or {},
         )
 
         # 5. P14：建 pending_order（signal=BUY/SELL）
@@ -339,8 +341,9 @@ def _update_completed(
     llm_provider: str | None,
     llm_model: str | None,
     total_tokens: int,
+    analyses: dict[str, Any] | None = None,
 ) -> None:
-    """寫回 completed 狀態 + signal 拆解 + 從 llm_usage 表彙總 cost。"""
+    """寫回 completed 狀態 + signal 拆解 + analyst_outputs + 從 llm_usage 表彙總 cost。"""
     with sync_rw_session() as s:
         row = s.get(AnalysisReport, UUID(analysis_id))
         if row is None:
@@ -352,6 +355,14 @@ def _update_completed(
         row.llm_provider = llm_provider or row.llm_provider
         row.llm_model = llm_model or row.llm_model
         row.total_tokens = int(total_tokens)
+
+        # v1.0.2：把各 analyst 結構化輸出寫進 analyst_outputs（前端 AnalystResultCard 用）
+        analyst_outputs = build_analyst_outputs(analyses)
+        if analyst_outputs:
+            row.analyst_outputs = analyst_outputs
+            # analyst_types 建立時若為空（auto-select），用實際跑過的 analyst 回填
+            if not row.analyst_types:
+                row.analyst_types = list(analyst_outputs.keys())
 
         # signal 拆解
         action = signal_dict.get("action")

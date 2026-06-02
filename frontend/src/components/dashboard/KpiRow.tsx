@@ -37,6 +37,33 @@ function closeSeries(
 }
 
 /**
+ * 大盤指數值來源策略：
+ *  - 後端 market.overview 目前只回 indices 名稱清單、無即時報價（見 market_service）。
+ *    若日後後端補上 index close/change_pct，優先採用。
+ *  - 否則從指數 OHLCV 序列推導：close = 最後一筆、漲跌% = 最後兩筆當日變化。
+ *    這讓 dashboard 在有指數 OHLCV（真實回填或 dev seed）時即能顯示，不再全是「—」。
+ */
+function deriveIndexValue(
+  backendClose: unknown,
+  backendChange: unknown,
+  series: number[],
+): { close: string | null; change: number | string | null } {
+  if (backendClose !== null && backendClose !== undefined && backendClose !== "") {
+    return {
+      close: String(backendClose),
+      change: (backendChange ?? null) as number | string | null,
+    };
+  }
+  if (series.length === 0) return { close: null, change: null };
+  const last = series[series.length - 1];
+  const prev = series.length >= 2 ? series[series.length - 2] : null;
+  return {
+    close: last.toLocaleString("en-US", { maximumFractionDigits: 2 }),
+    change: prev && prev !== 0 ? ((last - prev) / prev) * 100 : null,
+  };
+}
+
+/**
  * Dashboard 頂部 4-col KPI 牆：
  *   加權指數 + sparkline / 櫃買 + sparkline / LLM 配額 + bar / 待核准訂單
  */
@@ -75,22 +102,21 @@ export function KpiRow() {
   }
 
   const idxObj = (market.data?.index ?? null) as Record<string, unknown> | null;
-  const twseClose = (idxObj?.twse_close ?? idxObj?.close ?? null) as
-    | string
-    | number
-    | null;
-  const twseChange = (idxObj?.twse_change_pct ?? idxObj?.change_pct ?? null) as
-    | string
-    | number
-    | null;
-  const tpexClose = (idxObj?.tpex_close ?? null) as string | number | null;
-  const tpexChange = (idxObj?.tpex_change_pct ?? null) as
-    | string
-    | number
-    | null;
 
   const twseSpark = closeSeries(twseOhlcv.data);
   const tpexSpark = closeSeries(tpexOhlcv.data);
+
+  // 後端有報價就用，否則從指數 OHLCV 序列推導（修正 v1.0.1「永遠是 —」的接線缺口）
+  const twse = deriveIndexValue(
+    idxObj?.twse_close ?? idxObj?.close,
+    idxObj?.twse_change_pct ?? idxObj?.change_pct,
+    twseSpark,
+  );
+  const tpex = deriveIndexValue(idxObj?.tpex_close, idxObj?.tpex_change_pct, tpexSpark);
+  const twseClose = twse.close;
+  const twseChange = twse.change;
+  const tpexClose = tpex.close;
+  const tpexChange = tpex.change;
 
   const used = quota.data?.used_usd ?? "0";
   const limit = quota.data?.limit_usd ?? "0";
@@ -110,7 +136,7 @@ export function KpiRow() {
         deltaMode="raw"
         spark={twseSpark}
         icon={TrendingUp}
-        subtitle="近 14 日走勢"
+        subtitle={twseClose !== null ? "近 14 日走勢" : "指數資料待接入"}
         accent={
           twseChange !== null && Number(twseChange) > 0
             ? "bull"
@@ -128,7 +154,7 @@ export function KpiRow() {
         deltaMode="raw"
         spark={tpexSpark}
         icon={TrendingUp}
-        subtitle="近 14 日走勢"
+        subtitle={tpexClose !== null ? "近 14 日走勢" : "指數資料待接入"}
         accent={
           tpexChange !== null && Number(tpexChange) > 0
             ? "bull"

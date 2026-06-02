@@ -53,6 +53,36 @@ interface LoginEnvelope {
 // /auth/refresh / /auth/logout 也不要(避免無窮迴圈)
 const AUTH_PATHS_NO_REFRESH = ["/auth/login", "/auth/refresh", "/auth/logout"];
 
+// 共用 in-flight refresh promise(mutex)——
+// 多查詢頁面 token 過期時會同時噴 N 個 401。若每個都各自打 /auth/refresh,
+// 後端 refresh token 是「單次輪替」,只有第一個成功、其餘拿到已輪替 token → 失敗 → logout。
+// 用一個共用 promise 讓並發 401 共用同一次 refresh,徹底消除 refresh 風暴。
+let refreshPromise: Promise<string> | null = null;
+
+/**
+ * 共用的 access token 刷新（mutex）。
+ * AuthBootstrap 與 response interceptor 都應呼叫此函式，
+ * 確保同一時間只有一個 /auth/refresh 在飛，避免 refresh token 輪替競態 / 重用偵測誤判。
+ */
+export function refreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = api
+      .post("/auth/refresh", {}, { _isRefreshCall: true } as RetryConfig)
+      .then((refresh) => {
+        const newToken =
+          (refresh.data as LoginEnvelope)?.data?.access_token ?? null;
+        if (!newToken) throw new Error("refresh missing access_token");
+        useAuthStore.getState().setAccessToken(newToken);
+        return newToken;
+      })
+      .finally(() => {
+        // 不論成功或失敗都釋放,讓下一輪過期可重新 refresh
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -74,16 +104,8 @@ api.interceptors.response.use(
 
     original._retry = true;
     try {
-      const refresh = await api.post(
-        "/auth/refresh",
-        {},
-        { _isRefreshCall: true } as RetryConfig,
-      );
-      const newToken =
-        (refresh.data as LoginEnvelope)?.data?.access_token ?? null;
-      if (!newToken) throw new Error("refresh missing access_token");
-
-      useAuthStore.getState().setAccessToken(newToken);
+      // 並發 401 共用同一個 refresh,避免 refresh token 輪替競態
+      const newToken = await refreshAccessToken();
       original.headers.Authorization = `Bearer ${newToken}`;
       return api(original);
     } catch (refreshErr) {

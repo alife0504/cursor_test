@@ -1,6 +1,15 @@
 "use client";
 
-import { CandlestickChart, Moon, Sun, TrendingUp } from "lucide-react";
+import {
+  CandlestickChart,
+  FileDown,
+  LineChart,
+  MessagesSquare,
+  Moon,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
@@ -37,7 +46,7 @@ export default function AuthLayout({
       </div>
 
       {/* 左欄：品牌 hero（lg+ 顯示） */}
-      <aside className="relative hidden flex-col justify-between overflow-hidden bg-primary p-10 text-primary-foreground lg:flex">
+      <aside className="relative hidden flex-col overflow-hidden bg-primary p-10 text-primary-foreground lg:flex">
         <div className="absolute inset-0 bg-hero-mesh opacity-60" />
         <div className="relative z-10 flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-foreground/15 backdrop-blur">
@@ -51,28 +60,36 @@ export default function AuthLayout({
           </div>
         </div>
 
-        <div className="relative z-10 space-y-4">
-          <h2 className="text-3xl font-bold leading-tight">
-            多 Agent AI<br />
+        <div className="relative z-10 flex flex-1 flex-col justify-center py-12">
+          <span className="mb-5 inline-flex w-fit items-center gap-1.5 rounded-full bg-primary-foreground/10 px-3 py-1 text-xs font-medium tracking-wide text-primary-foreground/80 ring-1 ring-inset ring-primary-foreground/15">
+            <Sparkles className="h-3.5 w-3.5" /> 台股主 · 美股輔 · 自用級資安
+          </span>
+          <h2 className="text-balance text-4xl font-bold leading-[1.15]">
+            多 Agent AI
+            <br />
             投資分析平台
           </h2>
-          <p className="max-w-md text-sm leading-relaxed text-primary-foreground/80">
-            台股主、美股輔。技術面、基本面、新聞面、籌碼面四種 Analyst
-            跨市場辯論，Manager 綜合決策；完整 audit hash chain 與手動核准下單。
+          <p className="mt-4 max-w-md text-sm leading-relaxed text-primary-foreground/75">
+            技術面、基本面、新聞面、籌碼面四種 Analyst 跨市場辯論，Manager
+            綜合決策；完整 audit hash chain 與手動核准下單。
           </p>
-          <ul className="space-y-2 text-sm">
-            <li className="flex items-start gap-2 text-primary-foreground/90">
-              <TrendingUp className="mt-0.5 h-4 w-4 text-bull-foreground/80" />
-              <span>4 種 Analyst 自動跑指標 / 財報 / 新聞</span>
-            </li>
-            <li className="flex items-start gap-2 text-primary-foreground/90">
-              <TrendingUp className="mt-0.5 h-4 w-4 text-bull-foreground/80" />
-              <span>Bull / Bear 多輪辯論 + Manager 結論</span>
-            </li>
-            <li className="flex items-start gap-2 text-primary-foreground/90">
-              <TrendingUp className="mt-0.5 h-4 w-4 text-bull-foreground/80" />
-              <span>PDF / MD / XLSX 匯出 + LINE / Telegram 通知</span>
-            </li>
+          <ul className="mt-8 space-y-3.5 text-sm">
+            {[
+              { icon: LineChart, text: "4 種 Analyst 自動跑技術 / 財報 / 新聞 / 籌碼" },
+              { icon: MessagesSquare, text: "Bull / Bear 多輪辯論 + Manager 綜合結論" },
+              { icon: ShieldCheck, text: "JWT 輪替 · RBAC · Audit Hash Chain 不可竄改" },
+              { icon: FileDown, text: "PDF / MD / XLSX 匯出 + LINE / Telegram 通知" },
+            ].map(({ icon: Icon, text }) => (
+              <li
+                key={text}
+                className="flex items-start gap-3 text-primary-foreground/90"
+              >
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary-foreground/10 ring-1 ring-inset ring-primary-foreground/15">
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <span className="leading-relaxed">{text}</span>
+              </li>
+            ))}
           </ul>
         </div>
 
