@@ -33,22 +33,33 @@ export function MarketIndexMiniChart() {
   const ohlcv = useOhlcv({ symbol: "TAIEX", start, end });
 
   const idxObj = (overview.data?.index ?? null) as Record<string, unknown> | null;
-  const idxClose =
-    (idxObj?.twse_close ?? idxObj?.close ?? idxObj?.value ?? null) as
-      | string
-      | number
-      | null;
-  const idxChange =
-    (idxObj?.twse_change_pct ?? idxObj?.change_pct ?? null) as
-      | string
-      | number
-      | null;
 
   const series = useMemo(() => {
     return (ohlcv.data ?? [])
       .map((p) => Number(p.close))
       .filter((n) => Number.isFinite(n));
   }, [ohlcv.data]);
+
+  // 後端 overview 目前只回 indices 名稱清單、無指數報價 →
+  // 從 OHLCV 序列推導：close = 最後一筆、漲跌% = 區間首尾變化（對應所選 N 日）。
+  const backendClose = (idxObj?.twse_close ??
+    idxObj?.close ??
+    idxObj?.value ??
+    null) as string | number | null;
+  const backendChange = (idxObj?.twse_change_pct ??
+    idxObj?.change_pct ??
+    null) as string | number | null;
+  const seriesClose = series.length ? series[series.length - 1] : null;
+  const idxClose: string | number | null =
+    backendClose ??
+    (seriesClose !== null
+      ? seriesClose.toLocaleString("en-US", { maximumFractionDigits: 2 })
+      : null);
+  const idxChange: string | number | null =
+    backendChange ??
+    (series.length >= 2 && series[0] !== 0
+      ? ((series[series.length - 1] - series[0]) / series[0]) * 100
+      : null);
 
   const tone =
     idxChange !== null && Number(idxChange) > 0
@@ -57,9 +68,16 @@ export function MarketIndexMiniChart() {
         ? "bear"
         : "flat";
 
-  const adv = (overview.data?.advancers as number | undefined) ?? null;
-  const dec = (overview.data?.decliners as number | undefined) ?? null;
-  const unc = (overview.data?.unchanged as number | undefined) ?? null;
+  // 後端欄位是 advance_count / decline_count / unchanged_count（舊名作 fallback）
+  const adv = (overview.data?.advance_count ??
+    overview.data?.advancers ??
+    null) as number | null;
+  const dec = (overview.data?.decline_count ??
+    overview.data?.decliners ??
+    null) as number | null;
+  const unc = (overview.data?.unchanged_count ??
+    overview.data?.unchanged ??
+    null) as number | null;
 
   if (overview.isLoading) return <LoadingSkeleton rows={3} />;
   if (overview.error) {
@@ -116,7 +134,7 @@ export function MarketIndexMiniChart() {
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             尚未有指數時間序列資料
             <br />
-            （後端執行 <code className="font-mono">make backfill ARGS=&quot;--symbol TAIEX&quot;</code> 即可顯示）
+            （執行 <code className="font-mono">make seed-index ARGS=&quot;--yes&quot;</code> 寫入大盤 OHLCV 即可顯示）
           </p>
         )}
       </div>
