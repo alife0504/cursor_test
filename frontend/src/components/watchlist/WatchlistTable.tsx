@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
+import { ErrorState } from "@/components/common/ErrorState";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,7 +140,7 @@ export function WatchlistTable() {
           aria-label={`刪除 ${row.original.symbol}`}
           onClick={() => setDeleteTarget(row.original)}
         >
-          <Trash2 className="h-4 w-4 text-rose-600" />
+          <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
       ),
     },
@@ -147,7 +148,14 @@ export function WatchlistTable() {
 
   if (error) {
     return (
-      <p className="text-sm text-destructive">自選股載入失敗,請稍後再試。</p>
+      <ErrorState
+        title="自選股載入失敗"
+        variant="inline"
+        onRetry={() => {
+          if (typeof window !== "undefined") window.location.reload();
+        }}
+        error={error}
+      />
     );
   }
 

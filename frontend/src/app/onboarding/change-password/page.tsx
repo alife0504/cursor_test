@@ -72,7 +72,7 @@ export default function ChangePasswordPage() {
     setSubmitting(true);
     try {
       await api.post("/auth/change-password", {
-        current_password: values.current_password,
+        old_password: values.current_password,
         new_password: values.new_password,
       });
       toast.success("密碼已更新");
@@ -80,9 +80,10 @@ export default function ChangePasswordPage() {
     } catch (err) {
       if (isAxiosError(err)) {
         const code = err.response?.status;
-        if (code === 400) toast.error("舊密碼錯誤");
-        else if (code === 422) toast.error("新密碼不符合規則");
-        else toast.error(t("common.error"));
+        const detail = err.response?.data?.error?.message;
+        if (code === 400) toast.error(detail || "舊密碼錯誤");
+        else if (code === 422) toast.error(detail || "新密碼不符合規則");
+        else toast.error(detail || t("common.error"));
       } else {
         toast.error(t("common.error"));
       }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -91,12 +92,10 @@ export default function NotificationsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">通知設定</h1>
-        <p className="text-sm text-muted-foreground">
-          LINE Notify / Telegram 通知與訂閱事件
-        </p>
-      </div>
+      <PageHeader
+        title="通知設定"
+        description="LINE Notify / Telegram 通知與訂閱事件"
+      />
 
       {settings.isLoading ? (
         <LoadingSkeleton rows={6} />
@@ -110,8 +109,8 @@ export default function NotificationsPage() {
               <Label htmlFor="line-token" className="text-xs">
                 LINE Notify Token
                 {settings.data?.line_token_masked ? (
-                  <span className="ml-2 text-xs text-emerald-600">
-                    (已設定:{settings.data.line_token_masked})
+                  <span className="ml-2 text-xs text-success">
+                    （已設定：{settings.data.line_token_masked}）
                   </span>
                 ) : (
                   <span className="ml-2 text-xs text-muted-foreground">
@@ -259,8 +258,8 @@ function NotificationLogsTable() {
                   <td
                     className={`p-2 text-xs font-medium ${
                       log.status === "sent" || log.status === "success"
-                        ? "text-emerald-600"
-                        : "text-rose-600"
+                        ? "text-success"
+                        : "text-destructive"
                     }`}
                   >
                     {log.status}

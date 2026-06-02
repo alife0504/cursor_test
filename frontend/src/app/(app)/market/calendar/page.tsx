@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { MockBanner } from "@/components/common/MockBanner";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +38,9 @@ const TYPE_LABEL: Record<MockEvent["type"], string> = {
   shareholder_meeting: "股東會",
 };
 const TYPE_COLOR: Record<MockEvent["type"], string> = {
-  earnings: "bg-blue-500/20 text-blue-700 dark:text-blue-200",
-  ex_dividend: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-200",
-  shareholder_meeting: "bg-amber-500/20 text-amber-700 dark:text-amber-200",
+  earnings: "bg-info/15 text-info",
+  ex_dividend: "bg-bull-muted text-bull",
+  shareholder_meeting: "bg-warning/15 text-warning",
 };
 
 function buildMockEvents(year: number, month: number): MockEvent[] {
@@ -101,12 +102,10 @@ export default function MarketCalendarPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">財報日曆</h1>
-        <p className="text-sm text-muted-foreground">
-          法說會、除權息、股東會時程
-        </p>
-      </div>
+      <PageHeader
+        title="財報日曆"
+        description="法說會、除權息、股東會時程"
+      />
 
       <MockBanner trackingRef="v1.1 接 GET /api/v1/market/calendar 真實資料" />
 

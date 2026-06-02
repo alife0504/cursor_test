@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { NumberFormat } from "@/components/common/NumberFormat";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
 import { PercentFormat } from "@/components/common/PercentFormat";
 import {
@@ -109,12 +110,10 @@ export default function ScreenerFilterPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">選股篩選器</h1>
-        <p className="text-sm text-muted-foreground">
-          PE / 殖利率 / EPS 成長 / RSI / 市值多條件複合篩選
-        </p>
-      </div>
+      <PageHeader
+        title="選股篩選器"
+        description="PE / 殖利率 / EPS 成長 / RSI / 市值多條件複合篩選"
+      />
 
       <ScreenerForm initial={filters} onSubmit={handleSubmit} />
 

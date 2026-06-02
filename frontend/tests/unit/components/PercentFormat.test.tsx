@@ -9,18 +9,18 @@ describe("<PercentFormat />", () => {
     expect(screen.getByText("8.25%")).toBeInTheDocument();
   });
 
-  test("colored=true 正數紅色", () => {
-    const { container } = render(
-      <PercentFormat value={0.05} colored />,
-    );
+  test("colored=true 正數 data-tone=bull（台股紅漲）", () => {
+    const { container } = render(<PercentFormat value={0.05} colored />);
     const span = container.querySelector("span");
-    expect(span?.className).toContain("text-green");
+    expect(span?.getAttribute("data-tone")).toBe("bull");
+    expect(span?.className).toContain("text-bull");
   });
 
-  test("colored=true 負數綠色", () => {
+  test("colored=true 負數 data-tone=bear（台股綠跌）", () => {
     const { container } = render(<PercentFormat value={-0.05} colored />);
     const span = container.querySelector("span");
-    expect(span?.className).toContain("text-red");
+    expect(span?.getAttribute("data-tone")).toBe("bear");
+    expect(span?.className).toContain("text-bear");
   });
 
   test("null fallback", () => {

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -50,27 +51,25 @@ export default function AdminPipelinePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">資料管線管理</h1>
-          <p className="text-sm text-muted-foreground">
-            Celery Dead Letter Queue 與資料來源同步狀態
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowResolved(!showResolved)}
-          >
-            {showResolved ? "只看未解決" : "顯示已解決"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="mr-1 h-4 w-4" />
-            重新整理
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="資料管線管理"
+        description="Celery Dead Letter Queue 與資料來源同步狀態"
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowResolved(!showResolved)}
+            >
+              {showResolved ? "只看未解決" : "顯示已解決"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="mr-1 h-4 w-4" />
+              重新整理
+            </Button>
+          </div>
+        }
+      />
 
       {/* Source last success — 後端尚未提供,先顯示 placeholder */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -83,7 +82,7 @@ export default function AdminPipelinePage() {
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between text-sm">
                 {s.name}
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <CheckCircle2 className="h-4 w-4 text-success" />
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -122,7 +121,7 @@ export default function AdminPipelinePage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                     <div>
                       <p className="font-mono text-xs text-muted-foreground">
                         #{row.id} · {row.task_name} · {row.retry_count} retries
@@ -159,7 +158,7 @@ export default function AdminPipelinePage() {
                         </Button>
                       </>
                     ) : (
-                      <span className="text-xs text-emerald-600">
+                      <span className="text-xs text-success">
                         已解決 {row.resolved_at?.slice(0, 16)}
                       </span>
                     )}

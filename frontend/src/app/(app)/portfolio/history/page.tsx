@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { DataTable } from "@/components/common/DataTable";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { NumberFormat } from "@/components/common/NumberFormat";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
 import { SignalBadge } from "@/components/common/SignalBadge";
 import { Input } from "@/components/ui/input";
@@ -123,12 +124,10 @@ export default function TradeHistoryPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">交易記錄</h1>
-        <p className="text-sm text-muted-foreground">
-          全部訂單(含 APPROVED / REJECTED / PENDING 等);可篩選 symbol 與方向
-        </p>
-      </div>
+      <PageHeader
+        title="交易記錄"
+        description="全部訂單（含 APPROVED / REJECTED / PENDING 等）；可篩選 symbol 與方向"
+      />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="flex flex-col gap-1">

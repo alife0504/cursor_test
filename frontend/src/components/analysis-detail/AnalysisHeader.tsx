@@ -1,14 +1,15 @@
 "use client";
 
-import { Download, RefreshCcw } from "lucide-react";
+import { Copy, Download, Loader2, RefreshCcw } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { DateFormat } from "@/components/common/DateFormat";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { SignalBadge } from "@/components/common/SignalBadge";
 import { Button } from "@/components/ui/button";
-import type { AnalysisDetail } from "@/lib/api-types";
 import { API_BASE_URL } from "@/lib/api";
+import type { AnalysisDetail } from "@/lib/api-types";
 
 interface AnalysisHeaderProps {
   analysis: AnalysisDetail;
@@ -16,7 +17,8 @@ interface AnalysisHeaderProps {
   onRefresh?: () => void;
 }
 
-// Phase 16 § E:分析詳情 header(代號 + signal + 控制按鈕)
+type Fmt = "pdf" | "md" | "xlsx";
+
 export function AnalysisHeader({
   analysis,
   wsStatus,
@@ -24,72 +26,117 @@ export function AnalysisHeader({
 }: AnalysisHeaderProps) {
   const exportBase = `${API_BASE_URL}/exports/${analysis.id}`;
   const canExport = analysis.status === "completed";
+  const [downloading, setDownloading] = useState<Fmt | null>(null);
 
-  const openExport = (fmt: "pdf" | "md" | "xlsx") => {
+  const openExport = (fmt: Fmt) => {
     if (!canExport) {
-      toast.error("分析尚未完成,暫時無法匯出");
+      toast.error("分析尚未完成，暫時無法匯出");
       return;
     }
-    if (typeof window !== "undefined") {
-      window.open(`${exportBase}?format=${fmt}`, "_blank");
+    if (typeof window === "undefined") return;
+    setDownloading(fmt);
+    // 用 anchor click 觸發下載；500ms 後重置 loading state（不阻塞）
+    const url = `${exportBase}?format=${fmt}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => setDownloading((cur) => (cur === fmt ? null : cur)), 800);
+  };
+
+  const copyShareLink = async () => {
+    if (typeof window === "undefined") return;
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("已複製分享連結");
+    } catch {
+      toast.error("無法複製連結（請手動複製網址列）");
     }
   };
 
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold tracking-tight">
+    <header className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="font-mono text-2xl font-bold tracking-tight">
             {analysis.symbol}
           </h1>
           <MarketBadge market={analysis.market} />
           <SignalBadge signal={analysis.signal} status={analysis.status} />
+          {analysis.llm_model ? (
+            <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {analysis.llm_model}
+            </span>
+          ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
           建立於 <DateFormat value={analysis.created_at} mode="datetime" />
           {analysis.completed_at ? (
             <>
-              ;完成於 <DateFormat value={analysis.completed_at} mode="datetime" />
+              ・完成於{" "}
+              <DateFormat value={analysis.completed_at} mode="datetime" />
             </>
           ) : null}
-          {analysis.llm_model ? (
-            <span className="ml-2">· {analysis.llm_model}</span>
-          ) : null}
           {wsStatus ? (
-            <span className="ml-2">· WS: {wsStatus}</span>
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 text-info">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-info" />
+              WS · {wsStatus}
+            </span>
           ) : null}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {onRefresh ? (
           <Button variant="outline" size="sm" onClick={onRefresh}>
             <RefreshCcw className="mr-1 h-3 w-3" /> 重新整理
           </Button>
         ) : null}
+        <Button variant="ghost" size="sm" onClick={copyShareLink}>
+          <Copy className="mr-1 h-3 w-3" /> 分享連結
+        </Button>
         <Button
           size="sm"
           variant="outline"
           onClick={() => openExport("md")}
-          disabled={!canExport}
+          disabled={!canExport || downloading === "md"}
         >
-          <Download className="mr-1 h-3 w-3" /> MD
+          {downloading === "md" ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Download className="mr-1 h-3 w-3" />
+          )}
+          MD
         </Button>
         <Button
           size="sm"
           variant="outline"
           onClick={() => openExport("xlsx")}
-          disabled={!canExport}
+          disabled={!canExport || downloading === "xlsx"}
         >
-          <Download className="mr-1 h-3 w-3" /> XLSX
+          {downloading === "xlsx" ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Download className="mr-1 h-3 w-3" />
+          )}
+          XLSX
         </Button>
         <Button
           size="sm"
           onClick={() => openExport("pdf")}
-          disabled={!canExport}
+          disabled={!canExport || downloading === "pdf"}
         >
-          <Download className="mr-1 h-3 w-3" /> PDF
+          {downloading === "pdf" ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Download className="mr-1 h-3 w-3" />
+          )}
+          PDF
         </Button>
       </div>
-    </div>
+    </header>
   );
 }

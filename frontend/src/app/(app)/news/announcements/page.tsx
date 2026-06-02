@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
+import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,12 +39,10 @@ export default function NewsAnnouncementsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">重大公告</h1>
-        <p className="text-sm text-muted-foreground">
-          TW MOPS + US SEC EDGAR(依股票查詢)
-        </p>
-      </div>
+      <PageHeader
+        title="重大公告"
+        description="TW MOPS + US SEC EDGAR（依股票查詢）"
+      />
 
       <div className="grid gap-3 sm:grid-cols-4">
         <div className="flex flex-col gap-1">

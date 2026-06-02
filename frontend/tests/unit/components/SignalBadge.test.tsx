@@ -4,14 +4,25 @@ import { describe, expect, test } from "vitest";
 import { SignalBadge } from "@/components/common/SignalBadge";
 
 describe("<SignalBadge />", () => {
-  test("completed + BUY 顯示 BUY", () => {
-    render(<SignalBadge signal="BUY" status="completed" />);
-    expect(screen.getByText("BUY")).toBeInTheDocument();
+  test("completed + BUY 顯示「買進」且 data-tone=buy", () => {
+    const { container } = render(
+      <SignalBadge signal="BUY" status="completed" />,
+    );
+    expect(screen.getByText(/買進/)).toBeInTheDocument();
+    expect(container.querySelector('[data-tone="buy"]')).toBeTruthy();
   });
 
-  test("completed + SELL 顯示 SELL", () => {
-    render(<SignalBadge signal="SELL" status="completed" />);
-    expect(screen.getByText("SELL")).toBeInTheDocument();
+  test("completed + SELL 顯示「賣出」且 data-tone=sell", () => {
+    const { container } = render(
+      <SignalBadge signal="SELL" status="completed" />,
+    );
+    expect(screen.getByText(/賣出/)).toBeInTheDocument();
+    expect(container.querySelector('[data-tone="sell"]')).toBeTruthy();
+  });
+
+  test("completed + HOLD 顯示「持有」", () => {
+    render(<SignalBadge signal="HOLD" status="completed" />);
+    expect(screen.getByText(/持有/)).toBeInTheDocument();
   });
 
   test("running 顯示中文「分析中」", () => {

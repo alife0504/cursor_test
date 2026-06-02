@@ -4,15 +4,16 @@ import { useState } from "react";
 
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
+import { PageHeader } from "@/components/common/PageHeader";
 import { PieChart } from "@/components/common/PieChart";
 import { IndexCard } from "@/components/market/IndexCard";
 import { MarketSwitcher } from "@/components/market/MarketSwitcher";
 import { MoversTable } from "@/components/market/MoversTable";
 import { useMarketOverview } from "@/hooks/useMarket";
 
-// Phase 17 § B:市場總覽
-//   - TW:加權、櫃買;US:S&P / NASDAQ / Dow(等後端 P10 完整 endpoint 補)
-//   - 漲跌家數 pie chart
+// 市場總覽
+//   - TW：加權、櫃買；US：S&P / NASDAQ / Dow
+//   - 漲跌家數 pie（紅漲綠跌）
 //   - 漲幅 / 跌幅 / 成交量榜
 export default function MarketOverviewPage() {
   const [market, setMarket] = useState<"TW" | "US">("TW");
@@ -24,7 +25,8 @@ export default function MarketOverviewPage() {
       ? [
           {
             name: "加權指數",
-            value: idxObj?.twse_close ?? idxObj?.close ?? idxObj?.value ?? null,
+            value:
+              idxObj?.twse_close ?? idxObj?.close ?? idxObj?.value ?? null,
             changePct: idxObj?.twse_change_pct ?? idxObj?.change_pct ?? null,
           },
           {
@@ -54,23 +56,20 @@ export default function MarketOverviewPage() {
   const adv = (data?.advancers as number | undefined) ?? 0;
   const dec = (data?.decliners as number | undefined) ?? 0;
   const unc = (data?.unchanged as number | undefined) ?? 0;
+  // 紅漲綠跌 token：bull/bear hsl
   const pieData = [
-    { name: "上漲", value: adv, fill: "#22c55e" },
-    { name: "下跌", value: dec, fill: "#ef4444" },
-    { name: "平盤", value: unc, fill: "#a3a3a3" },
+    { name: "上漲", value: adv, fill: "hsl(var(--bull))" },
+    { name: "下跌", value: dec, fill: "hsl(var(--bear))" },
+    { name: "平盤", value: unc, fill: "hsl(var(--flat))" },
   ];
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">市場總覽</h1>
-          <p className="text-sm text-muted-foreground">
-            大盤指數、漲跌家數、漲跌幅 / 成交量榜
-          </p>
-        </div>
-        <MarketSwitcher value={market} onChange={setMarket} />
-      </div>
+      <PageHeader
+        title="市場總覽"
+        description="大盤指數、漲跌家數、漲跌幅 / 成交量榜"
+        actions={<MarketSwitcher value={market} onChange={setMarket} />}
+      />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {isLoading ? (
@@ -91,26 +90,24 @@ export default function MarketOverviewPage() {
         <ChartContainer title="漲跌家數分佈" height={260}>
           <PieChart data={pieData} />
         </ChartContainer>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card p-4">
           <h3 className="mb-2 text-sm font-medium">市場摘要</h3>
-          <dl className="space-y-1 text-sm">
+          <dl className="space-y-1.5 text-sm">
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">上漲</dt>
-              <dd className="font-medium text-emerald-600 tabular-nums">{adv}</dd>
+              <dt className="text-muted-foreground">上漲家數</dt>
+              <dd className="num font-medium text-bull">{adv}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">下跌</dt>
-              <dd className="font-medium text-rose-600 tabular-nums">{dec}</dd>
+              <dt className="text-muted-foreground">下跌家數</dt>
+              <dd className="num font-medium text-bear">{dec}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">平盤</dt>
-              <dd className="font-medium tabular-nums">{unc}</dd>
+              <dt className="text-muted-foreground">平盤家數</dt>
+              <dd className="num font-medium text-flat">{unc}</dd>
             </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">成交量</dt>
-              <dd className="font-medium tabular-nums">
-                {data?.total_volume ?? "-"}
-              </dd>
+            <div className="flex justify-between border-t pt-1.5">
+              <dt className="text-muted-foreground">總成交量</dt>
+              <dd className="num font-medium">{data?.total_volume ?? "—"}</dd>
             </div>
           </dl>
         </div>

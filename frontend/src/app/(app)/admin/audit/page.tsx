@@ -6,6 +6,8 @@ import { useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
+import { ErrorState } from "@/components/common/ErrorState";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -141,12 +143,10 @@ export default function AuditPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">審計日誌</h1>
-        <p className="text-sm text-muted-foreground">
-          tamper-evident 紀錄 (hash chain);僅 ADMIN 可看
-        </p>
-      </div>
+      <PageHeader
+        title="審計日誌"
+        description="Tamper-evident 紀錄（hash chain）。僅 ADMIN 可看"
+      />
 
       <div className="grid grid-cols-1 gap-2 rounded-md border p-3 md:grid-cols-5">
         <div>
@@ -203,7 +203,14 @@ export default function AuditPage() {
       </div>
 
       {error ? (
-        <p className="text-sm text-destructive">無法載入審計日誌</p>
+        <ErrorState
+          title="無法載入審計日誌"
+          variant="inline"
+          onRetry={() => {
+            if (typeof window !== "undefined") window.location.reload();
+          }}
+          error={error}
+        />
       ) : null}
 
       <DataTable

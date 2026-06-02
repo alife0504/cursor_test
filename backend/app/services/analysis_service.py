@@ -11,10 +11,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy import select
+
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError
 from app.core.logging_config import get_logger
 from app.core.market_dispatcher import MarketDispatcher, detect_region
 from app.core.metrics import ANALYSIS_TOTAL
+from app.models.stock import StockList
 from app.repos.analysis_repo import AnalysisRepository
 from app.repos.audit_repo import AuditRepository
 
@@ -47,15 +50,22 @@ class AnalysisService:
         analyst_types: list[str],
         llm_model: str,
         debate_rounds: int,
+        risk_tolerance: str | None = None,
         request_id: str | None = None,
     ) -> AnalysisReport:
-        """新建一筆 queued 分析。寫 DB + audit；推 celery task 是 stub。"""
-        market = self._infer_market(symbol)
+        """新建一筆 queued 分析。寫 DB + audit；推 celery task 是 stub。
+
+        v1.0.1：保留 analyst_types / debate_rounds / risk_tolerance 給前端還原。
+        """
+        market = await self._infer_market(symbol)
         report = await self.repo.create(
             user_id=user.id,
             symbol=symbol,
             market=market,
             llm_model=llm_model,
+            analyst_types=analyst_types,
+            debate_rounds=debate_rounds,
+            risk_tolerance=risk_tolerance,
         )
         await self.audit_repo.append(
             actor_id=user.id,
@@ -156,17 +166,31 @@ class AnalysisService:
         await self.session.commit()
 
     # ── helpers ──────────────────────────────────────
-    def _infer_market(self, symbol: str) -> str:
-        """從 symbol 推斷 market 欄位（symbol 必須 FK 到 stock_list.symbol；
-        market 是 stock_list 上的列舉 (TWSE/TPEX/NYSE/NASDAQ/AMEX/OTHER)）。
+    async def _infer_market(self, symbol: str) -> str:
+        """從 symbol 推斷 market 欄位（symbol 必須 FK 到 stock_list.symbol）。
 
-        實務上 P12+ 會改成查 stock_list 拿 market；本 stub 階段：
-        - 純數字 4-6 位 → TWSE（fallback；TPEX 由 stock_list seed 決定）
-        - 其餘 → NASDAQ
+        v1.0.1：先查 stock_list 拿真實 market（TWSE/TPEX/NYSE/NASDAQ/AMEX/OTHER）；
+        - 查到 → 直接用 DB 值（解原本 OTC/AMEX 被錯標 TWSE/NASDAQ 的 bug）
+        - 查不到 → 退回 region 推斷（純數字 4-6 → TW → TWSE，其餘 → NASDAQ）
+          這分支也讓 stock_list 未 seed 的測試環境仍能跑
+
+        market 是 stock_list 上的列舉 (TWSE/TPEX/NYSE/NASDAQ/AMEX/OTHER)。
         """
         try:
+            stmt = select(StockList.market).where(StockList.symbol == symbol)
+            row_market = (await self.session.execute(stmt)).scalar_one_or_none()
+            if row_market is not None:
+                return str(row_market)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "analysis.infer_market.db_lookup_failed",
+                symbol=symbol,
+                error=str(exc),
+            )
+
+        # fallback：region 推斷
+        try:
             region = detect_region(symbol)
-            # region 是 TW / US；對應到預設 market：TW → TWSE、US → NASDAQ
             return "TWSE" if str(region).upper().endswith("TW") else "NASDAQ"
         except Exception:  # pragma: no cover
             return "TWSE" if symbol.isdigit() and 4 <= len(symbol) <= 6 else "NASDAQ"

@@ -8,8 +8,9 @@ import {
   AnalystChooser,
   type AnalystType,
 } from "@/components/analysis-new/AnalystChooser";
-import { QuotaProgress } from "@/components/dashboard/QuotaProgress";
+import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
+import { QuotaProgress } from "@/components/dashboard/QuotaProgress";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -126,12 +127,10 @@ function NewAnalysisInner() {
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <div className="flex flex-col gap-4 lg:col-span-2">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">新增分析</h1>
-          <p className="text-sm text-muted-foreground">
-            選股 → 選 analyst → 選模型 → 選辯論輪數 → 送出
-          </p>
-        </div>
+        <PageHeader
+          title="新增分析"
+          description="選股 → 選 analyst → 選模型 → 選辯論輪數 → 送出"
+        />
 
         <Card>
           <CardHeader>

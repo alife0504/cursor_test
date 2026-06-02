@@ -36,14 +36,23 @@ class AnalysisRepository(BaseRepository):
         symbol: str,
         market: str,
         llm_model: str | None = None,
+        analyst_types: list[str] | None = None,
+        debate_rounds: int | None = None,
+        risk_tolerance: str | None = None,
     ) -> AnalysisReport:
-        """建立一筆 queued 分析（caller 負責 commit）。"""
+        """建立一筆 queued 分析（caller 負責 commit）。
+
+        v1.0.1：保留 analyst_types / debate_rounds / risk_tolerance 給前端還原節點圖。
+        """
         report = AnalysisReport(
             user_id=user_id,
             symbol=symbol,
             market=market,
             status="queued",
             llm_model=llm_model,
+            analyst_types=analyst_types,
+            debate_rounds=debate_rounds,
+            risk_tolerance=risk_tolerance,
         )
         self.session.add(report)
         await self.session.flush()

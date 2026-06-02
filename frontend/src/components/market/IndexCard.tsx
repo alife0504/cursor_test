@@ -1,11 +1,9 @@
-import { TrendingDown, TrendingUp } from "lucide-react";
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-// Phase 17 § B:大盤指數卡片
-//   - TW 加權 / 櫃買;US S&P / NASDAQ / Dow
-
+// 大盤指數卡片（紅漲綠跌）
 interface IndexCardProps {
   name: string;
   value?: string | number | null;
@@ -13,32 +11,51 @@ interface IndexCardProps {
   className?: string;
 }
 
-export function IndexCard({ name, value, changePct, className }: IndexCardProps) {
-  const num = changePct === null || changePct === undefined ? null : Number(changePct);
-  const positive = num !== null && num >= 0;
+export function IndexCard({
+  name,
+  value,
+  changePct,
+  className,
+}: IndexCardProps) {
+  const num =
+    changePct === null || changePct === undefined ? null : Number(changePct);
+  const tone: "bull" | "bear" | "flat" =
+    num === null || !Number.isFinite(num) || num === 0
+      ? "flat"
+      : num > 0
+        ? "bull"
+        : "bear";
+
   return (
-    <Card className={cn(className)}>
+    <Card className={cn("card-hover", className)}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm text-muted-foreground">{name}</CardTitle>
+        <CardTitle className="text-xs font-medium text-muted-foreground">
+          {name}
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold tabular-nums">
-          {value !== null && value !== undefined ? String(value) : "-"}
+        <p className="num text-2xl font-bold leading-tight">
+          {value !== null && value !== undefined ? String(value) : "—"}
         </p>
         {num !== null && Number.isFinite(num) ? (
           <p
+            data-tone={tone}
             className={cn(
-              "mt-1 flex items-center gap-1 text-sm tabular-nums",
-              positive ? "text-emerald-600" : "text-rose-600",
+              "mt-1 flex items-center gap-1 num text-sm font-medium",
+              tone === "bull" && "text-bull",
+              tone === "bear" && "text-bear",
+              tone === "flat" && "text-flat",
             )}
           >
-            {positive ? (
+            {tone === "bull" ? (
               <TrendingUp className="h-3.5 w-3.5" />
-            ) : (
+            ) : tone === "bear" ? (
               <TrendingDown className="h-3.5 w-3.5" />
+            ) : (
+              <Minus className="h-3.5 w-3.5" />
             )}
-            {positive ? "+" : ""}
-            {num.toFixed(2)}%
+            {tone === "bull" ? "+" : tone === "bear" ? "−" : ""}
+            {Math.abs(num).toFixed(2)}%
           </p>
         ) : null}
       </CardContent>

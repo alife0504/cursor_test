@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
+import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
 import { SentimentBar } from "@/components/news/SentimentBar";
 import { useStockNews } from "@/hooks/useNews";
@@ -14,12 +15,13 @@ import { useStockNews } from "@/hooks/useNews";
 //   - 提供個股檢視 + sentiment 分佈
 //   - 全市場聚合留 v1.1
 
+// 情緒色：positive → bull（紅、台股慣例「利多」）；negative → bear（綠）；neutral → 灰
 const SENTIMENT_LABEL_MAP: Record<string, { text: string; color: string }> = {
-  very_positive: { text: "極正面", color: "text-green-700 bg-green-50" },
-  positive: { text: "正面", color: "text-green-600 bg-green-50" },
+  very_positive: { text: "極正面", color: "text-bull bg-bull-muted" },
+  positive: { text: "正面", color: "text-bull bg-bull-muted" },
   neutral: { text: "中性", color: "text-muted-foreground bg-muted" },
-  negative: { text: "負面", color: "text-orange-600 bg-orange-50" },
-  very_negative: { text: "極負面", color: "text-rose-700 bg-rose-50" },
+  negative: { text: "負面", color: "text-bear bg-bear-muted" },
+  very_negative: { text: "極負面", color: "text-bear bg-bear-muted" },
 };
 
 export default function NewsSentimentPage() {
@@ -32,12 +34,10 @@ export default function NewsSentimentPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">新聞情緒</h1>
-        <p className="text-sm text-muted-foreground">
-          個股近期新聞與情緒分佈(資料來源:Qdrant + 各家新聞 source)
-        </p>
-      </div>
+      <PageHeader
+        title="新聞情緒"
+        description="個股近期新聞與情緒分佈（資料來源：Qdrant + 各家新聞 source）"
+      />
 
       <div className="flex items-end gap-3">
         <div className="flex flex-col gap-1">

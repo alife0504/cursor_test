@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { DataTable } from "@/components/common/DataTable";
 import { MockBanner } from "@/components/common/MockBanner";
+import { PageHeader } from "@/components/common/PageHeader";
 import { PercentFormat } from "@/components/common/PercentFormat";
 import { PieChart } from "@/components/common/PieChart";
 import { SignalBadge } from "@/components/common/SignalBadge";
@@ -69,44 +70,59 @@ export default function StatisticsAccuracyPage() {
     [],
   );
 
+  // 紅漲綠跌：BUY=bull、SELL=bear（hsl token 化）
   const pieData = [
-    { name: "BUY 命中", value: stats.buy.hits, fill: "#22c55e" },
-    { name: "BUY 失誤", value: stats.buy.total - stats.buy.hits, fill: "#86efac" },
-    { name: "SELL 命中", value: stats.sell.hits, fill: "#ef4444" },
-    { name: "SELL 失誤", value: stats.sell.total - stats.sell.hits, fill: "#fca5a5" },
+    {
+      name: "BUY 命中",
+      value: stats.buy.hits,
+      fill: "hsl(var(--bull))",
+    },
+    {
+      name: "BUY 失誤",
+      value: stats.buy.total - stats.buy.hits,
+      fill: "hsl(var(--bull) / 0.35)",
+    },
+    {
+      name: "SELL 命中",
+      value: stats.sell.hits,
+      fill: "hsl(var(--bear))",
+    },
+    {
+      name: "SELL 失誤",
+      value: stats.sell.total - stats.sell.hits,
+      fill: "hsl(var(--bear) / 0.35)",
+    },
   ];
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">準確率分析</h1>
-        <p className="text-sm text-muted-foreground">
-          已完成分析的訊號統計(client-side 計算)
-        </p>
-      </div>
+      <PageHeader
+        title="準確率分析"
+        description="已完成分析的訊號統計（client-side 計算）"
+      />
 
       <MockBanner
-        title="Mock 計算 - v1.1 將以 actual_return_30d 改為真實命中率"
-        trackingRef="後端待補 endpoint:GET /api/v1/analysis/{id}/actual-return"
+        title="Mock 計算 — v1.1 將以 actual_return_30d 改為真實命中率"
+        trackingRef="後端待補 endpoint：GET /api/v1/analysis/{id}/actual-return"
       />
 
       <section className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card p-3 card-hover">
           <p className="text-xs text-muted-foreground">總分析數</p>
-          <p className="text-2xl font-bold tabular-nums">{stats.total}</p>
+          <p className="num text-2xl font-bold">{stats.total}</p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
-          <p className="text-xs text-muted-foreground">BUY 命中率(粗估)</p>
-          <p className="text-2xl font-bold tabular-nums text-emerald-600">
+        <div className="rounded-lg border bg-card p-3 card-hover">
+          <p className="text-xs text-muted-foreground">BUY 命中率（粗估）</p>
+          <p className="num text-2xl font-bold text-bull">
             <PercentFormat value={stats.buy.rate * 100} />
           </p>
           <p className="text-xs text-muted-foreground">
             {stats.buy.hits} / {stats.buy.total}
           </p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
-          <p className="text-xs text-muted-foreground">SELL 命中率(粗估)</p>
-          <p className="text-2xl font-bold tabular-nums text-rose-600">
+        <div className="rounded-lg border bg-card p-3 card-hover">
+          <p className="text-xs text-muted-foreground">SELL 命中率（粗估）</p>
+          <p className="num text-2xl font-bold text-bear">
             <PercentFormat value={stats.sell.rate * 100} />
           </p>
           <p className="text-xs text-muted-foreground">

@@ -130,3 +130,83 @@ async def test_analysis_delete_admin_only(
     )
     assert ra.status_code == 200, ra.text
     assert ra.json()["data"]["deleted"] is True
+
+
+# ───────────────────────────────────────────────────────
+# v1.0.1 新增：analyst_outputs / analyst_types / debate_rounds 暴露 + _infer_market 改查 DB
+# ───────────────────────────────────────────────────────
+
+
+async def test_analysis_create_persists_metadata_and_detail_exposes_it(
+    auth_client, make_test_user, login_helper, seed_stocks
+) -> None:
+    """v1.0.1：create 寫入 analyst_types + debate_rounds + risk_tolerance；
+    detail 把它們 + analyst_outputs 都顯露給前端。
+    """
+    await seed_stocks([{"symbol": "2330", "market": "TWSE", "name": "台積電"}])
+    user, pwd = await make_test_user(role="ANALYST", must_change=False)
+    access, csrf = await login_helper(auth_client, user.email, pwd)
+    headers = _csrf(access, csrf) | {"Idempotency-Key": str(uuid.uuid4())}
+
+    r = auth_client.post(
+        "/api/v1/analysis",
+        json={
+            "symbol": "2330",
+            "analyst_types": ["market", "fundamental"],
+            "llm_model": "gemini-2.0-flash",
+            "debate_rounds": 2,
+            "risk_tolerance": "moderate",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    analysis_id = r.json()["data"]["analysis_id"]
+
+    r2 = auth_client.get(
+        f"/api/v1/analysis/{analysis_id}",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r2.status_code == 200, r2.text
+    data = r2.json()["data"]
+    # 新增欄位都存在（即使值是 None 也要在 schema 中）
+    assert "analyst_outputs" in data
+    assert "analyst_types" in data
+    assert "debate_rounds" in data
+    assert "risk_tolerance" in data
+    # 建立參數有正確寫回
+    assert data["analyst_types"] == ["market", "fundamental"]
+    assert data["debate_rounds"] == 2
+    assert data["risk_tolerance"] == "moderate"
+
+
+async def test_infer_market_uses_stock_list_for_tpex_symbol(
+    auth_client, make_test_user, login_helper, seed_stocks
+) -> None:
+    """v1.0.1：原本 _infer_market 把 4-6 位純數字一律標為 TWSE；
+    現在改查 stock_list — 上櫃股票應正確得到 TPEX，而非 TWSE。
+    """
+    await seed_stocks([{"symbol": "5483", "market": "TPEX", "name": "中美晶"}])
+    user, pwd = await make_test_user(role="ANALYST", must_change=False)
+    access, csrf = await login_helper(auth_client, user.email, pwd)
+    headers = _csrf(access, csrf) | {"Idempotency-Key": str(uuid.uuid4())}
+
+    r = auth_client.post(
+        "/api/v1/analysis",
+        json={
+            "symbol": "5483",
+            "analyst_types": ["market"],
+            "llm_model": "gemini-2.0-flash",
+            "debate_rounds": 0,
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    analysis_id = r.json()["data"]["analysis_id"]
+
+    r2 = auth_client.get(
+        f"/api/v1/analysis/{analysis_id}",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r2.status_code == 200, r2.text
+    # 重點：market 應為 TPEX（從 stock_list 查到）而不是 TWSE（舊行為）
+    assert r2.json()["data"]["market"] == "TPEX"

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { BarChart } from "@/components/common/BarChart";
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { MockBanner } from "@/components/common/MockBanner";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -68,12 +69,10 @@ export default function StatisticsBacktestPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">回測結果</h1>
-        <p className="text-sm text-muted-foreground">
-          策略 + 期間 → equity curve / drawdown
-        </p>
-      </div>
+      <PageHeader
+        title="回測結果"
+        description="策略 + 期間 → equity curve / drawdown"
+      />
 
       <MockBanner
         title="Mock 資料 - v1.1 將接真實回測引擎"
@@ -111,40 +110,50 @@ export default function StatisticsBacktestPage() {
       </div>
 
       <section className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card p-3 card-hover">
           <p className="text-xs text-muted-foreground">期末資金</p>
-          <p className="text-2xl font-bold tabular-nums">${finalEquity.toLocaleString()}</p>
+          <p className="num text-2xl font-bold">
+            ${finalEquity.toLocaleString()}
+          </p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card p-3 card-hover">
           <p className="text-xs text-muted-foreground">總報酬</p>
           <p
-            className={`text-2xl font-bold tabular-nums ${totalReturn >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+            className={`num text-2xl font-bold ${totalReturn >= 0 ? "text-bull" : "text-bear"}`}
           >
             {totalReturn.toFixed(2)}%
           </p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card p-3 card-hover">
           <p className="text-xs text-muted-foreground">最大回撤</p>
-          <p className="text-2xl font-bold tabular-nums text-rose-600">
+          <p className="num text-2xl font-bold text-bear">
             {maxDD.toFixed(2)}%
           </p>
         </div>
       </section>
 
-      <ChartContainer title="Equity Curve(mock)">
+      <ChartContainer title="Equity Curve（mock）">
         <BarChart
           data={data}
           xKey="day"
-          series={[{ dataKey: "equity", name: "equity", fill: "#3b82f6" }]}
+          series={[
+            { dataKey: "equity", name: "equity", fill: "hsl(var(--chart-1))" },
+          ]}
           showLegend={false}
         />
       </ChartContainer>
 
-      <ChartContainer title="Drawdown(mock)">
+      <ChartContainer title="Drawdown（mock）">
         <BarChart
           data={data}
           xKey="day"
-          series={[{ dataKey: "drawdown", name: "drawdown %", fill: "#ef4444" }]}
+          series={[
+            {
+              dataKey: "drawdown",
+              name: "drawdown %",
+              fill: "hsl(var(--bear))",
+            },
+          ]}
           showLegend={false}
         />
       </ChartContainer>

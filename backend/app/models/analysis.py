@@ -19,7 +19,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, short_enum
@@ -80,6 +80,16 @@ class AnalysisReport(Base):
     report_md: Mapped[str | None] = mapped_column(Text)
     """最終 Markdown 報告（繁中）。"""
     error_msg: Mapped[str | None] = mapped_column(Text)
+
+    # v1.0.1：保留 analyst 結構化輸出（前端 AnalystResultCard 用）+ 還原建立參數
+    analyst_outputs: Mapped[dict | None] = mapped_column(JSONB)
+    """每個 analyst 結構化結果：{type → {score / key_points / report_md / metrics}}"""
+    analyst_types: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    """建立時的請求參數，給前端 AgentFlowGraph 還原節點用。"""
+    debate_rounds: Mapped[int | None] = mapped_column(Integer)
+    """建立時的請求參數。"""
+    risk_tolerance: Mapped[str | None] = mapped_column(String(20))
+    """建立時的請求參數（保留欄位，v1.1 由 Agent 邏輯使用）。"""
 
     # 樂觀鎖（PLAN 15.2）
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")

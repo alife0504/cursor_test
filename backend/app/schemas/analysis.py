@@ -95,6 +95,11 @@ class AnalysisDetail(BaseSchema):
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # v1.0.1 新增：給前端 AnalystResultCard / AgentFlowGraph / Risk panel 用
+    analyst_outputs: dict[str, Any] | None = None
+    analyst_types: list[str] | None = None
+    debate_rounds: int | None = None
+    risk_tolerance: str | None = None
 
 
 class DebateMessageOut(BaseSchema):

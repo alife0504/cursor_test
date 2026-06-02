@@ -7,6 +7,7 @@ import { BarChart } from "@/components/common/BarChart";
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { DataTable } from "@/components/common/DataTable";
 import { NumberFormat } from "@/components/common/NumberFormat";
+import { PageHeader } from "@/components/common/PageHeader";
 import { useModelStats, type ModelStats } from "@/hooks/useStatistics";
 
 // Phase 17 § H:模型比較
@@ -58,12 +59,10 @@ export default function StatisticsModelsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">模型比較</h1>
-        <p className="text-sm text-muted-foreground">
-          各 LLM 模型使用次數與平均成本(client-side 聚合)
-        </p>
-      </div>
+      <PageHeader
+        title="模型比較"
+        description="各 LLM 模型使用次數與平均成本（client-side 聚合）"
+      />
 
       <ChartContainer title="模型使用分佈" height={260}>
         <BarChart

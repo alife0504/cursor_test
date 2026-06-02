@@ -148,6 +148,9 @@ backfill:  ## 回填 OHLCV：make backfill ARGS="--region TW --symbol 2330 --yea
 verify-data:  ## 驗證資料完整性（stock_list / stock_prices / audit_logs）
 	cd backend && uv run python ../data-pipeline/scripts/verify_data.py
 
+dev-cleanup-audit:  ## (v1.0.1) 清除 dev/test 環境 audit_logs 測試殘留 — 用 ARGS="--dry-run" 或 ARGS="--yes"
+	cd backend && uv run python scripts/dev_cleanup_audit_artefacts.py $(ARGS)
+
 # ── 程式碼品質（P1 已有） ───────────────────────────
 
 lint:  ## 跑 ruff 檢查

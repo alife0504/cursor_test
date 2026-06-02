@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useState } from "react";
 
 import { MockBanner } from "@/components/common/MockBanner";
+import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
 import { Button } from "@/components/ui/button";
 
@@ -65,12 +66,10 @@ export default function ScreenerComparePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">多股比較</h1>
-        <p className="text-sm text-muted-foreground">
-          並排檢視最多 5 支股票的主要指標
-        </p>
-      </div>
+      <PageHeader
+        title="多股比較"
+        description="並排檢視最多 5 支股票的主要指標"
+      />
 
       <MockBanner trackingRef="GitHub issue: multi-stock-compare" />
 

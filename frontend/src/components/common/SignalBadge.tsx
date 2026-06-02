@@ -7,44 +7,86 @@ interface SignalBadgeProps {
   className?: string;
 }
 
-// Phase 16:統一顯示分析訊號與狀態
-//   - signal: BUY (綠) / SELL (紅) / HOLD (黃)
-//   - status: queued / running / completed / failed / cancelled
-const signalStyle: Record<string, string> = {
-  BUY: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100",
-  SELL: "bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-100",
-  HOLD: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
-};
+// 訊號（台股慣例：BUY=紅、SELL=綠、HOLD=橙）
+const signalStyle: Record<string, { cls: string; tone: string; label: string }> =
+  {
+    BUY: {
+      cls: "bg-signal-buy-muted text-signal-buy ring-1 ring-signal-buy/20",
+      tone: "buy",
+      label: "買進",
+    },
+    SELL: {
+      cls: "bg-signal-sell-muted text-signal-sell ring-1 ring-signal-sell/20",
+      tone: "sell",
+      label: "賣出",
+    },
+    HOLD: {
+      cls: "bg-signal-hold-muted text-signal-hold ring-1 ring-signal-hold/20",
+      tone: "hold",
+      label: "持有",
+    },
+  };
 
-const statusStyle: Record<string, string> = {
-  queued: "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-200",
-  running: "bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100",
-  completed: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100",
-  failed: "bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-100",
-  cancelled: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-200",
-};
-
-const statusLabel: Record<string, string> = {
-  queued: "排隊中",
-  running: "分析中",
-  completed: "已完成",
-  failed: "失敗",
-  cancelled: "已取消",
+const statusStyle: Record<string, { cls: string; label: string }> = {
+  queued: {
+    cls: "bg-muted text-muted-foreground ring-1 ring-border",
+    label: "排隊中",
+  },
+  running: {
+    cls: "bg-info/10 text-info ring-1 ring-info/20 animate-pulse",
+    label: "分析中",
+  },
+  completed: {
+    cls: "bg-success/10 text-success ring-1 ring-success/20",
+    label: "已完成",
+  },
+  failed: {
+    cls: "bg-destructive/10 text-destructive ring-1 ring-destructive/20",
+    label: "失敗",
+  },
+  cancelled: {
+    cls: "bg-muted text-muted-foreground ring-1 ring-border line-through",
+    label: "已取消",
+  },
 };
 
 export function SignalBadge({ signal, status, className }: SignalBadgeProps) {
-  // 已完成優先顯示 signal;進行中或失敗顯示 status
+  // 已完成優先顯示 signal；進行中或失敗顯示 status
   if (signal && status === "completed") {
+    const s = signalStyle[signal.toUpperCase()] ?? null;
+    if (s) {
+      return (
+        <Badge
+          variant="secondary"
+          data-tone={s.tone}
+          className={cn("font-semibold", s.cls, className)}
+        >
+          {s.label}（{signal.toUpperCase()}）
+        </Badge>
+      );
+    }
     return (
-      <Badge variant="secondary" className={cn(signalStyle[signal] || "", className)}>
+      <Badge variant="secondary" className={className}>
         {signal}
       </Badge>
     );
   }
   if (status) {
+    const st = statusStyle[status] ?? null;
+    if (st) {
+      return (
+        <Badge
+          variant="secondary"
+          data-status={status}
+          className={cn(st.cls, className)}
+        >
+          {st.label}
+        </Badge>
+      );
+    }
     return (
-      <Badge variant="secondary" className={cn(statusStyle[status] || "", className)}>
-        {statusLabel[status] || status}
+      <Badge variant="secondary" className={className} data-status={status}>
+        {status}
       </Badge>
     );
   }

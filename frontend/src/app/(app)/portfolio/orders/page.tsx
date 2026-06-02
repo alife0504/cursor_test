@@ -7,7 +7,9 @@ import { useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
+import { ErrorState } from "@/components/common/ErrorState";
 import { MarketBadge } from "@/components/common/MarketBadge";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
 import { OrderApprovalDialog } from "@/components/orders/OrderApprovalDialog";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +25,23 @@ import { useOrders } from "@/hooks/useOrders";
 import type { OrderSummary } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
-// Phase 16 § H:訂單核准頁
+const STATUS_LABEL: Record<string, string> = {
+  PENDING: "待核准",
+  APPROVED: "已核准",
+  REJECTED: "已拒絕",
+  EXPIRED: "已過期",
+  CANCELLED: "已取消",
+};
+
+const STATUS_STYLE: Record<string, string> = {
+  PENDING: "bg-warning/10 text-warning ring-1 ring-warning/20",
+  APPROVED: "bg-success/10 text-success ring-1 ring-success/20",
+  REJECTED: "bg-destructive/10 text-destructive ring-1 ring-destructive/20",
+  EXPIRED: "bg-muted text-muted-foreground ring-1 ring-border",
+  CANCELLED: "bg-muted text-muted-foreground ring-1 ring-border line-through",
+};
+
+// 訂單核准頁
 export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>("PENDING");
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([null]);
@@ -33,7 +51,7 @@ export default function OrdersPage() {
     mode: "approve" | "reject";
   } | null>(null);
 
-  const { data, isLoading, error } = useOrders({
+  const { data, isLoading, error, refetch } = useOrders({
     status: statusFilter && statusFilter !== "ALL" ? statusFilter : null,
     cursor,
   });
@@ -45,7 +63,7 @@ export default function OrdersPage() {
       header: "代號",
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
-          <span className="font-medium">{row.original.symbol}</span>
+          <span className="font-mono font-medium">{row.original.symbol}</span>
           <MarketBadge market={row.original.market} />
         </div>
       ),
@@ -56,37 +74,43 @@ export default function OrdersPage() {
       cell: ({ row }) => (
         <Badge
           variant="secondary"
+          data-side={row.original.side}
           className={cn(
+            "font-semibold",
             row.original.side === "BUY"
-              ? "bg-emerald-100 text-emerald-900"
-              : "bg-rose-100 text-rose-900",
+              ? "bg-signal-buy-muted text-signal-buy ring-1 ring-signal-buy/20"
+              : "bg-signal-sell-muted text-signal-sell ring-1 ring-signal-sell/20",
           )}
         >
-          {row.original.side}
+          {row.original.side === "BUY" ? "買進" : "賣出"}
         </Badge>
       ),
     },
     {
       accessorKey: "qty",
       header: "數量",
-      cell: ({ row }) => (
-        <span className="tabular-nums">{row.original.qty}</span>
-      ),
+      cell: ({ row }) => <span className="num">{row.original.qty}</span>,
     },
     {
       accessorKey: "target_price",
       header: "目標價",
       cell: ({ row }) => (
-        <span className="tabular-nums">
-          {row.original.target_price ?? "-"}
-        </span>
+        <span className="num">{row.original.target_price ?? "—"}</span>
       ),
     },
     {
       accessorKey: "status",
       header: "狀態",
       cell: ({ row }) => (
-        <Badge variant="outline">{row.original.status}</Badge>
+        <Badge
+          variant="secondary"
+          className={cn(
+            "uppercase",
+            STATUS_STYLE[row.original.status] ?? "bg-muted text-muted-foreground",
+          )}
+        >
+          {STATUS_LABEL[row.original.status] ?? row.original.status}
+        </Badge>
       ),
     },
     {
@@ -104,7 +128,7 @@ export default function OrdersPage() {
             查看 <ExternalLink className="ml-1 h-3 w-3" />
           </Link>
         ) : (
-          <span className="text-xs text-muted-foreground">-</span>
+          <span className="text-xs text-muted-foreground">—</span>
         ),
     },
     {
@@ -120,12 +144,10 @@ export default function OrdersPage() {
       cell: ({ row }) => {
         const isPending = row.original.status === "PENDING";
         if (!isPending) {
-          return (
-            <span className="text-xs text-muted-foreground">已處理</span>
-          );
+          return <span className="text-xs text-muted-foreground">—</span>;
         }
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-end gap-1">
             <Button
               size="sm"
               onClick={() =>
@@ -153,34 +175,38 @@ export default function OrdersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">待核准訂單</h1>
-        <p className="text-sm text-muted-foreground">
-          分析完成後若 signal=BUY/SELL 自動產生 PENDING 訂單;雙重確認核准
-        </p>
-      </div>
-
-      <div className="flex items-center justify-end gap-2">
-        <span className="text-sm text-muted-foreground">狀態:</span>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v ?? "ALL")}
-        >
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">全部</SelectItem>
-            <SelectItem value="PENDING">PENDING</SelectItem>
-            <SelectItem value="APPROVED">APPROVED</SelectItem>
-            <SelectItem value="REJECTED">REJECTED</SelectItem>
-            <SelectItem value="EXPIRED">EXPIRED</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      <PageHeader
+        title="待核准訂單"
+        description="分析完成後若 signal=BUY/SELL 自動產生 PENDING 訂單。雙重確認核准。"
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">狀態</span>
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v ?? "ALL")}
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部</SelectItem>
+                <SelectItem value="PENDING">PENDING</SelectItem>
+                <SelectItem value="APPROVED">APPROVED</SelectItem>
+                <SelectItem value="REJECTED">REJECTED</SelectItem>
+                <SelectItem value="EXPIRED">EXPIRED</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        }
+      />
 
       {error ? (
-        <p className="text-sm text-destructive">無法載入訂單列表</p>
+        <ErrorState
+          title="無法載入訂單列表"
+          variant="inline"
+          onRetry={refetch}
+          error={error}
+        />
       ) : null}
 
       <DataTable

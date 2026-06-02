@@ -1,31 +1,45 @@
 "use client";
 
-import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 import { DateFormat } from "@/components/common/DateFormat";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { SignalBadge } from "@/components/common/SignalBadge";
 import { buttonVariants } from "@/components/ui/button";
 import { useAnalysisList } from "@/hooks/useAnalysis";
 import { cn } from "@/lib/utils";
 
-// Phase 16 § B:儀表板 — 最近 5 筆分析
 export function RecentAnalyses({ limit = 5 }: { limit?: number }) {
-  const { data, isLoading, error } = useAnalysisList({ limit });
+  const { data, isLoading, error, refetch } = useAnalysisList({ limit });
   const items = data?.items ?? [];
 
   if (isLoading) return <LoadingSkeleton rows={3} />;
-  if (error)
+  if (error) {
     return (
-      <p className="text-sm text-destructive">無法載入分析,請稍後再試。</p>
+      <ErrorState
+        title="無法載入分析"
+        variant="inline"
+        onRetry={refetch}
+        error={error}
+      />
     );
+  }
   if (!items.length) {
     return (
       <EmptyState
         title="尚無分析記錄"
         description="到「新增分析」開始第一筆"
+        variant="inline"
+        action={{
+          label: "前往新增",
+          onClick: () => {
+            if (typeof window !== "undefined")
+              window.location.href = "/analysis/new";
+          },
+        }}
       />
     );
   }
@@ -36,15 +50,17 @@ export function RecentAnalyses({ limit = 5 }: { limit?: number }) {
         <Link
           key={it.id}
           href={`/analysis/${it.id}`}
-          className="flex items-center justify-between py-2 hover:bg-muted/40 transition-colors px-2 -mx-2 rounded-md"
+          className="-mx-2 flex items-center justify-between rounded-md px-2 py-2 transition-colors hover:bg-muted/40"
         >
           <div className="flex items-center gap-2">
-            <span className="font-medium">{it.symbol}</span>
-            <span className="text-xs text-muted-foreground">{it.market}</span>
+            <span className="font-mono font-medium">{it.symbol}</span>
+            <span className="text-[10px] uppercase text-muted-foreground">
+              {it.market}
+            </span>
             <SignalBadge signal={it.signal} status={it.status} />
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <DateFormat value={it.created_at} mode="datetime" />
+            <DateFormat value={it.created_at} mode="relative" />
             <ArrowRight className="h-3 w-3" />
           </div>
         </Link>

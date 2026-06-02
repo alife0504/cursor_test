@@ -7,6 +7,7 @@ import {
   Controls,
   Handle,
   MarkerType,
+  MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -14,63 +15,116 @@ import {
   type Node,
   type NodeTypes,
 } from "@xyflow/react";
+import {
+  CheckCircle2,
+  Loader2,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  UserCog,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 
-// Phase 16 § K:AgentFlowGraph
-//   - 動態節點:analyst x N + bull/bear x debate_rounds + manager
-//   - 狀態:pending(灰) / running(黃 animate) / completed(綠) / failed(紅)
-//   - 重複事件用 Map by node id 去重(由父層保證 nodes prop 已去重)
-//   - 簡易 left→right layout(每層垂直分散)
+// AgentFlowGraph：動態節點圖（左→右）
+//   - analyst x N → debate round x N（bull/bear 同 column）→ manager
+//   - 重複事件用 Map by id 去重（父層保證已去重）
+//   - 用色彩 token + icon + 動態 stroke 表達狀態
 
 export type FlowNodeState = "pending" | "running" | "completed" | "failed";
 
 export interface FlowNodeInput {
   id: string;
   label: string;
-  sub?: string; // 副標(如:Round 1)
+  sub?: string;
   group: "analyst" | "bull" | "bear" | "manager";
   state: FlowNodeState;
-  // 容忍 ReactFlow 的 Record<string, unknown> 約束
   [k: string]: unknown;
 }
 
 const STATE_STYLE: Record<FlowNodeState, string> = {
-  pending: "border-slate-300 bg-slate-50 text-slate-700",
+  pending:
+    "border-state-pending bg-state-pending-muted text-flat",
   running:
-    "border-amber-400 bg-amber-50 text-amber-900 animate-pulse shadow-md shadow-amber-200/50",
-  completed: "border-emerald-400 bg-emerald-50 text-emerald-900",
-  failed: "border-rose-400 bg-rose-50 text-rose-900",
+    "border-state-running bg-state-running-muted text-state-running animate-pulse-glow",
+  completed:
+    "border-state-done bg-state-done-muted text-state-done",
+  failed: "border-state-failed bg-state-failed-muted text-state-failed",
+};
+
+const STATE_ICON: Record<FlowNodeState, LucideIcon> = {
+  pending: Sparkles,
+  running: Loader2,
+  completed: CheckCircle2,
+  failed: XCircle,
+};
+
+const GROUP_ICON: Record<FlowNodeInput["group"], LucideIcon> = {
+  analyst: Sparkles,
+  bull: TrendingUp,
+  bear: TrendingDown,
+  manager: UserCog,
 };
 
 const GROUP_LABEL: Record<FlowNodeInput["group"], string> = {
   analyst: "Analyst",
-  bull: "Bull",
-  bear: "Bear",
+  bull: "Bull（看多）",
+  bear: "Bear（看空）",
   manager: "Manager",
 };
 
+const STATE_LABEL: Record<FlowNodeState, string> = {
+  pending: "待執行",
+  running: "進行中",
+  completed: "已完成",
+  failed: "失敗",
+};
+
 function FlowNodeView({ data }: { data: FlowNodeInput }) {
+  const StateIcon = STATE_ICON[data.state];
+  const GroupIcon = GROUP_ICON[data.group];
   return (
     <div
       data-testid={`flow-node-${data.id}`}
       data-state={data.state}
+      data-group={data.group}
       className={cn(
-        "min-w-[160px] rounded-md border-2 px-3 py-2 text-xs shadow-sm",
+        "min-w-[180px] rounded-lg border-2 px-3 py-2.5 text-xs shadow-soft transition-shadow",
         STATE_STYLE[data.state],
       )}
-      title={`${GROUP_LABEL[data.group]} · ${data.state}`}
+      title={`${GROUP_LABEL[data.group]} · ${STATE_LABEL[data.state]}`}
     >
-      <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
-      <div className="font-medium">{data.label}</div>
-      {data.sub ? (
-        <div className="text-[10px] text-muted-foreground">{data.sub}</div>
-      ) : null}
-      <div className="mt-1 inline-flex rounded bg-background/60 px-1 text-[10px] uppercase">
-        {data.state}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-muted-foreground/60"
+      />
+      <div className="flex items-center gap-1.5">
+        <GroupIcon className="h-3.5 w-3.5 opacity-80" />
+        <span className="font-semibold">{data.label}</span>
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
+      {data.sub ? (
+        <div className="mt-0.5 ml-5 text-[10px] text-muted-foreground">
+          {data.sub}
+        </div>
+      ) : null}
+      <div className="mt-1.5 ml-5 inline-flex items-center gap-1 rounded-full bg-background/70 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+        <StateIcon
+          className={cn(
+            "h-3 w-3",
+            data.state === "running" && "animate-spin",
+          )}
+        />
+        {STATE_LABEL[data.state]}
+      </div>
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-muted-foreground/60"
+      />
     </div>
   );
 }
@@ -81,7 +135,6 @@ const nodeTypes: NodeTypes = {
 
 interface AgentFlowGraphProps {
   nodes: FlowNodeInput[];
-  /** 每個 column 的索引;同 column 內節點垂直排;由 layout 函數推導 */
   className?: string;
 }
 
@@ -91,17 +144,16 @@ interface LayoutGroup {
 }
 
 function layoutGroups(nodes: FlowNodeInput[]): LayoutGroup[] {
-  // 1. analyst 全部放 col 0
-  // 2. debate 每輪 bull/bear 放 col 1, 2, 3...(bull/bear 同 column)
-  // 3. manager 最後一 column
   const analystNodes = nodes.filter((n) => n.group === "analyst");
-  const debateNodes = nodes.filter((n) => n.group === "bull" || n.group === "bear");
+  const debateNodes = nodes.filter(
+    (n) => n.group === "bull" || n.group === "bear",
+  );
   const managerNodes = nodes.filter((n) => n.group === "manager");
 
-  // group debate by round number(由 id 後綴 :round_N 或 sub 推導)
   const roundMap = new Map<number, FlowNodeInput[]>();
   for (const n of debateNodes) {
-    const m = /round[_-]?(\d+)/i.exec(n.id) ?? /round[_-]?(\d+)/i.exec(n.sub ?? "");
+    const m =
+      /round[_-]?(\d+)/i.exec(n.id) ?? /round[_-]?(\d+)/i.exec(n.sub ?? "");
     const round = m ? Number(m[1]) : 1;
     if (!roundMap.has(round)) roundMap.set(round, []);
     roundMap.get(round)!.push(n);
@@ -119,51 +171,60 @@ function layoutGroups(nodes: FlowNodeInput[]): LayoutGroup[] {
   return groups;
 }
 
+function edgeStateColor(state: FlowNodeState): string {
+  switch (state) {
+    case "completed":
+      return "hsl(var(--state-done))";
+    case "running":
+      return "hsl(var(--state-running))";
+    case "failed":
+      return "hsl(var(--state-failed))";
+    default:
+      return "hsl(var(--state-pending))";
+  }
+}
+
 export function AgentFlowGraph({ nodes, className }: AgentFlowGraphProps) {
   const { rfNodes, rfEdges } = useMemo(() => {
-    // de-dup by id（PLAN trap:同事件重複到 → state 用 Map）
     const seen = new Map<string, FlowNodeInput>();
     for (const n of nodes) seen.set(n.id, n);
     const dedup = Array.from(seen.values());
 
     const groups = layoutGroups(dedup);
-    const X_GAP = 220;
-    const Y_GAP = 92;
-    const Y_BASE = 20;
+    const X_GAP = 260;
+    const Y_GAP = 110;
+    const Y_BASE = 24;
 
     const rfNodes: Node[] = [];
-    const nodeIdToPos: Record<string, { x: number; y: number; column: number }> =
-      {};
-
     for (const g of groups) {
       g.rows.forEach((n, i) => {
-        const x = g.column * X_GAP;
-        const y = Y_BASE + i * Y_GAP;
         rfNodes.push({
           id: n.id,
           type: "flow",
-          position: { x, y },
+          position: { x: g.column * X_GAP, y: Y_BASE + i * Y_GAP },
           data: n,
           draggable: false,
         });
-        nodeIdToPos[n.id] = { x, y, column: g.column };
       });
     }
 
-    // edges:相鄰 column 之間全連
     const rfEdges: Edge[] = [];
     for (let i = 0; i < groups.length - 1; i += 1) {
       const from = groups[i];
       const to = groups[i + 1];
       for (const a of from.rows) {
         for (const b of to.rows) {
+          // edge 顏色取決於 source state（done = 綠、running = 橙）
+          const stroke = edgeStateColor(a.state);
+          const animated = a.state === "running";
           rfEdges.push({
             id: `e-${a.id}-${b.id}`,
             source: a.id,
             target: b.id,
             type: "smoothstep",
-            markerEnd: { type: MarkerType.ArrowClosed },
-            style: { stroke: "#94a3b8" },
+            animated,
+            markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+            style: { stroke, strokeWidth: 1.5 },
           });
         }
       }
@@ -174,7 +235,10 @@ export function AgentFlowGraph({ nodes, className }: AgentFlowGraphProps) {
 
   return (
     <div
-      className={cn("h-[360px] w-full rounded-md border bg-muted/20", className)}
+      className={cn(
+        "h-[420px] w-full overflow-hidden rounded-lg border bg-muted/10 sm:h-[480px]",
+        className,
+      )}
       data-testid="agent-flow-graph"
     >
       <ReactFlowProvider>
@@ -189,8 +253,20 @@ export function AgentFlowGraph({ nodes, className }: AgentFlowGraphProps) {
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
         >
-          <Background gap={16} />
-          <Controls showInteractive={false} />
+          <Background gap={20} className="bg-muted/20" />
+          <Controls showInteractive={false} className="!bg-card !border" />
+          <MiniMap
+            zoomable
+            pannable
+            position="bottom-right"
+            className="!bg-card !border"
+            nodeColor={(node) => {
+              const data = node.data as FlowNodeInput | undefined;
+              if (!data) return "hsl(var(--state-pending))";
+              return edgeStateColor(data.state);
+            }}
+            maskColor="hsl(var(--background) / 0.6)"
+          />
         </ReactFlow>
       </ReactFlowProvider>
     </div>

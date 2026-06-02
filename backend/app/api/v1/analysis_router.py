@@ -132,6 +132,7 @@ async def create_analysis(
         analyst_types=payload.analyst_types,
         llm_model=payload.llm_model,
         debate_rounds=payload.debate_rounds,
+        risk_tolerance=payload.risk_tolerance,
         request_id=_trace_id(request),
     )
 

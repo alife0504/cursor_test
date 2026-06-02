@@ -6,6 +6,102 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [1.0.1] — 2026-06-02 — UX & Design System Upgrade
+
+> 不破壞 v1.0 範圍下，依 Opus 4.8 全面審視 v1.0、聚焦「日後操作更順手、更專業、更美觀」的改善版本。
+> 新增 / 改造的所有測試全綠：**後端 718 passed / 前端 209 unit / typecheck 0 errors / next build 成功**。
+
+### Added — 設計系統 & 共用元件
+- **金融感官色彩系統**（[globals.css](frontend/src/app/globals.css) + [tailwind.config.ts](frontend/tailwind.config.ts)）
+  - 品牌靛藍（`--primary` 222 47% 22%）取代純黑
+  - **台股慣例：紅漲綠跌**（`--bull` / `--bear` / `--flat` / `--signal-*` / `--state-*` token）
+  - chart palette 重做（藍/橙/紫/綠/紅，有對比邏輯）
+  - `--radius` 加大、Card hover shadow lift、Sidebar 反轉為深色
+  - dark mode 完整覆蓋
+- **新共用元件**（`frontend/src/components/common/`）
+  - `PageHeader.tsx` — 統一所有頁面的 `<h1>` + `<p>` + actions slot
+  - `Breadcrumbs.tsx` — 從 `usePathname()` 自動產生繁中麵包屑（含 UUID → 「詳情」）
+  - `KpiCard.tsx` — 統一 KPI 卡（標題 + 大數值 + PriceDelta + sparkline + footer + 可點擊）
+  - `Sparkline.tsx` + `SparklineInner.tsx` — recharts Area 包裝、自動 tone
+  - `PriceDelta.tsx` — 統一漲跌幅顯示（紅漲綠跌 + 圖示 + sign + `data-tone` attribute）
+  - `StatusStepper.tsx` — 5 階段分析進度（queue → analysts → debate → manager → done），running 階段 pulse-glow
+  - `ErrorState.tsx` — 取代到處 `<p className="text-destructive">無法載入...</p>`，含 inline / card variant + 重試 CTA
+  - `CommandPalette.tsx` — 全域 ⌘K（cmdk）：股票搜尋 + 18 頁跳轉 + 最近分析
+  - `NotificationBell.tsx` — Topbar 通知 bell（30 秒輪詢，近 1h 有事件顯示紅點）
+  - 重做 `EmptyState.tsx` / `LoadingSkeleton.tsx`（補 `CardSkeleton` / `KpiSkeleton` / `ChartSkeleton`）
+
+### Added — Mobile 響應式
+- `Sidebar.tsx` 拆出 `<NavList>`、桌機保留 `aside`、Mobile 用 `<Sheet>` drawer
+- `Topbar.tsx` 加漢堡 trigger、Mobile 品牌標、⌘K hint button
+- `useUiStore` 管理 mobile nav / command palette 開關
+- 各頁 grid breakpoints 整理（sm / lg / xl 完善）
+
+### Added — Dashboard 重做
+- **`KpiRow.tsx`** — 頂部 4 KPI 牆（加權 / 櫃買 / LLM 配額 / 待核訂單，含 sparkline 與 delta）
+- **`QuickActions.tsx`** — 4 顆主要功能快捷
+- **`TodayAlerts.tsx`** — 「今日重點」事件 widget（近 24h 通知）
+- **`MarketIndexMiniChart.tsx`** 重做 — 真正 7/30/90D sparkline（fallback 提示）
+- 整版佈局：KPI 牆 + 快速行動 + 大盤趨勢 + 今日重點 + 最近分析 + 待核准訂單 + 自選股
+
+### Added — 分析詳情頁升級
+- **StatusStepper** 進度視覺化
+- **`SignalOverview.tsx`** — 信心圓環（SVG arc）+ Risk/Reward 數線（target / stop / take）
+- `AgentFlowGraph.tsx` 視覺升級：高度 360 → 420-480px、加 group icon、edge animate when source running、MiniMap
+- `AnalystResultCard.tsx` 真正接 `analysis.analyst_outputs[type]`，展示 score / key_points / report_md
+- `DebateTimeline.tsx` 改用 `ReportMarkdown` 渲染（取代 `<pre>`）+ 左側時間軸
+- `AnalysisHeader.tsx` 匯出按鈕加 loading state + 分享連結 copy
+
+### Added — 後端缺口修補
+- **Migration 0017** — `analysis_reports` 加 4 個 nullable 欄位（`analyst_outputs JSONB` / `analyst_types TEXT[]` / `debate_rounds INTEGER` / `risk_tolerance VARCHAR(20)`）
+- `AnalysisDetail` schema 顯露上述新欄位 → 前端 AnalystResultCard / AgentFlowGraph 可還原
+- `AnalysisRepository.create` 寫入新參數
+- `AnalysisService.create_analysis` 接 `risk_tolerance` 並傳遞
+- **`AnalysisService._infer_market` 改為 async + 查 stock_list** — 解原本「OTC 上櫃股票被誤標 TWSE / AMEX 被誤標 NASDAQ」的 bug
+- `backend/scripts/dev_cleanup_audit_artefacts.py` — dev/test only，清 audit_logs 測試殘留，恢復 `audit_integrity` SLO = 100%
+- Makefile 新增 `dev-cleanup-audit` target
+- 2 個新 integration test：`test_analysis_create_persists_metadata_and_detail_exposes_it` / `test_infer_market_uses_stock_list_for_tpex_symbol`
+
+### Added — Auth Layout 品牌化
+- `(auth)/layout.tsx` 左右兩欄（lg+）：左品牌 hero（漸層 mesh + 4 個賣點）/ 右登入卡
+- 加 ThemeToggle（登入前可切深淺）
+
+### Added — 前端測試
+- 6 個新 unit test：`PriceDelta`、`PageHeader`、`ErrorState`、`KpiCard`、`StatusStepper`、`Breadcrumbs`
+- 既有測試適配新色彩 token（`SignalBadge` / `IndexCard` / `PercentFormat` 改用 `data-tone` attribute）
+- 前端 **183 → 209** unit tests / typecheck 0 errors / next build 成功
+
+### Added — i18n 補完
+- zh-TW 字典擴充：dashboard / analysis / portfolio / status / signal / market / common.error / common.empty 等 key
+- en dict 仍 fallback 到 zh-TW（v1.2 才補完整翻譯）
+
+### Changed
+- 全部 18 頁 `<h1>` + `<p>` 改用 `<PageHeader>` 統一
+- 全部 `text-emerald-*` / `text-rose-*` 漲跌語意改 `text-bull` / `text-bear`（紅漲綠跌）
+- 漲跌語意之外的 emerald/rose 改 `text-success` / `text-destructive` 語意 token（admin users / pipeline / notifications）
+- 沿用既有的 ErrorBoundary / RBAC / Audit / Idempotency — 不動內部架構
+
+### Fixed
+- `_infer_market` 不再 hardcode TWSE/NASDAQ；TPEX/AMEX 股票市場標籤正確
+- AnalystResultCard 不再是「已完成 → 點箭頭展開但沒內容」的 stub
+- dev DB 殘留 tampering audit row（v1.0 結案報告中 broken_id=535, 559）有了清理腳本
+
+### Migration
+從 v1.0.0 升級：
+```bash
+cd backend && uv run alembic upgrade head  # 套用 0017 migration（nullable，向後相容）
+cd frontend && npm install && npm run build  # 重建（依賴沒變）
+# 若 dev DB 有 audit tampering 殘留：
+make dev-cleanup-audit ARGS="--yes"
+```
+
+### v1.1 待辦（仍依 PLAN 第 33 章 + 本次改善留下）
+- 大盤 OHLCV symbol（TAIEX / TPEX）真實 backfill，讓 dashboard sparkline 有資料
+- analyst_outputs 由 LangGraph workflow 寫入（目前只有 schema 顯露，實際還沒寫）
+- `data_freshness_minutes` / `audit_integrity` SLO 在 prod 跑 30 天回填基準
+- v1.1 真實後端化 calendar / compare / backtest（5 個 mock 頁）
+
+---
+
 ## [1.0.0] — 2026-05-18 — TradingAgents-TW Release
 
 > **Release Ready** — 21 個 Phase（P0-P20）全部完成；716 後端 tests + 183 前端 unit + 57 E2E 全綠。

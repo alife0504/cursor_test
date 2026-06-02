@@ -7,6 +7,7 @@ import { BarChart } from "@/components/common/BarChart";
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { MockBanner } from "@/components/common/MockBanner";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSystemInfo, useSystemMetrics } from "@/hooks/useSystem";
 
@@ -72,12 +73,10 @@ export default function AdminSystemPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">系統監控</h1>
-        <p className="text-sm text-muted-foreground">
-          API 可用性、延遲、磁碟、佇列等關鍵指標(/metrics 摘要)
-        </p>
-      </div>
+      <PageHeader
+        title="系統監控"
+        description="API 可用性、延遲、磁碟、佇列等關鍵指標（/metrics 摘要）"
+      />
 
       <MockBanner
         title="本頁圖表為 Mock - v1.1 將接 Prometheus / Grafana"
@@ -113,7 +112,7 @@ export default function AdminSystemPage() {
               <BarChart
                 data={latencySeries}
                 xKey="hour"
-                series={[{ dataKey: "value", name: "延遲 (ms)", fill: "#3b82f6" }]}
+                series={[{ dataKey: "value", name: "延遲 (ms)", fill: "hsl(var(--chart-1))" }]}
                 showLegend={false}
               />
             </ChartContainer>
@@ -121,7 +120,7 @@ export default function AdminSystemPage() {
               <BarChart
                 data={queueSeries}
                 xKey="hour"
-                series={[{ dataKey: "value", name: "queue len", fill: "#8b5cf6" }]}
+                series={[{ dataKey: "value", name: "queue len", fill: "hsl(var(--chart-3))" }]}
                 showLegend={false}
               />
             </ChartContainer>

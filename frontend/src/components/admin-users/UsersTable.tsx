@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
+import { ErrorState } from "@/components/common/ErrorState";
 import { Pagination } from "@/components/common/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,9 +32,9 @@ import type { AdminUserItem } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
 const ROLE_STYLE: Record<string, string> = {
-  ADMIN: "bg-rose-100 text-rose-900",
-  ANALYST: "bg-sky-100 text-sky-900",
-  VIEWER: "bg-slate-100 text-slate-700",
+  ADMIN: "bg-destructive/10 text-destructive ring-1 ring-destructive/20",
+  ANALYST: "bg-info/10 text-info ring-1 ring-info/20",
+  VIEWER: "bg-muted text-muted-foreground ring-1 ring-border",
 };
 
 interface ResetPasswordDialogProps {
@@ -160,12 +161,15 @@ export function UsersTable() {
         row.original.is_active ? (
           <Badge
             variant="secondary"
-            className="bg-emerald-100 text-emerald-900"
+            className="bg-success/10 text-success ring-1 ring-success/20"
           >
             啟用中
           </Badge>
         ) : (
-          <Badge variant="secondary" className="bg-zinc-200 text-zinc-700">
+          <Badge
+            variant="secondary"
+            className="bg-muted text-muted-foreground ring-1 ring-border"
+          >
             已停用
           </Badge>
         ),
@@ -207,9 +211,9 @@ export function UsersTable() {
               disabled={update.isPending}
             >
               {u.is_active ? (
-                <ShieldOff className="h-4 w-4 text-rose-600" />
+                <ShieldOff className="h-4 w-4 text-destructive" />
               ) : (
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                <ShieldCheck className="h-4 w-4 text-success" />
               )}
             </Button>
             {u.is_active ? (
@@ -217,7 +221,7 @@ export function UsersTable() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setDeleteTarget(u)}
-                className="text-rose-600"
+                className="text-destructive hover:text-destructive"
               >
                 刪除
               </Button>
@@ -229,7 +233,16 @@ export function UsersTable() {
   ];
 
   if (error) {
-    return <p className="text-sm text-destructive">用戶列表載入失敗</p>;
+    return (
+      <ErrorState
+        title="用戶列表載入失敗"
+        variant="inline"
+        onRetry={() => {
+          if (typeof window !== "undefined") window.location.reload();
+        }}
+        error={error}
+      />
+    );
   }
 
   return (

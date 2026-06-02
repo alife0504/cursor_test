@@ -108,6 +108,24 @@ export interface AnalysisSummary {
   completed_at?: string | null;
 }
 
+/** Analyst raw output 的結構（後端 P14+ 寫入 analysis_reports.analyst_outputs）。 */
+export interface AnalystOutput {
+  /** 分析師類型：market / fundamental / news / sentiment */
+  type?: string;
+  /** 信心度 0-1 */
+  score?: number | string | null;
+  /** 訊號（同 BUY/SELL/HOLD 系列） */
+  signal?: string | null;
+  /** 關鍵觀察點（依 prompt schema） */
+  key_points?: string[] | null;
+  /** Markdown 完整報告片段（可選） */
+  report_md?: string | null;
+  /** 額外結構化資料（指標數值等） */
+  metrics?: Record<string, unknown> | null;
+  /** 任何其他欄位 — pass-through */
+  [k: string]: unknown;
+}
+
 export interface AnalysisDetail extends AnalysisSummary {
   user_id: UUID;
   target_price?: string | null;
@@ -120,6 +138,12 @@ export interface AnalysisDetail extends AnalysisSummary {
   error_msg?: string | null;
   version: number;
   started_at?: string | null;
+  /** Phase 14+：每個 analyst 的結構化輸出（v1.0.1 後端開始顯露） */
+  analyst_outputs?: Record<string, AnalystOutput> | null;
+  /** 從建立參數帶回，給前端 AgentFlowGraph 建節點用（v1.0.1 後端開始顯露） */
+  analyst_types?: string[] | null;
+  debate_rounds?: number | null;
+  risk_tolerance?: string | null;
 }
 
 export interface DebateMessage {
