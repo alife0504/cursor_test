@@ -22,11 +22,11 @@ export function MockBanner({
     <div
       data-testid="mock-banner"
       className={cn(
-        "flex items-start gap-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm",
+        "flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm",
         className,
       )}
     >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="flex flex-col gap-1">
         <p className="font-medium">{title}</p>
         <p className="text-xs text-muted-foreground">
