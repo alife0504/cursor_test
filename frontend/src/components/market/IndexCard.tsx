@@ -11,6 +11,16 @@ interface IndexCardProps {
   className?: string;
 }
 
+function fmtValue(v: string | number | null | undefined): string {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function IndexCard({
   name,
   value,
@@ -34,9 +44,7 @@ export function IndexCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="num text-2xl font-bold leading-tight">
-          {value !== null && value !== undefined ? String(value) : "—"}
-        </p>
+        <p className="num text-2xl font-bold leading-tight">{fmtValue(value)}</p>
         {num !== null && Number.isFinite(num) ? (
           <p
             data-tone={tone}

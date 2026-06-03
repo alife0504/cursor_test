@@ -6,10 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
-## [1.0.2] — 2026-06-03 — 功能接通 + 認證穩定性 + 登入頁精修
+## [1.0.2] — 2026-06-03 — 功能接通 + 認證穩定性 + 前端欄位稽核 + 市場數據
 
-> 以 Opus 4.8 視角延續 v1.0.1：聚焦「把宣稱完成但實際失效的功能真正接通」、修補一個會導致閒置後被強制登出的認證隱憂，並精修登入體驗。
-> 驗證：後端新增 11 測試（單元 10 + 整合 1）全綠、`pytest --collect-only` 731 無 import 錯誤；前端 typecheck 0 errors、vitest 209 passed、next build 成功。
+> 以 Opus 4.8 視角延續 v1.0.1：聚焦「把宣稱完成但實際失效的功能真正接通」、修補會導致閒置後被強制登出的認證隱憂、全面對齊前端欄位名與後端 schema，並讓大盤指數真正有值。多項修正已於本機接上真實後端（Docker stack）逐頁視覺驗證。
+> 驗證：後端新增測試全綠（market router 8 passed 等）；前端 typecheck 0 errors、vitest 209 passed、next build 成功。
 
 ### Fixed — 核心功能缺口（v1.0.1 宣稱完成但實際失效）
 - **`analyst_outputs` 從未寫入 DB**：分析詳情頁的 AnalystResultCard 永遠 fallback「結構化資料尚未取得」。
@@ -22,6 +22,20 @@ Breaking changes within the 0.x line are called out explicitly.
 - **Refresh 風暴 → 強制全部登出**：多查詢頁面（如儀表板）在 access token 過期後會同時噴多個 401。原本每個 401 各自呼叫 `/auth/refresh`，但後端 refresh token 是單次輪替，並發 refresh 會被「重用偵測」判為攻擊 → **強制撤銷所有 session**。使用者閒置約 15 分鐘後重整就可能整個被登出。
   - [api.ts](frontend/src/lib/api.ts)：新增共用 in-flight refresh promise（mutex），並發 401 共用同一次 refresh。
   - [AuthBootstrap.tsx](frontend/src/components/common/AuthBootstrap.tsx)：改走同一個共用 `refreshAccessToken()`，與 interceptor 不再互相競態。
+
+### Fixed — 前端欄位對齊後端 schema（全面稽核）
+對照 `backend/app/schemas/*.py` 稽核前端，修正多處 typecheck 抓不到的欄位名不一致（前端讀的 key ≠ 後端回傳 → 顯示空 / — / 篩選失效）：
+- **MarketOverview**：`index`→`indices`、`advancers/decliners/unchanged` → `advance_count/decline_count/unchanged_count`（市場總覽頁 + 儀表板 MarketIndexMiniChart）
+- **NewsItem**：`sentiment_label` → `sentiment`（新聞情緒頁 + SentimentBar）
+- **AnnouncementItem**：`type` → `announcement_type`；移除後端不存在的 source 欄
+- **ScreenerRow**：`pe` → `pe_ratio`（選股表格 PE 欄）
+- **CalendarEvent**：對齊 `event_date/event_type`（供 v1.1；calendar 頁目前仍本地 mock）
+- 註：screener filter 的 `PE_min/RSI_min` 大寫是正確的（後端 router 有 alias），未動。
+
+### Added — 大盤指數報價（治本）
+- [market_repo.py](backend/app/repos/market_repo.py) `get_index_quotes` + [market_service.py](backend/app/services/market_service.py) `_build_indices`：market overview 的指數 close + 當日漲跌% 改由 stock_prices 動態填入；`DEFAULT_INDICES` symbol 對齊 TAIEX/TPEX。市場總覽指數卡不再「—」（實機驗證 23,680.45 / +1.22%）。
+- [IndexCard.tsx](frontend/src/components/market/IndexCard.tsx)：指數值格式化（千分位 + 2 位小數，`23,680.45` 取代 `23680.450000`）。
+- [MarketIndexMiniChart.tsx](frontend/src/components/dashboard/MarketIndexMiniChart.tsx)：儀表板大盤趨勢卡同步修正欄位接線 + 空圖提示改 `make seed-index`。
 
 ### Added — Dev/Demo 工具
 - [seed_index_ohlcv.py](data-pipeline/scripts/seed_index_ohlcv.py) + `make seed-index`：寫入 TAIEX / TPEX 指數 OHLCV（`source=dev-seed`、強制非 prod），讓本機儀表板立即有資料、sparkline 不再空白。正式環境真實大盤回填仍列 v1.1。
