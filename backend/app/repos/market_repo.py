@@ -105,6 +105,63 @@ class MarketRepository(BaseRepository):
             "volume": int(row.volume or 0),
         }
 
+    # ── 大盤指數報價（從 stock_prices 取指數 symbol 的最近兩日）────────
+    async def get_index_quotes(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """取指定指數 symbols 最近 2 個交易日，算出 close + 當日漲跌%。
+
+        指數（TAIEX / TPEX 等）以一般 OHLCV row 存於 stock_prices（symbol 即指數代號），
+        不依賴 stock_list.market，故 by symbol 直接查。
+        """
+        if not symbols:
+            return {}
+        rn = (
+            func.row_number()
+            .over(
+                partition_by=StockPrice.symbol,
+                order_by=StockPrice.date.desc(),
+            )
+            .label("rn")
+        )
+        sub = (
+            select(
+                StockPrice.symbol.label("symbol"),
+                StockPrice.date.label("date"),
+                StockPrice.close.label("close"),
+                StockPrice.volume.label("volume"),
+                rn,
+            )
+            .where(StockPrice.symbol.in_(symbols))
+            .subquery()
+        )
+        stmt = select(sub.c.symbol, sub.c.date, sub.c.close, sub.c.volume, sub.c.rn).where(
+            sub.c.rn <= 2
+        )
+        result = await self.session.execute(stmt)
+
+        by_symbol: dict[str, dict[int, Any]] = {}
+        for r in result.all():
+            by_symbol.setdefault(r.symbol, {})[int(r.rn)] = r
+
+        out: dict[str, dict[str, Any]] = {}
+        for sym, rows in by_symbol.items():
+            latest = rows.get(1)
+            if latest is None:
+                continue
+            change: Decimal | None = None
+            change_pct: Decimal | None = None
+            prev = rows.get(2)
+            if prev is not None and prev.close not in (None, 0):
+                change = Decimal(latest.close) - Decimal(prev.close)
+                change_pct = (change / Decimal(prev.close) * Decimal(100)).quantize(Decimal("0.01"))
+            out[sym] = {
+                "close": latest.close,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": int(latest.volume or 0),
+                "as_of": latest.date,
+            }
+        return out
+
     # ── 三大法人（TW only）──────────────────────────────────
     async def get_institutional_for_date(
         self,

@@ -39,11 +39,12 @@ def _validate_market(market: str) -> str:
     return m
 
 
-# 預設 TW 三大主指數 / US 三大指數 — 真實 quote 暫無，先 placeholder
+# 預設指數定義。symbol 對齊 stock_prices 內的指數 OHLCV（TAIEX / TPEX），
+# 報價由 get_overview 從 stock_prices 動態填入（見 _build_indices）。
 DEFAULT_INDICES: dict[str, list[dict[str, str]]] = {
     "TW": [
-        {"name": "加權指數", "symbol": "^TWII"},
-        {"name": "OTC 指數", "symbol": "^TWOII"},
+        {"name": "加權指數", "symbol": "TAIEX"},
+        {"name": "櫃買指數", "symbol": "TPEX"},
     ],
     "US": [
         {"name": "S&P 500", "symbol": "^GSPC"},
@@ -72,13 +73,14 @@ class MarketService:
             logger.warning("market.overview.cache_read_failed", error=str(exc), market=m)
 
         # 走 DB
+        indices = await self._build_indices(m)
         as_of = await self.repo.get_latest_trading_date(m)
         if as_of is None:
-            # 沒任何 stock_prices — 回 placeholder
+            # 沒任何個股 stock_prices — 家數回 0，但指數仍可能有資料
             payload: dict[str, Any] = {
                 "market": m,
                 "as_of": datetime.utcnow().date().isoformat(),
-                "indices": DEFAULT_INDICES.get(m, []),
+                "indices": indices,
                 "advance_count": 0,
                 "decline_count": 0,
                 "unchanged_count": 0,
@@ -89,7 +91,7 @@ class MarketService:
             payload = {
                 "market": m,
                 "as_of": as_of.isoformat(),
-                "indices": DEFAULT_INDICES.get(m, []),
+                "indices": indices,
                 "advance_count": int(agg.get("advance") or 0),
                 "decline_count": int(agg.get("decline") or 0),
                 "unchanged_count": int(agg.get("unchanged") or 0),
@@ -104,6 +106,32 @@ class MarketService:
             logger.warning("market.overview.cache_write_failed", error=str(exc), market=m)
 
         return payload
+
+    async def _build_indices(self, market: str) -> list[dict[str, Any]]:
+        """組裝指數清單 + 從 stock_prices 填入最近報價（Decimal→str 以利 JSON cache）。"""
+        defs = DEFAULT_INDICES.get(market, [])
+        symbols = [d["symbol"] for d in defs]
+        quotes = await self.repo.get_index_quotes(symbols) if symbols else {}
+
+        def _s(v: Any) -> str | None:
+            return str(v) if v is not None else None
+
+        out: list[dict[str, Any]] = []
+        for d in defs:
+            q = quotes.get(d["symbol"], {})
+            as_of = q.get("as_of")
+            out.append(
+                {
+                    "name": d["name"],
+                    "symbol": d["symbol"],
+                    "close": _s(q.get("close")),
+                    "change": _s(q.get("change")),
+                    "change_pct": _s(q.get("change_pct")),
+                    "volume": q.get("volume"),
+                    "as_of": as_of.isoformat() if as_of else None,
+                }
+            )
+        return out
 
     # ── institutional（TW only）─────────────────────────
     async def get_institutional(

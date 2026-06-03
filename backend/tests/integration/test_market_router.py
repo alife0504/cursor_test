@@ -38,6 +38,53 @@ async def test_market_overview_returns_envelope(auth_client, make_test_user, log
     assert isinstance(data["indices"], list)
 
 
+async def test_market_overview_index_close_from_ohlcv(
+    auth_client, make_test_user, login_helper, seed_stocks, seed_ohlcv
+) -> None:
+    """v1.0.2：加權指數(TAIEX) 的 close / change_pct 由 stock_prices 動態填入。"""
+    await seed_stocks(
+        [{"symbol": "TAIEX", "market": "OTHER", "name": "加權指數", "is_active": False}]
+    )
+    await seed_ohlcv(
+        [
+            {
+                "symbol": "TAIEX",
+                "date": date(2026, 5, 28),
+                "open": 23000,
+                "high": 23100,
+                "low": 22900,
+                "close": 23000,
+                "volume": 1000,
+            },
+            {
+                "symbol": "TAIEX",
+                "date": date(2026, 5, 29),
+                "open": 23010,
+                "high": 23300,
+                "low": 22950,
+                "close": 23230,
+                "volume": 1200,
+            },
+        ]
+    )
+    user, pwd = await make_test_user(must_change=False)
+    access, _ = await login_helper(auth_client, user.email, pwd)
+    r = auth_client.get(
+        "/api/v1/market/overview?market=TW",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r.status_code == 200, r.text
+    indices = r.json()["data"]["indices"]
+    taiex = next((i for i in indices if i["symbol"] == "TAIEX"), None)
+    assert taiex is not None, indices
+    # 重點：close 與 change_pct 由 stock_prices 填入（非 null），且為合法數字。
+    # （不斷言確切數值，因整合測試共用 DB 可能已有其他 TAIEX OHLCV）
+    assert taiex["close"] is not None, "加權指數 close 應由 stock_prices 填入"
+    assert float(taiex["close"]) > 0
+    assert taiex["change_pct"] is not None, "兩日資料應算出 change_pct"
+    float(taiex["change_pct"])  # 應可轉 float
+
+
 # ────────────────────────────────────────────────────────
 # 3. /overview 不支援 market → 422
 # ────────────────────────────────────────────────────────
