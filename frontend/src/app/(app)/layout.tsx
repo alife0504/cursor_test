@@ -19,8 +19,8 @@ export default function AppLayout({
       <MobileSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar />
-        <main className="flex-1 overflow-y-auto bg-muted/20">
-          <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 p-4 sm:p-6">
+        <main className="flex-1 overflow-y-auto bg-app-mesh">
+          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6 lg:px-8">
             <Breadcrumbs />
             <ErrorBoundary>
               <AuthBootstrap />

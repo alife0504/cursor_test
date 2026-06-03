@@ -365,7 +365,7 @@ export function Sidebar() {
   const role = useAuthStore((s) => s.user?.role);
   const isAdmin = role === "ADMIN";
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex">
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-brand-gradient text-sidebar-foreground md:flex">
       <SidebarBrand />
       <NavList pathname={pathname} isAdmin={isAdmin} />
       <SidebarFooter role={role} />
@@ -385,7 +385,7 @@ export function MobileSidebar() {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetContent
         side="left"
-        className="w-72 max-w-[80vw] bg-sidebar text-sidebar-foreground p-0"
+        className="w-72 max-w-[80vw] bg-brand-gradient text-sidebar-foreground p-0"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>主選單</SheetTitle>

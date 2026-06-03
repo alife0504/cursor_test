@@ -13,31 +13,31 @@
 
 @layer base {
   :root {
-    /* 基底 */
-    --background: 220 20% 99%;
-    --foreground: 222 47% 11%;
+    /* 基底 — 冷調靛灰底（非純白），白卡片浮其上形成層次；與深色 sidebar 同色系呼應 */
+    --background: 222 32% 95.5%;
+    --foreground: 222 47% 13%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 222 47% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 222 47% 13%;
 
-    /* 品牌（靛藍） */
-    --primary: 222 47% 22%;
+    /* 品牌（靛藍）— 提亮為飽和靛藍，更有生命、去除近黑感 */
+    --primary: 223 57% 33%;
     --primary-foreground: 0 0% 100%;
-    --primary-muted: 222 47% 96%;
+    --primary-muted: 223 45% 94%;
 
-    /* 中性 */
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 222 47% 22%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 220 14% 94%;
-    --accent-foreground: 222 47% 22%;
+    /* 中性 — 冷調，與品牌同源 */
+    --secondary: 220 22% 93%;
+    --secondary-foreground: 223 47% 26%;
+    --muted: 220 24% 93%;
+    --muted-foreground: 220 12% 42%;
+    --accent: 222 30% 90%;
+    --accent-foreground: 223 47% 26%;
 
     /* 表單 */
-    --border: 220 13% 90%;
-    --input: 220 13% 90%;
-    --ring: 222 47% 35%;
+    --border: 220 20% 88%;
+    --input: 220 20% 86%;
+    --ring: 223 57% 45%;
 
     /* 訊號（台股紅漲綠跌） */
     --bull: 0 75% 50%;
@@ -247,6 +247,22 @@
       radial-gradient(at 100% 0%, hsl(var(--chart-2) / 0.06) 0px, transparent 50%),
       radial-gradient(at 100% 100%, hsl(var(--chart-3) / 0.06) 0px, transparent 50%),
       radial-gradient(at 0% 100%, hsl(var(--info) / 0.06) 0px, transparent 50%);
+  }
+  /* App 內容區底色 — 冷靛灰 + 極淡品牌光暈，與深色 sidebar 同源呼應、避免死白 */
+  .bg-app-mesh {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(1000px circle at 0% -5%, hsl(var(--primary) / 0.07), transparent 45%),
+      radial-gradient(760px circle at 100% 0%, hsl(var(--info) / 0.05), transparent 42%);
+    background-attachment: fixed;
+  }
+  /* 深色品牌漸層 — sidebar / 登入 hero 用：深邃靛藍 + 微紫，取代死黑 */
+  .bg-brand-gradient {
+    background-color: hsl(var(--sidebar));
+    background-image:
+      radial-gradient(130% 90% at 0% 0%, hsl(223 62% 26% / 0.95), transparent 60%),
+      radial-gradient(110% 70% at 100% 100%, hsl(266 52% 24% / 0.6), transparent 58%),
+      linear-gradient(160deg, hsl(224 48% 15%), hsl(222 48% 9%));
   }
   /* 可重複使用：focus ring */
   .focus-ring {
