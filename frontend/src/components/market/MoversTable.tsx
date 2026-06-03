@@ -6,7 +6,7 @@ import { useMemo } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { NumberFormat } from "@/components/common/NumberFormat";
-import { PercentFormat } from "@/components/common/PercentFormat";
+import { PriceDelta } from "@/components/common/PriceDelta";
 import { useMarketMovers } from "@/hooks/useMarket";
 import type { MoverRow } from "@/lib/api-types";
 
@@ -55,9 +55,10 @@ export function MoversTable({ type, market, limit = 10 }: MoversTableProps) {
         accessorKey: "change_pct",
         header: "漲跌幅",
         cell: ({ row }) => (
-          <PercentFormat
+          <PriceDelta
             value={row.original.change_pct ?? null}
-            colored
+            mode="raw"
+            showIcon={false}
           />
         ),
       },

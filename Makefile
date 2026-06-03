@@ -6,7 +6,7 @@
         backend-logs init-db migration-up migration-down migration-new \
         migration-status migration-history migration-redo \
         up-workers workers-logs workers-restart down-workers \
-        seed-stocks seed-admin backfill seed-index verify-data celery-shell \
+        seed-stocks seed-admin backfill seed-index seed-demo verify-data celery-shell \
         celery-purge celery-inspect \
         frontend-install frontend-dev frontend-build frontend-start \
         frontend-test frontend-typecheck frontend-lint frontend-e2e \
@@ -147,6 +147,9 @@ backfill:  ## 回填 OHLCV：make backfill ARGS="--region TW --symbol 2330 --yea
 
 seed-index:  ## (v1.0.2) dev/demo：寫入大盤指數 OHLCV 讓 dashboard 不再空 — ARGS="--yes"
 	cd backend && uv run python ../data-pipeline/scripts/seed_index_ohlcv.py $(ARGS)
+
+seed-demo:  ## (v1.0.2) dev/demo：8 檔台股 OHLCV/三大法人/新聞/公告/自選股 — ARGS="--yes"
+	cd backend && uv run python ../data-pipeline/scripts/seed_demo_data.py $(ARGS)
 
 verify-data:  ## 驗證資料完整性（stock_list / stock_prices / audit_logs）
 	cd backend && uv run python ../data-pipeline/scripts/verify_data.py

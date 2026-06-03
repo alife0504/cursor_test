@@ -114,7 +114,7 @@ export default function StatisticsAccuracyPage() {
         <div className="rounded-lg border bg-card p-3 card-hover">
           <p className="text-xs text-muted-foreground">BUY 命中率（粗估）</p>
           <p className="num text-2xl font-bold text-bull">
-            <PercentFormat value={stats.buy.rate * 100} />
+            <PercentFormat value={stats.buy.rate} />
           </p>
           <p className="text-xs text-muted-foreground">
             {stats.buy.hits} / {stats.buy.total}
@@ -123,7 +123,7 @@ export default function StatisticsAccuracyPage() {
         <div className="rounded-lg border bg-card p-3 card-hover">
           <p className="text-xs text-muted-foreground">SELL 命中率（粗估）</p>
           <p className="num text-2xl font-bold text-bear">
-            <PercentFormat value={stats.sell.rate * 100} />
+            <PercentFormat value={stats.sell.rate} />
           </p>
           <p className="text-xs text-muted-foreground">
             {stats.sell.hits} / {stats.sell.total}
