@@ -259,14 +259,14 @@
   /* 深色品牌漸層 — sidebar / 登入 hero 用：明顯的垂直靛藍漸層 + 頂部品牌光暈，
      色彩飽和、清楚是「藍」非「黑」，但仍夠深讓白字可讀。 */
   .bg-brand-gradient {
-    background-color: hsl(226 52% 17%);
+    background-color: hsl(225 52% 21%);
     background-image:
       /* 頂部品牌光暈（logo 後方）— 明亮靛藍 halo，往下淡出 */
-      radial-gradient(125% 46% at 50% -6%, hsl(221 80% 48% / 0.55), transparent 55%),
+      radial-gradient(128% 50% at 50% -6%, hsl(221 84% 54% / 0.62), transparent 58%),
       /* 右下微紫，增添層次 */
-      radial-gradient(100% 45% at 100% 106%, hsl(265 60% 44% / 0.34), transparent 60%),
+      radial-gradient(100% 45% at 100% 106%, hsl(265 64% 50% / 0.38), transparent 60%),
       /* 主體垂直漸層：上亮靛藍 → 下深靛藍（高瘦面才看得出變化） */
-      linear-gradient(180deg, hsl(225 58% 26%) 0%, hsl(229 56% 16%) 55%, hsl(231 56% 11%) 100%);
+      linear-gradient(180deg, hsl(224 58% 32%) 0%, hsl(228 56% 22%) 55%, hsl(231 54% 15%) 100%);
   }
   /* 可重複使用：focus ring */
   .focus-ring {
