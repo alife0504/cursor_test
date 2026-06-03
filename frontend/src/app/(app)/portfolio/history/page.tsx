@@ -1,10 +1,12 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import { CheckCircle2, History, TrendingDown, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
+import { KpiCard } from "@/components/common/KpiCard";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { NumberFormat } from "@/components/common/NumberFormat";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -37,6 +39,13 @@ export default function TradeHistoryPage() {
     side: side === "all" ? null : side,
     cursor,
   });
+
+  const summary = useMemo(() => {
+    const buy = items.filter((o) => o.side === "BUY").length;
+    const sell = items.filter((o) => o.side === "SELL").length;
+    const approved = items.filter((o) => o.status === "APPROVED").length;
+    return { n: items.length, buy, sell, approved };
+  }, [items]);
 
   const columns = useMemo<ColumnDef<OrderSummary>[]>(
     () => [
@@ -128,6 +137,38 @@ export default function TradeHistoryPage() {
         title="交易記錄"
         description="全部訂單（含 APPROVED / REJECTED / PENDING 等）；可篩選 symbol 與方向"
       />
+
+      {/* 摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="本頁筆數"
+          value={summary.n}
+          subtitle={`已核准 ${summary.approved} 筆`}
+          icon={History}
+          accent="primary"
+        />
+        <KpiCard
+          title="買入 BUY"
+          value={summary.buy}
+          subtitle="紅漲 · 做多"
+          icon={TrendingUp}
+          accent="bull"
+        />
+        <KpiCard
+          title="賣出 SELL"
+          value={summary.sell}
+          subtitle="綠跌 · 做空"
+          icon={TrendingDown}
+          accent="bear"
+        />
+        <KpiCard
+          title="已核准"
+          value={summary.approved}
+          subtitle="實際成交訂單"
+          icon={CheckCircle2}
+          accent="info"
+        />
+      </section>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="flex flex-col gap-1">
