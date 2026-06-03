@@ -1,12 +1,20 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import {
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  ScrollText,
+  Server,
+  Users,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
 import { ErrorState } from "@/components/common/ErrorState";
+import { KpiCard } from "@/components/common/KpiCard";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
 import { Button } from "@/components/ui/button";
@@ -69,6 +77,13 @@ export default function AuditPage() {
     cursor,
   });
   const items = data?.items ?? [];
+
+  const summary = useMemo(() => {
+    const actions = new Set(items.map((i) => i.action)).size;
+    const system = items.filter((i) => !i.actor_id).length;
+    const actors = new Set(items.map((i) => i.actor_id).filter(Boolean)).size;
+    return { n: items.length, actions, system, actors };
+  }, [items]);
 
   const applyFilter = () => {
     setAppliedFilters({ actor, action, entity, from, to });
@@ -147,6 +162,38 @@ export default function AuditPage() {
         title="審計日誌"
         description="Tamper-evident 紀錄（hash chain）。僅 ADMIN 可看"
       />
+
+      {/* 摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="本頁事件"
+          value={summary.n}
+          subtitle="audit log 筆數"
+          icon={ScrollText}
+          accent="primary"
+        />
+        <KpiCard
+          title="不同 Action"
+          value={summary.actions}
+          subtitle="事件類型數"
+          icon={Activity}
+          accent="info"
+        />
+        <KpiCard
+          title="系統事件"
+          value={summary.system}
+          subtitle="無 actor（系統觸發）"
+          icon={Server}
+          accent="info"
+        />
+        <KpiCard
+          title="不同 Actor"
+          value={summary.actors}
+          subtitle="操作者數"
+          icon={Users}
+          accent="warning"
+        />
+      </section>
 
       <div className="grid grid-cols-1 gap-2 rounded-md border p-3 md:grid-cols-5">
         <div>

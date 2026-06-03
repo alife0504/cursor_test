@@ -97,10 +97,11 @@ export default function NotificationsPage() {
         description="LINE Notify / Telegram 通知與訂閱事件"
       />
 
+      <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
       {settings.isLoading ? (
         <LoadingSkeleton rows={6} />
       ) : (
-        <section className="grid gap-4 rounded-lg border bg-card p-4">
+        <section className="grid gap-4 rounded-lg border bg-card p-4 card-hover">
           <h3 className="text-sm font-medium">頻道設定</h3>
 
           {/* LINE token */}
@@ -191,8 +192,9 @@ export default function NotificationsPage() {
         </section>
       )}
 
-      {/* Events */}
-      <section className="grid gap-3 rounded-lg border bg-card p-4">
+      {/* 右欄：訂閱事件 + 儲存 */}
+      <div className="flex flex-col gap-4">
+      <section className="grid gap-3 rounded-lg border bg-card p-4 card-hover">
         <h3 className="text-sm font-medium">訂閱事件</h3>
         <div className="grid gap-2 sm:grid-cols-2">
           {EVENT_OPTIONS.map((ev) => (
@@ -215,6 +217,8 @@ export default function NotificationsPage() {
         <Button onClick={handleSave} disabled={updateMut.isPending}>
           {updateMut.isPending ? "儲存中..." : "儲存設定"}
         </Button>
+      </div>
+      </div>
       </div>
 
       {/* History */}
