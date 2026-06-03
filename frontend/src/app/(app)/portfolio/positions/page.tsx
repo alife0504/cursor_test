@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Briefcase, Wallet } from "lucide-react";
+import { Briefcase, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 
@@ -21,7 +21,9 @@ export default function PortfolioPositionsPage() {
       (acc, p) => acc + Math.abs(Number(p.total_cost)),
       0,
     );
-    return { count: positions.length, totalCost: total };
+    const long = positions.filter((p) => Number(p.qty) > 0).length;
+    const short = positions.filter((p) => Number(p.qty) < 0).length;
+    return { count: positions.length, totalCost: total, long, short };
   }, [positions]);
 
   const columns = useMemo<ColumnDef<PortfolioPosition>[]>(
@@ -80,16 +82,32 @@ export default function PortfolioPositionsPage() {
         description="由已核准的訂單聚合計算；v1.1 將支援即時市價與 P&L"
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           title="持有檔數"
           value={summary.count}
+          subtitle="由已核准訂單聚合"
           icon={Briefcase}
           accent="primary"
         />
         <KpiCard
+          title="多單檔數"
+          value={summary.long}
+          subtitle="紅漲 · 做多"
+          icon={TrendingUp}
+          accent="bull"
+        />
+        <KpiCard
+          title="空單檔數"
+          value={summary.short}
+          subtitle="綠跌 · 做空"
+          icon={TrendingDown}
+          accent="bear"
+        />
+        <KpiCard
           title="累計投入成本"
           value={<NumberFormat value={summary.totalCost} decimals={0} />}
+          subtitle="絕對金額合計"
           icon={Wallet}
           accent="info"
         />

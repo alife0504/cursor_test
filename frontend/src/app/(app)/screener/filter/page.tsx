@@ -1,10 +1,12 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import { Globe, Layers, LineChart, ListFilter } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
+import { KpiCard } from "@/components/common/KpiCard";
 import { NumberFormat } from "@/components/common/NumberFormat";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
@@ -32,6 +34,15 @@ export default function ScreenerFilterPage() {
   }, []);
 
   const { data, isLoading } = useScreener({ ...filters, cursor });
+  const items = data?.items ?? [];
+
+  const summary = useMemo(() => {
+    const withClose = items.filter((r) => r.close != null).length;
+    const industries = new Set(
+      items.map((r) => r.industry).filter(Boolean),
+    ).size;
+    return { n: items.length, withClose, industries };
+  }, [items]);
 
   const columns = useMemo<ColumnDef<ScreenerRow>[]>(
     () => [
@@ -115,11 +126,43 @@ export default function ScreenerFilterPage() {
         description="PE / 殖利率 / EPS 成長 / RSI / 市值多條件複合篩選"
       />
 
+      {/* 摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="本頁結果"
+          value={summary.n}
+          subtitle="符合條件股票"
+          icon={ListFilter}
+          accent="primary"
+        />
+        <KpiCard
+          title="市場"
+          value={filters.market ?? "TW"}
+          subtitle="篩選範圍"
+          icon={Globe}
+          accent="info"
+        />
+        <KpiCard
+          title="有收盤資料"
+          value={summary.withClose}
+          subtitle="其餘待行情回填"
+          icon={LineChart}
+          accent="info"
+        />
+        <KpiCard
+          title="涵蓋產業"
+          value={summary.industries}
+          subtitle="不同產業別"
+          icon={Layers}
+          accent="primary"
+        />
+      </section>
+
       <ScreenerForm initial={filters} onSubmit={handleSubmit} />
 
       <DataTable
         columns={columns}
-        data={data?.items ?? []}
+        data={items}
         isLoading={isLoading}
         emptyText="尚無符合條件的股票,請調整篩選條件"
       />
