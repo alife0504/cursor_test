@@ -36,8 +36,9 @@ repos:
     hooks:
       - id: detect-secrets
         args: ['--baseline', '.secrets.baseline']
-        # docs/phase_reports：開發流程文件，含 smoke-test 範例指令的假帳密（非真實機密）
-        exclude: '^(legacy/|docs/phase_reports/|PLAN\.v6\.0\.backup\.md$|.*\.lock$|backend/uv\.lock$)'
+        # docs/（runbook/報告/指南，含 smoke-test 範例假帳密）與 backend/tests/（測試 fixtures
+        # 的假密碼）非真實機密；程式碼（backend/app、frontend）仍完整掃描。
+        exclude: '^(legacy/|docs/|backend/tests/|PLAN\.v6\.0\.backup\.md$|.*\.lock$|backend/uv\.lock$)'
 
   # ── 前端 prettier（P15 啟用）──
   # 暫時註解，P15 frontend 設定完成後啟用
