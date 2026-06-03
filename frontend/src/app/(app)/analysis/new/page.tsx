@@ -72,10 +72,11 @@ function NewAnalysisInner() {
     setIdemKey(uuidv4());
   }, [picked?.symbol]);
 
+  // 台股主：未選股時預設 TW（避免一進頁面就誤判美股、隱藏籌碼面）
   const market: "TW" | "US" = useMemo(() => {
-    const m = (picked?.market || "").toUpperCase();
-    if (m === "TW" || m === "TWSE" || m === "TPEX") return "TW";
-    return "US";
+    const m = (picked?.market || "TW").toUpperCase();
+    if (m === "NYSE" || m === "NASDAQ" || m === "AMEX" || m === "US") return "US";
+    return "TW";
   }, [picked?.market]);
 
   // US 不允許 sentiment;若選了就過濾

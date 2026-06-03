@@ -2,6 +2,7 @@
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 export type AnalystType = "market" | "fundamental" | "news" | "sentiment";
 
@@ -43,9 +44,8 @@ interface AnalystChooserProps {
 }
 
 // Phase 16 § D 步驟 2:選 analyst(多選)
-//   - US 不顯示 sentiment(後端會擋,前端先過濾)
+//   - 籌碼面（sentiment）為台股專屬：美股時「顯示但禁用 + 標註原因」，不隱藏（避免選項憑空消失）
 export function AnalystChooser({ value, onChange, market }: AnalystChooserProps) {
-  const visible = OPTIONS.filter((o) => !(o.twOnly && market === "US"));
   const toggle = (id: AnalystType) => {
     if (value.includes(id)) {
       onChange(value.filter((v) => v !== id));
@@ -55,30 +55,49 @@ export function AnalystChooser({ value, onChange, market }: AnalystChooserProps)
   };
   return (
     <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-      {visible.map((o) => {
-        const checked = value.includes(o.id);
+      {OPTIONS.map((o) => {
+        const isDisabled = !!o.twOnly && market === "US";
+        const checked = value.includes(o.id) && !isDisabled;
         return (
           <label
             key={o.id}
             htmlFor={`analyst-${o.id}`}
-            className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
-              checked ? "border-primary bg-primary/5" : "hover:bg-muted/40"
-            }`}
+            className={cn(
+              "flex items-start gap-3 rounded-md border p-3 transition-colors",
+              isDisabled
+                ? "cursor-not-allowed border-dashed opacity-60"
+                : checked
+                  ? "cursor-pointer border-primary bg-primary/5"
+                  : "cursor-pointer hover:bg-muted/40",
+            )}
           >
             <Checkbox
               id={`analyst-${o.id}`}
               checked={checked}
-              onCheckedChange={() => toggle(o.id)}
+              disabled={isDisabled}
+              onCheckedChange={() => {
+                if (!isDisabled) toggle(o.id);
+              }}
             />
             <div className="flex flex-col">
               <Label
                 htmlFor={`analyst-${o.id}`}
-                className="cursor-pointer font-medium"
+                className={cn(
+                  "flex items-center gap-2 font-medium",
+                  isDisabled ? "cursor-not-allowed" : "cursor-pointer",
+                )}
               >
                 {o.label}
+                {isDisabled ? (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                    美股不支援
+                  </span>
+                ) : null}
               </Label>
               <span className="text-xs text-muted-foreground">
-                {o.description}
+                {isDisabled
+                  ? "籌碼面（三大法人 / 融資券）為台股專屬資料"
+                  : o.description}
               </span>
             </div>
           </label>
