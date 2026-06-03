@@ -19,43 +19,16 @@ export default function MarketOverviewPage() {
   const [market, setMarket] = useState<"TW" | "US">("TW");
   const { data, isLoading } = useMarketOverview(market);
 
-  const idxObj = (data?.index ?? null) as Record<string, unknown> | null;
-  const indexes =
-    market === "TW"
-      ? [
-          {
-            name: "加權指數",
-            value:
-              idxObj?.twse_close ?? idxObj?.close ?? idxObj?.value ?? null,
-            changePct: idxObj?.twse_change_pct ?? idxObj?.change_pct ?? null,
-          },
-          {
-            name: "櫃買指數",
-            value: idxObj?.tpex_close ?? null,
-            changePct: idxObj?.tpex_change_pct ?? null,
-          },
-        ]
-      : [
-          {
-            name: "S&P 500",
-            value: idxObj?.sp500_close ?? null,
-            changePct: idxObj?.sp500_change_pct ?? null,
-          },
-          {
-            name: "NASDAQ",
-            value: idxObj?.nasdaq_close ?? null,
-            changePct: idxObj?.nasdaq_change_pct ?? null,
-          },
-          {
-            name: "Dow Jones",
-            value: idxObj?.dow_close ?? null,
-            changePct: idxObj?.dow_change_pct ?? null,
-          },
-        ];
+  // 後端 indices 是 IndexQuote[]（已依 market 回對應指數）；直接 map，欄位名以後端為準。
+  const indexes = (data?.indices ?? []).map((q) => ({
+    name: q.name,
+    value: q.close ?? null,
+    changePct: q.change_pct ?? null,
+  }));
 
-  const adv = (data?.advancers as number | undefined) ?? 0;
-  const dec = (data?.decliners as number | undefined) ?? 0;
-  const unc = (data?.unchanged as number | undefined) ?? 0;
+  const adv = (data?.advance_count as number | undefined) ?? 0;
+  const dec = (data?.decline_count as number | undefined) ?? 0;
+  const unc = (data?.unchanged_count as number | undefined) ?? 0;
   // 紅漲綠跌 token：bull/bear hsl
   const pieData = [
     { name: "上漲", value: adv, fill: "hsl(var(--bull))" },

@@ -30,7 +30,7 @@ export default function NewsAnnouncementsPage() {
   const filtered = useMemo(() => {
     if (!data) return [];
     return data.filter((row) => {
-      if (typeFilter && row.type !== typeFilter) return false;
+      if (typeFilter && row.announcement_type !== typeFilter) return false;
       if (from && row.published_at && row.published_at < from) return false;
       if (to && row.published_at && row.published_at > `${to}T23:59:59Z`) return false;
       return true;
@@ -101,7 +101,6 @@ export default function NewsAnnouncementsPage() {
                 <th className="p-2">代號</th>
                 <th className="p-2">類型</th>
                 <th className="p-2">標題</th>
-                <th className="p-2">來源</th>
                 <th className="p-2 w-10" />
               </tr>
             </thead>
@@ -110,9 +109,8 @@ export default function NewsAnnouncementsPage() {
                 <tr key={(row.id ?? idx) + row.title.slice(0, 20)} className="border-b">
                   <td className="p-2 tabular-nums">{row.published_at?.slice(0, 10) ?? "-"}</td>
                   <td className="p-2 font-mono">{row.symbol ?? "-"}</td>
-                  <td className="p-2 text-muted-foreground">{row.type ?? "-"}</td>
+                  <td className="p-2 text-muted-foreground">{row.announcement_type ?? "-"}</td>
                   <td className="p-2">{row.title}</td>
-                  <td className="p-2 text-muted-foreground">{row.source ?? "-"}</td>
                   <td className="p-2">
                     {row.url ? (
                       <a

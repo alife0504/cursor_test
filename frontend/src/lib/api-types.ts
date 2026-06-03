@@ -245,14 +245,27 @@ export interface MoverRow {
   volume?: number | null;
 }
 
+// 對齊 backend/app/schemas/market.py IndexQuote
+export interface IndexQuote {
+  name: string;
+  symbol: string;
+  close?: string | null;
+  change?: string | null;
+  change_pct?: string | null;
+  volume?: number | null;
+  as_of?: string | null;
+}
+
+// 對齊 backend/app/schemas/market.py MarketOverview（欄位名以後端為準）
 export interface MarketOverview {
   market?: string;
-  index?: Record<string, unknown> | null;
-  advancers?: number | null;
-  decliners?: number | null;
-  unchanged?: number | null;
-  total_volume?: string | null;
-  // 後端 P10 stub:結構彈性,前端容忍未知欄位
+  as_of?: string;
+  indices?: IndexQuote[] | null;
+  advance_count?: number | null;
+  decline_count?: number | null;
+  unchanged_count?: number | null;
+  total_volume?: number | string | null;
+  // 結構彈性,前端容忍未知欄位
   [k: string]: unknown;
 }
 
@@ -278,18 +291,18 @@ export interface InstitutionalResponse {
 }
 
 // Screener row（對應 backend/schemas/screener.py ScreenerRow）
+// 對齊 backend/app/schemas/screener.py ScreenerRow（後端欄位 pe_ratio，無 volume）
 export interface ScreenerRow {
   symbol: string;
   name?: string | null;
   market?: string | null;
   industry?: string | null;
   close?: string | null;
-  pe?: string | null;
+  pe_ratio?: string | null;
   dividend_yield?: string | null;
   eps_growth?: string | null;
   rsi?: string | null;
   market_cap?: string | null;
-  volume?: number | null;
 }
 
 export interface ScreenerFilters {
@@ -310,22 +323,27 @@ export interface ScreenerFilters {
 export interface NewsItem {
   id?: string;
   symbol?: string | null;
+  market?: string | null;
   title: string;
   summary?: string | null;
   source?: string | null;
   url?: string | null;
+  author?: string | null;
   published_at: string;
-  sentiment_label?: "very_positive" | "positive" | "neutral" | "negative" | "very_negative" | string | null;
+  /** 後端欄位（backend NewsItem.sentiment）：very_positive | positive | neutral | negative | very_negative */
+  sentiment?: "very_positive" | "positive" | "neutral" | "negative" | "very_negative" | string | null;
+  /** @deprecated 後端實際回 `sentiment`；保留作向後相容 fallback */
+  sentiment_label?: string | null;
   sentiment_score?: string | number | null;
 }
 
+// 對齊 backend/app/schemas/stocks.py AnnouncementItem（後端無 source 欄位）
 export interface AnnouncementItem {
   id?: string;
   symbol?: string | null;
   market?: string | null;
-  type?: string | null;
+  announcement_type?: string | null;
   title: string;
-  source?: string | null;
   url?: string | null;
   published_at: string;
 }
@@ -409,11 +427,12 @@ export interface DLQItem {
   resolution_notes?: string | null;
 }
 
-// Calendar event（mock for v1.0）
+// 對齊 backend/app/schemas/market.py CalendarItem（v1.1 接真實資料用；目前 calendar 頁仍用本地 mock）
 export interface CalendarEvent {
-  date: string;
   symbol: string;
-  name?: string | null;
-  type: "earnings" | "ex_dividend" | "shareholder_meeting" | string;
+  market?: string;
+  event_type: string;
+  event_date: string;
   title: string;
+  extra?: Record<string, unknown> | null;
 }

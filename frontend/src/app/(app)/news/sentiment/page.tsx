@@ -82,7 +82,7 @@ export default function NewsSentimentPage() {
               </thead>
               <tbody>
                 {data.map((it, idx) => {
-                  const lbl = it.sentiment_label ?? "neutral";
+                  const lbl = it.sentiment ?? it.sentiment_label ?? "neutral";
                   const tag = SENTIMENT_LABEL_MAP[lbl] ?? SENTIMENT_LABEL_MAP.neutral;
                   return (
                     <tr key={(it.id ?? idx) + it.title.slice(0, 20)} className="border-b">

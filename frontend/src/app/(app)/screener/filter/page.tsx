@@ -63,9 +63,9 @@ export default function ScreenerFilterPage() {
         cell: ({ row }) => <NumberFormat value={row.original.close ?? null} decimals={2} />,
       },
       {
-        accessorKey: "pe",
+        accessorKey: "pe_ratio",
         header: "PE",
-        cell: ({ row }) => <NumberFormat value={row.original.pe ?? null} decimals={2} />,
+        cell: ({ row }) => <NumberFormat value={row.original.pe_ratio ?? null} decimals={2} />,
       },
       {
         accessorKey: "dividend_yield",

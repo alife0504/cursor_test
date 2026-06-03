@@ -39,7 +39,7 @@ export function SentimentBar({ items }: { items: NewsItem[] }) {
     const c: Record<string, number> = {};
     for (const l of ORDER) c[l] = 0;
     for (const it of items) {
-      const lbl = (it.sentiment_label ?? "neutral") as string;
+      const lbl = (it.sentiment ?? it.sentiment_label ?? "neutral") as string;
       if (lbl in c) c[lbl] += 1;
     }
     return ORDER.map((l) => ({
