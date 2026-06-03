@@ -1,10 +1,12 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import { Briefcase, Building2, Globe, Layers } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
+import { KpiCard } from "@/components/common/KpiCard";
 import { NumberFormat } from "@/components/common/NumberFormat";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Input } from "@/components/ui/input";
@@ -13,6 +15,15 @@ import { useInstitutional } from "@/hooks/useNews";
 import type { InstitutionalRow } from "@/lib/api-types";
 
 // Phase 17 § C:三大法人(TW only)
+
+// 大數字精簡顯示（億 / 萬）；紅買超綠賣超由 accent 表達
+function compactNet(n: number): string {
+  const abs = Math.abs(n);
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  if (abs >= 1e8) return `${sign}${(abs / 1e8).toFixed(2)} 億`;
+  if (abs >= 1e4) return `${sign}${(abs / 1e4).toFixed(1)} 萬`;
+  return `${sign}${abs.toLocaleString()}`;
+}
 
 export default function InstitutionalPage() {
   const [date, setDate] = useState<string>("");
@@ -31,6 +42,16 @@ export default function InstitutionalPage() {
       .sort((a, b) => Number(b.foreign_net ?? 0) - Number(a.foreign_net ?? 0))
       .slice(0, 10);
   }, [rows]);
+
+  // 三大法人淨額合計（本日，用已載入資料彙總）
+  const totals = useMemo(() => {
+    const f = rows.reduce((a, r) => a + Number(r.foreign_net ?? 0), 0);
+    const t = rows.reduce((a, r) => a + Number(r.trust_net ?? 0), 0);
+    const d = rows.reduce((a, r) => a + Number(r.dealer_net ?? 0), 0);
+    return { f, t, d, count: rows.length };
+  }, [rows]);
+  const netAccent = (n: number): "bull" | "bear" | undefined =>
+    n > 0 ? "bull" : n < 0 ? "bear" : undefined;
 
   const columns = useMemo<ColumnDef<InstitutionalRow>[]>(
     () => [
@@ -117,6 +138,38 @@ export default function InstitutionalPage() {
           </div>
         }
       />
+
+      {/* 三大法人淨額合計 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="外資淨額合計"
+          value={compactNet(totals.f)}
+          subtitle="紅買超 · 綠賣超"
+          icon={Globe}
+          accent={netAccent(totals.f)}
+        />
+        <KpiCard
+          title="投信淨額合計"
+          value={compactNet(totals.t)}
+          subtitle="紅買超 · 綠賣超"
+          icon={Building2}
+          accent={netAccent(totals.t)}
+        />
+        <KpiCard
+          title="自營商淨額合計"
+          value={compactNet(totals.d)}
+          subtitle="紅買超 · 綠賣超"
+          icon={Briefcase}
+          accent={netAccent(totals.d)}
+        />
+        <KpiCard
+          title="本日個股數"
+          value={totals.count}
+          subtitle="有三大法人資料"
+          icon={Layers}
+          accent="primary"
+        />
+      </section>
 
       <section className="space-y-2">
         <h3 className="text-sm font-medium">外資買超 Top 10</h3>

@@ -2,12 +2,13 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { Activity, ArrowRight, Coins, TrendingDown, TrendingUp } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
 import { ErrorState } from "@/components/common/ErrorState";
+import { KpiCard } from "@/components/common/KpiCard";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
@@ -40,6 +41,15 @@ export default function HistoryPage() {
     cursor,
   });
   const items = data?.items ?? [];
+
+  // 本頁摘要（用已載入資料即時彙總）
+  const summary = useMemo(() => {
+    const completed = items.filter((i) => i.status === "completed").length;
+    const buy = items.filter((i) => i.signal === "BUY").length;
+    const sell = items.filter((i) => i.signal === "SELL").length;
+    const cost = items.reduce((a, i) => a + Number(i.total_cost_usd ?? 0), 0);
+    return { n: items.length, completed, buy, sell, cost };
+  }, [items]);
 
   const apply = () => {
     setApplied({ symbol, status });
@@ -124,6 +134,38 @@ export default function HistoryPage() {
         title="分析歷史"
         description="檢視過往分析、訊號與費用"
       />
+
+      {/* 摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="本頁分析"
+          value={summary.n}
+          subtitle={`已完成 ${summary.completed} 筆`}
+          icon={Activity}
+          accent="primary"
+        />
+        <KpiCard
+          title="看多訊號 BUY"
+          value={summary.buy}
+          subtitle="紅漲 · 看多建議"
+          icon={TrendingUp}
+          accent="bull"
+        />
+        <KpiCard
+          title="看空訊號 SELL"
+          value={summary.sell}
+          subtitle="綠跌 · 看空建議"
+          icon={TrendingDown}
+          accent="bear"
+        />
+        <KpiCard
+          title="本頁總成本"
+          value={`US$${summary.cost.toFixed(3)}`}
+          subtitle="LLM 推論費用"
+          icon={Coins}
+          accent="info"
+        />
+      </section>
 
       <div className="grid grid-cols-1 gap-2 rounded-md border p-3 md:grid-cols-4">
         <div className="space-y-1.5">

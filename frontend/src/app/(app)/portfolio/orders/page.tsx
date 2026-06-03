@@ -1,13 +1,22 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import { Check, ExternalLink, X } from "lucide-react";
+import {
+  Check,
+  Clock,
+  ExternalLink,
+  ListChecks,
+  TrendingDown,
+  TrendingUp,
+  X,
+} from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { DateFormat } from "@/components/common/DateFormat";
 import { ErrorState } from "@/components/common/ErrorState";
+import { KpiCard } from "@/components/common/KpiCard";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
@@ -56,6 +65,13 @@ export default function OrdersPage() {
     cursor,
   });
   const items = data?.items ?? [];
+
+  const summary = useMemo(() => {
+    const buy = items.filter((o) => o.side === "BUY").length;
+    const sell = items.filter((o) => o.side === "SELL").length;
+    const pending = items.filter((o) => o.status === "PENDING").length;
+    return { n: items.length, buy, sell, pending };
+  }, [items]);
 
   const columns: ColumnDef<OrderSummary>[] = [
     {
@@ -199,6 +215,38 @@ export default function OrdersPage() {
           </div>
         }
       />
+
+      {/* 摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="本頁訂單"
+          value={summary.n}
+          subtitle={`待核准 ${summary.pending} 筆`}
+          icon={ListChecks}
+          accent="primary"
+        />
+        <KpiCard
+          title="買進 BUY"
+          value={summary.buy}
+          subtitle="紅漲 · 做多"
+          icon={TrendingUp}
+          accent="bull"
+        />
+        <KpiCard
+          title="賣出 SELL"
+          value={summary.sell}
+          subtitle="綠跌 · 做空"
+          icon={TrendingDown}
+          accent="bear"
+        />
+        <KpiCard
+          title="待核准"
+          value={summary.pending}
+          subtitle="需人工雙重確認"
+          icon={Clock}
+          accent="warning"
+        />
+      </section>
 
       {error ? (
         <ErrorState
