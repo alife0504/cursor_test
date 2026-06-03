@@ -60,9 +60,9 @@ def test_backend_subdirectories_complete() -> None:
 
     # data_sources/base.py + fallback.py 應為檔案而非目錄（P5 重構）
     assert (APP_ROOT / "data_sources" / "base.py").is_file(), "data_sources/base.py 應為檔案"
-    assert (
-        APP_ROOT / "data_sources" / "fallback.py"
-    ).is_file(), "data_sources/fallback.py 應為檔案"
+    assert (APP_ROOT / "data_sources" / "fallback.py").is_file(), (
+        "data_sources/fallback.py 應為檔案"
+    )
 
 
 def test_legacy_directory_exists_and_isolated() -> None:

@@ -210,8 +210,7 @@ async def test_login_audit_log_written(auth_client, make_test_user, db_session_m
         count = (
             await s.execute(
                 text(
-                    "SELECT count(*) FROM audit_logs "
-                    "WHERE action='auth.login' AND actor_id = :uid"
+                    "SELECT count(*) FROM audit_logs WHERE action='auth.login' AND actor_id = :uid"
                 ),
                 {"uid": user.id},
             )
@@ -255,7 +254,10 @@ async def test_login_failed_response_envelope_format(auth_client, make_test_user
 async def test_login_unknown_email_returns_401(auth_client) -> None:
     r = auth_client.post(
         "/api/v1/auth/login",
-        json={"email": "nonexistent-99999@test.example.com", "password": "Anything12345!"},
+        json={
+            "email": "nonexistent-99999@test.example.com",
+            "password": "Anything12345!",  # pragma: allowlist secret
+        },
     )
     assert r.status_code == 401, r.text
     body = r.json()

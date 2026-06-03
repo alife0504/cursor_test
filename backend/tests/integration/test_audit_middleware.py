@@ -121,9 +121,7 @@ async def test_audit_includes_user_when_authenticated(
     async with db_session_maker() as s:
         row = (
             await s.execute(
-                text(
-                    "SELECT actor_id FROM audit_logs " "WHERE request_id=:tid AND action='http.get'"
-                ),
+                text("SELECT actor_id FROM audit_logs WHERE request_id=:tid AND action='http.get'"),
                 {"tid": trace_id},
             )
         ).first()

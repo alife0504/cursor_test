@@ -38,8 +38,7 @@ DEFAULT_TTL_HOURS = 24
 def make_ohlcv_key(symbol: str, market: str, start: date, end: date) -> str:
     """組 OHLCV cache key。"""
     return (
-        f"{CACHE_KEY_PREFIX}:ohlcv:{market}:{symbol.upper()}"
-        f":{start.isoformat()}:{end.isoformat()}"
+        f"{CACHE_KEY_PREFIX}:ohlcv:{market}:{symbol.upper()}:{start.isoformat()}:{end.isoformat()}"
     )
 
 

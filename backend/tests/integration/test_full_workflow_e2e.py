@@ -360,9 +360,9 @@ async def test_admin_views_audit_log_for_actions(
     # 取最近的 action 列表
     actions = {row.get("action", "") for row in body}
     # 應該至少包含一個 http.request 或 auth.* 類型
-    assert any(
-        a.startswith("http.") or a.startswith("auth.") for a in actions
-    ), f"audit log 沒有 http.* / auth.* action：{actions}"
+    assert any(a.startswith("http.") or a.startswith("auth.") for a in actions), (
+        f"audit log 沒有 http.* / auth.* action：{actions}"
+    )
 
 
 # ════════════════════════════════════════════════════════

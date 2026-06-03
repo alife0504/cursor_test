@@ -22,7 +22,7 @@ repos:
 
   # ── Python: ruff（lint + format） ──
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.4
+    rev: v0.15.12  # 對齊 backend deps 的 ruff 版本（CI Backend Lint 用），避免 format 規則不一致
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
@@ -36,7 +36,8 @@ repos:
     hooks:
       - id: detect-secrets
         args: ['--baseline', '.secrets.baseline']
-        exclude: '^(legacy/|PLAN\.v6\.0\.backup\.md$|.*\.lock$|backend/uv\.lock$)'
+        # docs/phase_reports：開發流程文件，含 smoke-test 範例指令的假帳密（非真實機密）
+        exclude: '^(legacy/|docs/phase_reports/|PLAN\.v6\.0\.backup\.md$|.*\.lock$|backend/uv\.lock$)'
 
   # ── 前端 prettier（P15 啟用）──
   # 暫時註解，P15 frontend 設定完成後啟用

@@ -179,6 +179,6 @@ def test_indicators_no_lookahead() -> None:
     for i in range(len(rsi_short)):
         if rsi_short[i] is None or rsi_full[i] is None:
             continue
-        assert math.isclose(
-            rsi_short[i], rsi_full[i], rel_tol=1e-9
-        ), f"RSI[{i}] 截斷與全量不一致：short={rsi_short[i]} full={rsi_full[i]}"
+        assert math.isclose(rsi_short[i], rsi_full[i], rel_tol=1e-9), (
+            f"RSI[{i}] 截斷與全量不一致：short={rsi_short[i]} full={rsi_full[i]}"
+        )

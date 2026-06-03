@@ -170,9 +170,9 @@ def test_ta_service_rw_cannot_create_table(
         "CREATE TABLE _phase02_should_fail (id INT)",
     )
     assert not ok, "ta_service_rw 不該能建表"
-    assert (
-        "permission denied" in err.lower() or "權限" in err.lower()
-    ), f"預期 permission denied，實際：{err}"
+    assert "permission denied" in err.lower() or "權限" in err.lower(), (
+        f"預期 permission denied，實際：{err}"
+    )
 
 
 def test_ta_agent_ro_can_select(
@@ -210,9 +210,9 @@ def test_ta_agent_ro_cannot_create_table(
         "CREATE TABLE _phase02_ro_fail (id INT)",
     )
     assert not ok, "ta_agent_ro 不該能建表"
-    assert (
-        "permission denied" in err.lower() or "權限" in err.lower()
-    ), f"預期 permission denied，實際：{err}"
+    assert "permission denied" in err.lower() or "權限" in err.lower(), (
+        f"預期 permission denied，實際：{err}"
+    )
 
 
 def test_timescaledb_extension_enabled(

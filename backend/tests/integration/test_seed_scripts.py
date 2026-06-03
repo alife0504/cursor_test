@@ -111,10 +111,7 @@ async def test_seed_stock_list_upsert_idempotent() -> None:
         async with sm() as session:
             count = (
                 await session.execute(
-                    text(
-                        "SELECT count(*) FROM stock_list "
-                        "WHERE symbol IN ('_T_SEED1', '_T_SEED2')"
-                    )
+                    text("SELECT count(*) FROM stock_list WHERE symbol IN ('_T_SEED1', '_T_SEED2')")
                 )
             ).scalar()
             assert int(count or 0) == 2  # 兩次跑後仍只有 2 筆

@@ -247,9 +247,7 @@ class SECEdgarSource(BaseDataSource):
         if not clean_accession:
             return None
         if primary_doc:
-            return (
-                f"https://www.sec.gov/Archives/edgar/data/{cik}/" f"{clean_accession}/{primary_doc}"
-            )
+            return f"https://www.sec.gov/Archives/edgar/data/{cik}/{clean_accession}/{primary_doc}"
         return (
             f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik:010d}"
             f"&type=&dateb=&owner=include&count=40"

@@ -87,9 +87,9 @@ def test_pending_order_status_enum() -> None:
         for c in PendingOrder.__table__.constraints
         if c.__class__.__name__ == "CheckConstraint"
     ]
-    assert any(
-        "status" in (n or "") for n in check_names
-    ), f"PendingOrder 缺 status CHECK constraint，現有：{check_names}"
+    assert any("status" in (n or "") for n in check_names), (
+        f"PendingOrder 缺 status CHECK constraint，現有：{check_names}"
+    )
 
 
 def test_stock_price_composite_pk() -> None:
@@ -134,9 +134,9 @@ def test_idempotency_key_ttl_calculated() -> None:
     expires = IdempotencyKey.calc_default_expires_at()
     delta = expires - now
     # 預設 23.99 ~ 24.01 小時間
-    assert (
-        23.9 < delta.total_seconds() / 3600 < 24.1
-    ), f"TTL 不對：{delta.total_seconds() / 3600} hours"
+    assert 23.9 < delta.total_seconds() / 3600 < 24.1, (
+        f"TTL 不對：{delta.total_seconds() / 3600} hours"
+    )
 
 
 def test_celery_dead_letter_resolved_default_false() -> None:
@@ -185,7 +185,7 @@ def test_datetime_columns_are_timezone_aware() -> None:
     ]
     for model_cls, col_name in sample_columns:
         col = _col(model_cls, col_name)
-        assert isinstance(
-            col.type, DateTime
-        ), f"{model_cls.__name__}.{col_name} 應為 DateTime，實為 {type(col.type)}"
+        assert isinstance(col.type, DateTime), (
+            f"{model_cls.__name__}.{col_name} 應為 DateTime，實為 {type(col.type)}"
+        )
         assert col.type.timezone is True, f"{model_cls.__name__}.{col_name} 應 timezone=True"

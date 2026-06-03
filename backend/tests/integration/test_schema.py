@@ -138,9 +138,9 @@ async def test_retention_policies_set() -> None:
         assert len(d) >= 6, f"預期 ≥ 6 retention policy，實際 {len(d)}"
 
         # notification_log 為 90 days，其餘為 1 year
-        assert "90 days" in (
-            d.get("notification_log") or ""
-        ), f"notification_log retention 不對：{d.get('notification_log')}"
+        assert "90 days" in (d.get("notification_log") or ""), (
+            f"notification_log retention 不對：{d.get('notification_log')}"
+        )
         for tbl in ("stock_prices", "audit_logs", "llm_usage"):
             assert "1 year" in (d.get(tbl) or ""), f"{tbl} retention 不是 1 year：{d.get(tbl)}"
     finally:
@@ -190,9 +190,9 @@ async def test_audit_logs_hash_chain_continuity() -> None:
             f"chain-{uuid.uuid4()}",
         )
         assert r1 is not None and r2 is not None
-        assert (
-            r2["prev_hash"] == r1["entry_hash"]
-        ), f"hash chain 斷裂：r2.prev={r2['prev_hash']} != r1.entry={r1['entry_hash']}"
+        assert r2["prev_hash"] == r1["entry_hash"], (
+            f"hash chain 斷裂：r2.prev={r2['prev_hash']} != r1.entry={r1['entry_hash']}"
+        )
         assert r2["entry_hash"] != r1["entry_hash"]
     finally:
         await conn.close()
@@ -226,9 +226,9 @@ async def test_updated_at_trigger() -> None:
         )
 
         new_updated_at = await conn.fetchval("SELECT updated_at FROM users WHERE id = $1", user_id)
-        assert (
-            new_updated_at > original_updated_at
-        ), f"updated_at 沒更新：{new_updated_at} <= {original_updated_at}"
+        assert new_updated_at > original_updated_at, (
+            f"updated_at 沒更新：{new_updated_at} <= {original_updated_at}"
+        )
 
         # 清理（不污染後續測試）
         await conn.execute("DELETE FROM users WHERE id = $1", user_id)

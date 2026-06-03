@@ -30,7 +30,7 @@ async def _make_some_audit(auth_client, make_test_user, n: int = 5) -> None:
             "/api/v1/auth/login",
             json={
                 "email": f"sec-{i}@test.example.com",
-                "password": "WrongPwd2026!Ab",
+                "password": "WrongPwd2026!Ab",  # pragma: allowlist secret
             },
         )
     # 等 audit middleware flush 完
@@ -136,7 +136,7 @@ async def test_verify_chain_detects_swapped_timestamp(
     )
     # 把最近兩筆的 timestamp 對調
     rows = await conn.fetch(
-        "SELECT id, timestamp FROM audit_logs WHERE timestamp >= $1 " "ORDER BY id DESC LIMIT 2",
+        "SELECT id, timestamp FROM audit_logs WHERE timestamp >= $1 ORDER BY id DESC LIMIT 2",
         since,
     )
     if len(rows) < 2:
@@ -206,7 +206,7 @@ async def test_verify_chain_detects_manual_delete(
     )
     # 抓出 since 後第 2 筆（不刪最後一筆，要讓「下一筆」存在）
     rows = await conn.fetch(
-        "SELECT id, timestamp FROM audit_logs WHERE timestamp >= $1 " "ORDER BY id ASC LIMIT 3",
+        "SELECT id, timestamp FROM audit_logs WHERE timestamp >= $1 ORDER BY id ASC LIMIT 3",
         since,
     )
     if len(rows) < 3:

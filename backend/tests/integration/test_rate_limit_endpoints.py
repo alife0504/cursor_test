@@ -46,7 +46,7 @@ async def test_login_5_per_min_per_ip(auth_client) -> None:
             json={"email": f"nx-{i}@test.example.com", "password": "Abc12345678!"},
         )
         # 5 次內都應該是 401（user 不存在）
-        assert r.status_code == 401, f"第 {i+1} 次 status={r.status_code} body={r.text}"
+        assert r.status_code == 401, f"第 {i + 1} 次 status={r.status_code} body={r.text}"
 
     # 第 6 次該被擋
     r6 = auth_client.post(

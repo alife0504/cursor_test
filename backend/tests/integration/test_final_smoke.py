@@ -106,9 +106,9 @@ async def test_dashboard_endpoint_returns_data(
     if r.status_code == 200:
         data = r.json()["data"]
         # 結構：monthly_budget_usd / used_usd / remaining_usd 任一存在即可
-        assert any(
-            k in data for k in ("monthly_budget_usd", "used_usd", "remaining_usd")
-        ), f"quota 結構不符：{data}"
+        assert any(k in data for k in ("monthly_budget_usd", "used_usd", "remaining_usd")), (
+            f"quota 結構不符：{data}"
+        )
 
 
 # ════════════════════════════════════════════════════════
