@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { GitCompareArrows, X } from "lucide-react";
 import { useState } from "react";
 
 import { MockBanner } from "@/components/common/MockBanner";
@@ -107,7 +107,29 @@ export default function ScreenerComparePage() {
       </div>
 
       {selected.length === 0 ? (
-        <p className="text-sm text-muted-foreground">請選擇至少一支股票進行比較</p>
+        <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed bg-card/50 p-10 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <GitCompareArrows className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="font-medium">尚未加入比較標的</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              從上方搜尋加入股票（最多 5 支），或點下列範例快速開始
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            {Object.values(MOCK_METRICS).map((m) => (
+              <Button
+                key={m.symbol}
+                variant="outline"
+                size="sm"
+                onClick={() => addSymbol(m.symbol)}
+              >
+                + {m.symbol} {m.name}
+              </Button>
+            ))}
+          </div>
+        </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-card">
           <table className="w-full text-sm">

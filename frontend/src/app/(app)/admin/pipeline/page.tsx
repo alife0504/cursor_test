@@ -1,11 +1,19 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  Database,
+  Filter,
+  RefreshCw,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EmptyState } from "@/components/common/EmptyState";
+import { KpiCard } from "@/components/common/KpiCard";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -32,6 +40,8 @@ export default function AdminPipelinePage() {
   const { data, isLoading, refetch } = useDLQ({ resolved: showResolved, limit: 50 });
   const resolveMut = useResolveDLQ();
   const requeueMut = useRequeueDLQ();
+  const dlqCount = data?.length ?? 0;
+  const healthy = !showResolved && dlqCount === 0;
 
   const handleConfirm = async () => {
     if (!target) return;
@@ -70,6 +80,38 @@ export default function AdminPipelinePage() {
           </div>
         }
       />
+
+      {/* 摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title={showResolved ? "已解決 DLQ" : "待處理 DLQ"}
+          value={dlqCount}
+          subtitle="Dead Letter Queue"
+          icon={AlertCircle}
+          accent={!showResolved && dlqCount > 0 ? "warning" : "info"}
+        />
+        <KpiCard
+          title="監控資料源"
+          value={3}
+          subtitle="TWSE / Yahoo / News"
+          icon={Database}
+          accent="primary"
+        />
+        <KpiCard
+          title="目前檢視"
+          value={showResolved ? "已解決" : "未解決"}
+          subtitle="右上可切換"
+          icon={Filter}
+          accent="info"
+        />
+        <KpiCard
+          title="系統狀態"
+          value={healthy ? "健康" : "需關注"}
+          subtitle="DLQ 是否清空"
+          icon={Activity}
+          accent={healthy ? "info" : "warning"}
+        />
+      </section>
 
       {/* Source last success — 後端尚未提供,先顯示 placeholder */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

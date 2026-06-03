@@ -1,8 +1,10 @@
 "use client";
 
+import { Banknote, CalendarDays, FileText, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
+import { KpiCard } from "@/components/common/KpiCard";
 import { MockBanner } from "@/components/common/MockBanner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -79,6 +81,16 @@ export default function MarketCalendarPage() {
     [cursor.year, cursor.month],
   );
 
+  const counts = useMemo(
+    () => ({
+      total: events.length,
+      earnings: events.filter((e) => e.type === "earnings").length,
+      exDiv: events.filter((e) => e.type === "ex_dividend").length,
+      meeting: events.filter((e) => e.type === "shareholder_meeting").length,
+    }),
+    [events],
+  );
+
   const daysInMonth = new Date(cursor.year, cursor.month + 1, 0).getDate();
   const firstDay = new Date(cursor.year, cursor.month, 1).getDay();
   const cells: Array<{ day?: number; events: MockEvent[] }> = [];
@@ -108,6 +120,38 @@ export default function MarketCalendarPage() {
       />
 
       <MockBanner trackingRef="v1.1 接 GET /api/v1/market/calendar 真實資料" />
+
+      {/* 本月事件摘要 KPI 帶 */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          title="本月事件"
+          value={counts.total}
+          subtitle="所有類型合計"
+          icon={CalendarDays}
+          accent="primary"
+        />
+        <KpiCard
+          title="法說 / 財報"
+          value={counts.earnings}
+          subtitle="業績發表"
+          icon={FileText}
+          accent="info"
+        />
+        <KpiCard
+          title="除權息"
+          value={counts.exDiv}
+          subtitle="配息配股"
+          icon={Banknote}
+          accent="bull"
+        />
+        <KpiCard
+          title="股東會"
+          value={counts.meeting}
+          subtitle="股東大會"
+          icon={Users}
+          accent="warning"
+        />
+      </section>
 
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">
