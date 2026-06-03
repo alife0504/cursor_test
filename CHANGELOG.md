@@ -36,8 +36,10 @@ Breaking changes within the 0.x line are called out explicitly.
 - [market_repo.py](backend/app/repos/market_repo.py) `get_index_quotes` + [market_service.py](backend/app/services/market_service.py) `_build_indices`：market overview 的指數 close + 當日漲跌% 改由 stock_prices 動態填入；`DEFAULT_INDICES` symbol 對齊 TAIEX/TPEX。市場總覽指數卡不再「—」（實機驗證 23,680.45 / +1.22%）。
 - [IndexCard.tsx](frontend/src/components/market/IndexCard.tsx)：指數值格式化（千分位 + 2 位小數，`23,680.45` 取代 `23680.450000`）。
 - [MarketIndexMiniChart.tsx](frontend/src/components/dashboard/MarketIndexMiniChart.tsx)：儀表板大盤趨勢卡同步修正欄位接線 + 空圖提示改 `make seed-index`。
+- **漲跌幅雙重 ×100 修正**（seed 真實資料巡覽時抓到）：後端 `change_pct` 已是百分比數字，前端 `MoversTable` 用 `PercentFormat`（會再 ×100）→ 顯示 +253% 應為 +2.54%。改用 `PriceDelta mode="raw"`。`statistics/accuracy`（mock）命中率同類雙重 ×100 一併修正。
 
 ### Added — Dev/Demo 工具
+- [seed_demo_data.py](data-pipeline/scripts/seed_demo_data.py) + `make seed-demo`：8 檔台股 OHLCV / 三大法人 / 新聞 / 公告 / admin 自選股（source=dev-seed、強制非 prod、uuid5 idempotent），讓市場總覽 / 三大法人 / 儀表板等頁可在「有資料」狀態檢視。
 - [seed_index_ohlcv.py](data-pipeline/scripts/seed_index_ohlcv.py) + `make seed-index`：寫入 TAIEX / TPEX 指數 OHLCV（`source=dev-seed`、強制非 prod），讓本機儀表板立即有資料、sparkline 不再空白。正式環境真實大盤回填仍列 v1.1。
 
 ### Changed — 登入頁精修
