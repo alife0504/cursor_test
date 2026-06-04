@@ -35,6 +35,7 @@ from app.agents.streaming import (
     EVENT_SYNTHESIS_COMPLETED,
     publish_event,
 )
+from app.core.errors import ExternalServiceError
 from app.core.logging_config import get_logger
 from app.core.market_dispatcher import detect_region, market_to_region
 
@@ -61,11 +62,42 @@ def _stream_wrap(node_func: Any, *, event: str, node_name: str) -> Any:
     """
 
     async def _wrapped(state: AgentState) -> dict[str, Any]:
-        result = await node_func(state)
+        # 優雅降級：analyst node 若因「資料源不足」(ExternalServiceError) 失敗，
+        # 不讓單一 analyst 缺資料炸掉整張圖 —— 標記為「略過」並續跑其餘 analyst /
+        # 辯論 / manager。非 analyst node（bull/bear/manager）或非資料類例外仍如實拋出。
+        degraded_reason: str | None = None
+        try:
+            result = await node_func(state)
+        except ExternalServiceError as exc:
+            if event != EVENT_ANALYST_COMPLETED:
+                raise  # 只對 analyst node 降級；manager/researcher 的外部錯誤仍應失敗
+            degraded_reason = str(exc)
+            display = node_name
+            cls = ANALYST_REGISTRY.get(node_name)
+            if cls is not None:
+                display = getattr(cls, "display_name_zh", node_name)
+            logger.warning(
+                "graph.analyst.degraded",
+                node=node_name,
+                analysis_id=str(state.get("analysis_id") or ""),
+                reason=degraded_reason,
+            )
+            result = {
+                "analyses": {
+                    node_name: (
+                        f"⚠️ 資料不足：{degraded_reason}。"
+                        f"「{display}」因缺少必要資料而略過，未納入最終決策；"
+                        "待資料源建置後重試即可取得完整分析。"
+                    )
+                }
+            }
         analysis_id = state.get("analysis_id")
         if analysis_id:
             # 從 result 取摘要（避免送整段 analyses[name]，太大）
             data: dict[str, Any] = {"node": node_name}
+            if degraded_reason is not None:
+                data["degraded"] = True
+                data["reason"] = degraded_reason
             if event == EVENT_ANALYST_COMPLETED:
                 analyses = result.get("analyses") or {}
                 # 取本 analyst 寫入 key 的長度做摘要
