@@ -49,10 +49,6 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
@@ -60,7 +56,14 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/* a11y：標題/描述必須在 DialogContent 內（portal 內），用 sr-only 隱藏 */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {/* cmdk 的 CommandInput/List/Item 都是 CommandPrimitive.*，
+            必須包在 <Command>（CommandPrimitive 根）的 context 內，否則一開啟就崩。 */}
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   )
