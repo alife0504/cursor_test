@@ -1,0 +1,2 @@
+# Next.js public/ 靜態資源目錄。
+# 保留此目錄讓 Dockerfile 的 `COPY --from=builder /app/public ./public` 不會因目錄不存在而失敗。

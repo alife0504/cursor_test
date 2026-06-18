@@ -30,9 +30,11 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
-# 非 root user
-RUN addgroup -g 1000 nextjs && adduser -u 1000 -G nextjs -s /bin/sh -D nextjs
-USER nextjs
+# 非 root user：node:20-alpine 內建 node(uid/gid 1000)，直接沿用
+# （原本另建 nextjs:1000 會與內建 node 的 gid 1000 衝突 → "gid 1000 in use"）。
+# chown /app 讓 next start 能寫 .next/cache。
+RUN chown -R node:node /app
+USER node
 
 EXPOSE 3000
 CMD ["npm", "start"]
