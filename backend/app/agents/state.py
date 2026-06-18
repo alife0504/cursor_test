@@ -64,7 +64,13 @@ class AgentState(TypedDict, total=False):
     debate_rounds: int
     """Bull/Bear 辯論輪次（P13 才使用）。"""
     llm_model: str
-    """LLM 模型 ID（gemini-2.0-flash / gpt-4o-mini / claude-3-5-haiku 等）。"""
+    """LLM 模型 ID（預設模型；gemini-2.5-flash / gpt-4o-mini / claude-haiku-4-5 等）。"""
+    agent_models: dict[str, str]
+    """各 agent 的模型覆寫（role → model id）；缺的 role 用 llm_model 預設。
+
+    role 對應：market/fundamental/news/sentiment（analyst）、bull/bear、manager、
+    trader、aggressive/conservative/neutral（風險辯論）、risk_manager。
+    """
     analyst_types: list[str]
     """請求啟用的 Analyst 名稱（如 ["market", "fundamental"]）。"""
 
@@ -83,6 +89,19 @@ class AgentState(TypedDict, total=False):
     bear_arguments: Annotated[list[str], add]
     """Bear researcher 每輪論點（P13）。"""
 
+    # ── 完整 agent 架構（trader + 風險團隊；還原原版）────
+    investment_plan: str
+    """ResearchManager 的研究計畫（文字綜述）；Trader / 風險團隊的輸入。"""
+    trader_proposal: dict[str, Any] | None
+    """Trader 的交易提案（TraderProposal.model_dump）。"""
+    risk_debate_history: Annotated[list[dict[str, Any]], add]
+    """[{stance, round, content}]；積極/保守/中立風險辯論累積。"""
+    aggressive_arguments: Annotated[list[str], add]
+    conservative_arguments: Annotated[list[str], add]
+    neutral_arguments: Annotated[list[str], add]
+    past_context: str
+    """記憶系統注入：同標的歷史決策 + 跨標的教訓（RiskManager 用）。"""
+
     # ── 終結欄位（manager / final 才寫一次）─────────
     signal: dict[str, Any] | None
     """{action: "BUY"/"SELL"/"HOLD"/..., confidence: 0~100, reasoning: str,
@@ -100,6 +119,12 @@ class AgentState(TypedDict, total=False):
     """ISO 8601 (UTC)。"""
     llm_usage_total_tokens: int
     """累計 token 數（cost 計算 + 月配額判斷依據）。"""
+    user_id: str
+    """發起分析的用戶 ID（UUID 字串）。
+
+    每筆 llm_usage 都要帶此 user_id 才能讓 QuotaService 按用戶彙總當月成本；
+    缺此值 → 月配額（PLAN §19.3 L6）等同失效（所有 usage 落在 user_id=NULL）。
+    """
 
 
 # ── 工廠函數 ───────────────────────────────────────────
@@ -116,6 +141,8 @@ def make_initial_state(
     trace_id: str,
     analysis_id: str,
     started_at: str,
+    user_id: str = "",
+    agent_models: dict[str, str] | None = None,
 ) -> AgentState:
     """建立初始 state（所有累積欄位 = 空容器，終結欄位 = None）。
 
@@ -136,14 +163,32 @@ def make_initial_state(
         "debate_history": [],
         "bull_arguments": [],
         "bear_arguments": [],
+        "investment_plan": "",
+        "trader_proposal": None,
+        "risk_debate_history": [],
+        "aggressive_arguments": [],
+        "conservative_arguments": [],
+        "neutral_arguments": [],
+        "past_context": "",
         "signal": None,
         "report_md": None,
         "trace_id": trace_id,
         "analysis_id": analysis_id,
         "started_at": started_at,
         "llm_usage_total_tokens": 0,
+        "user_id": user_id,
+        "agent_models": dict(agent_models or {}),
     }
     return state
 
 
-__all__ = ["AgentState", "make_initial_state", "merge_dict"]
+def resolve_agent_model(state: AgentState, role: str) -> str | None:
+    """取某 agent 的模型：先看 agent_models[role]，否則回 llm_model 預設。
+
+    回 None 表示讓 LLM chain 用其預設（caller 把 None 傳給 llm_call_with_schema 即可）。
+    """
+    models = state.get("agent_models") or {}
+    return models.get(role) or state.get("llm_model") or None
+
+
+__all__ = ["AgentState", "make_initial_state", "merge_dict", "resolve_agent_model"]

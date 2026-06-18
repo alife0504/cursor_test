@@ -14,7 +14,7 @@ from typing import Any
 from app.agents.llm_helpers import llm_call_with_schema, record_llm_usage
 from app.agents.prompts_loader import load_prompt, render_template
 from app.agents.schemas import BullArgument
-from app.agents.state import AgentState
+from app.agents.state import AgentState, resolve_agent_model
 from app.core.database import rw_session
 from app.core.logging_config import get_logger
 from app.llm.base_provider import BaseLLMProvider
@@ -76,6 +76,7 @@ class BullResearcher:
             system_prompt,
             user_prompt,
             BullArgument,
+            model=resolve_agent_model(state, "bull"),
             max_tokens=1500,
             temperature=0.5,
         )
@@ -87,9 +88,12 @@ class BullResearcher:
                     await record_llm_usage(
                         session,
                         analysis_id=analysis_id,
-                        user_id=None,
+                        user_id=state.get("user_id"),
                         provider=self.llm.name,
-                        model=getattr(self.llm, "default_model", "unknown"),
+                        model=(
+                            getattr(self.llm, "last_used_model", None)
+                            or getattr(self.llm, "default_model", "unknown")
+                        ),
                         usage=usage,
                         purpose=f"debate.bull.round{round_num}",
                         latency_ms=latency_ms,

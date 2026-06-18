@@ -24,9 +24,20 @@ from app.models.order import PendingOrder
 logger = get_logger(__name__)
 
 
-# v1.0 預設「每張訂單投入」固定金額（USD-equivalent；台股以 TWD 計）。
+# v1.0 預設「每張訂單投入」固定金額（依市場計價幣別分開）。
 # 真實 portfolio balance 需 P16 用戶持倉管理上線後再串接（PLAN 已知陷阱）。
 DEFAULT_NOTIONAL_USD: Decimal = Decimal("10000")
+"""美股每張訂單預設投入（USD）。"""
+DEFAULT_NOTIONAL_TWD: Decimal = Decimal("100000")
+"""台股每張訂單預設投入（TWD，約 NT$10 萬；足以買 1~2 張中價位個股）。"""
+TW_LOT_SIZE: int = 1000
+"""台股一張（整股交易單位）= 1000 股。"""
+
+_TW_MARKETS = frozenset({"TWSE", "TPEX", "TW"})
+
+
+def _is_tw_market(market: str | None) -> bool:
+    return (market or "").upper() in _TW_MARKETS
 
 
 def _decimal_or_none(v: Any) -> Decimal | None:
@@ -43,17 +54,27 @@ def _decimal_or_none(v: Any) -> Decimal | None:
 def calculate_qty(target_price: Decimal | None, *, market: str | None = None) -> int:
     """估算下單股數。
 
+    台股（TWSE/TPEX）以「整張」為交易單位（1 張 = 1000 股），故無條件捨去到整張、
+    至少 1 張；美股以「股」為單位、至少 1 股。預算依市場計價幣別分開。
+
     Args:
         target_price: 進場參考價（FinalSignal.target_price_low）。
-        market: 市場代碼；台股最小單位通常為 1000 股（v1.0 暫忽略，整數股即可）。
+        market: 市場代碼；決定計價幣別預算與最小交易單位。
 
     Returns:
-        正整數股數；target_price ≤ 0 或缺資料 → 回 1（保留訂單骨架，由 admin 補單價）。
+        正整數股數；target_price ≤ 0 或缺資料 → 回最小交易單位（台股 1000、美股 1），
+        保留訂單骨架由 admin 補單價。
     """
+    is_tw = _is_tw_market(market)
+    min_unit = TW_LOT_SIZE if is_tw else 1
     if target_price is None or target_price <= 0:
-        return 1
-    qty = int((DEFAULT_NOTIONAL_USD / target_price).to_integral_value())
-    return max(qty, 1)
+        return min_unit
+    notional = DEFAULT_NOTIONAL_TWD if is_tw else DEFAULT_NOTIONAL_USD
+    raw = int((notional / target_price).to_integral_value())
+    if is_tw:
+        lots = raw // TW_LOT_SIZE  # 無條件捨去到整張
+        return max(lots, 1) * TW_LOT_SIZE
+    return max(raw, 1)
 
 
 def signal_to_pending_order(
@@ -137,7 +158,9 @@ def _uuid(v: str | UUID) -> UUID:
 
 
 __all__ = [
+    "DEFAULT_NOTIONAL_TWD",
     "DEFAULT_NOTIONAL_USD",
+    "TW_LOT_SIZE",
     "calculate_qty",
     "signal_to_pending_order",
 ]

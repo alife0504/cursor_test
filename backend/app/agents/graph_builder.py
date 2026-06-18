@@ -180,6 +180,86 @@ async def placeholder_manager(state: AgentState) -> dict[str, Any]:
     return {"signal": signal, "report_md": report_md}
 
 
+# ── 完整風險架構接線（還原原版 trader + 風險團隊 + verifier）─────
+
+
+def _wire_risk_layer(
+    graph: Any,
+    manager_node_name: str,
+    llm: BaseLLMProvider | None,
+    risk_rounds: int,
+    end: Any,
+) -> None:
+    """在 ResearchManager 之後接上 trader → 風險辯論 → RiskManager → Verifier → END。
+
+    lazy import 以避免 module 載入順序問題；只有 risk_rounds>0 時才會用到。
+    """
+    from app.agents.managers.risk_manager import RiskManager
+    from app.agents.risk_mgmt import (
+        AggressiveRiskAnalyst,
+        ConservativeRiskAnalyst,
+        NeutralRiskAnalyst,
+    )
+    from app.agents.trader import Trader
+    from app.agents.verifier import Verifier
+
+    trader = Trader(llm=llm)
+    aggressive = AggressiveRiskAnalyst(llm=llm)
+    conservative = ConservativeRiskAnalyst(llm=llm)
+    neutral = NeutralRiskAnalyst(llm=llm)
+    risk_manager = RiskManager(llm=llm)
+    verifier = Verifier(llm=None)  # 程式化接地查核（不需 LLM）
+
+    graph.add_node(
+        "trader", _stream_wrap(trader.propose, event=EVENT_DEBATE_ARGUMENT, node_name="trader")
+    )
+    graph.add_node(
+        "risk_aggressive",
+        _stream_wrap(aggressive.argue, event=EVENT_DEBATE_ARGUMENT, node_name="risk_aggressive"),
+    )
+    graph.add_node(
+        "risk_conservative",
+        _stream_wrap(
+            conservative.argue, event=EVENT_DEBATE_ARGUMENT, node_name="risk_conservative"
+        ),
+    )
+    graph.add_node(
+        "risk_neutral",
+        _stream_wrap(neutral.argue, event=EVENT_DEBATE_ARGUMENT, node_name="risk_neutral"),
+    )
+    graph.add_node(
+        "risk_manager",
+        _stream_wrap(
+            risk_manager.synthesize, event=EVENT_SYNTHESIS_COMPLETED, node_name="risk_manager"
+        ),
+    )
+    # verifier 也包 stream wrapper，並沿用 SYNTHESIS_COMPLETED：它在 risk_manager 之後執行，
+    # 若把 BUY/SELL 接地翻成 HOLD，最後 publish 的 synthesis 事件即為「最終訊號」，
+    # 避免前端只收到 risk_manager 的翻轉前訊號而與 DB 最終結果不一致。
+    graph.add_node(
+        "verifier",
+        _stream_wrap(verifier.verify, event=EVENT_SYNTHESIS_COMPLETED, node_name="verifier"),
+    )
+
+    graph.add_edge(manager_node_name, "trader")
+    graph.add_edge("trader", "risk_aggressive")
+    graph.add_edge("risk_aggressive", "risk_conservative")
+    graph.add_edge("risk_conservative", "risk_neutral")
+
+    def _decide_risk_next(s: AgentState) -> str:
+        """達到 risk_rounds 後 → risk_manager，否則再跑一輪（回 aggressive）。"""
+        rounds_done = len(s.get("neutral_arguments") or [])
+        return "risk_manager" if rounds_done >= risk_rounds else "risk_aggressive"
+
+    graph.add_conditional_edges(
+        "risk_neutral",
+        _decide_risk_next,
+        {"risk_aggressive": "risk_aggressive", "risk_manager": "risk_manager"},
+    )
+    graph.add_edge("risk_manager", "verifier")
+    graph.add_edge("verifier", end)
+
+
 # ── build_graph ───────────────────────────────────────
 
 
@@ -189,6 +269,7 @@ def build_graph(
     *,
     analyst_types: list[str] | None = None,
     debate_rounds: int = 1,
+    risk_rounds: int = 0,
     llm: BaseLLMProvider | None = None,
     tools: ToolRegistry | None = None,
     checkpointer: Any = None,
@@ -200,6 +281,8 @@ def build_graph(
         market: Market enum 或 str（"TWSE" / "NASDAQ" / ...）。
         analyst_types: 若給 → 過濾只用其中的 Analyst；None → 全部支援的。
         debate_rounds: Bull/Bear 辯論輪次（0 = 跳過辯論直接 manager）。
+        risk_rounds: 風險辯論輪次（0 = 關閉完整風險架構，向後相容＝現狀；
+            >0 = 啟用 trader → 積極/保守/中立風險辯論 → RiskManager → Verifier 完整架構）。
         llm: BaseLLMProvider 實例（注入給 Analyst / Researcher / Manager）。
             * None → 用 placeholder_manager（P12 stub 模式，僅單測用）。
         tools: ToolRegistry 實例（注入給 Analyst）。
@@ -318,7 +401,13 @@ def build_graph(
         else:
             graph.add_edge(analysts[-1].name, manager_node_name)
 
-        graph.add_edge(manager_node_name, END)
+        # 9. 完整風險架構（risk_rounds > 0）：還原原版
+        #    manager(研究計畫) → trader → 積極/保守/中立風險辯論(迴圈) → RiskManager → Verifier → END
+        enable_risk = use_real_manager and risk_rounds > 0
+        if enable_risk:
+            _wire_risk_layer(graph, manager_node_name, llm, risk_rounds, END)
+        else:
+            graph.add_edge(manager_node_name, END)
 
     compiled = graph.compile(checkpointer=checkpointer)
 
@@ -329,8 +418,10 @@ def build_graph(
         region=region.value,
         analysts=[a.name for a in analysts],
         debate_rounds=debate_rounds,
+        risk_rounds=risk_rounds,
         use_real_manager=use_real_manager,
         has_debate=use_real_manager and debate_rounds > 0 and bool(analysts),
+        enable_risk=use_real_manager and risk_rounds > 0 and bool(analysts),
         checkpointer=type(checkpointer).__name__ if checkpointer else None,
     )
     return compiled
@@ -346,12 +437,17 @@ def build_initial_state(
     analysis_id: str,
     trace_id: str,
     analyst_types: list[str] | None = None,
-    llm_model: str = "gemini-2.0-flash",
+    llm_model: str = "gemini-2.5-flash",
     debate_rounds: int = 1,
+    user_id: str = "",
+    agent_models: dict[str, str] | None = None,
 ) -> AgentState:
     """組裝初始 state（給 celery task 用）。
 
     自動填：region / started_at；analyst_types None → 空 list（表示全部）。
+
+    user_id 需由 caller（run_analysis task）帶入，否則 LLM usage 無法歸屬用戶、月配額失效。
+    agent_models：各 agent 的模型覆寫（role → model id）；缺則用 llm_model 預設。
     """
     region = detect_region(symbol)
     return make_initial_state(
@@ -364,6 +460,8 @@ def build_initial_state(
         trace_id=trace_id,
         analysis_id=analysis_id,
         started_at=datetime.now(tz=UTC).isoformat(),
+        user_id=user_id,
+        agent_models=agent_models,
     )
 
 

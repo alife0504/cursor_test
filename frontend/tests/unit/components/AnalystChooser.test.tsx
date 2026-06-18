@@ -16,9 +16,12 @@ describe("<AnalystChooser />", () => {
     expect(screen.getByText(/Sentiment/)).toBeInTheDocument();
   });
 
-  test("US 不顯示 sentiment", () => {
+  test("US 顯示但禁用 sentiment（不隱藏、標註原因）", () => {
     render(<AnalystChooser value={[]} onChange={() => {}} market="US" />);
-    expect(screen.queryByText(/Sentiment/)).toBeNull();
+    // 籌碼面為台股專屬：美股時「顯示但禁用」，不讓選項憑空消失
+    expect(screen.getByText(/Sentiment/)).toBeInTheDocument();
+    // 標註「美股不支援」徽章（只在 disabled 狀態渲染）
+    expect(screen.getByText(/美股不支援/)).toBeInTheDocument();
   });
 
   test("勾選時 onChange 被呼叫", async () => {

@@ -17,7 +17,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ── Analyst Result Schemas ─────────────────────────────
 #
@@ -123,6 +123,53 @@ class BearArgument(BaseModel):
     )
 
 
+class TraderProposal(BaseModel):
+    """Trader 交易提案 — 把 ResearchManager 的研究計畫轉成具體交易主張。
+
+    對應原版 tauricresearch/tradingagents 的 TraderProposal；TW 化為 3-level + 部位%。
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    action: Literal["BUY", "HOLD", "SELL"]
+    conviction: int = Field(ge=0, le=100, description="對此提案的把握度")
+    suggested_position_pct: Decimal = Field(
+        ge=Decimal("0"), le=Decimal("100"), description="建議部位（佔投組 %）"
+    )
+    rationale_zh: str = Field(min_length=80, max_length=1500)
+    key_risks: list[str] = Field(min_length=1, max_length=6)
+
+    @field_validator("suggested_position_pct", mode="before")
+    @classmethod
+    def _coerce_pct(cls, v: object) -> Decimal:
+        if isinstance(v, Decimal):
+            return v
+        if isinstance(v, int | float):
+            return Decimal(str(v))
+        if isinstance(v, str):
+            try:
+                return Decimal(v.strip().rstrip("%"))
+            except Exception as e:
+                raise ValueError(f"suggested_position_pct 無法轉 Decimal：{v!r}") from e
+        raise ValueError(f"suggested_position_pct 不支援的 type: {type(v).__name__}")
+
+
+class RiskArgument(BaseModel):
+    """風險辯論單輪論點（積極/保守/中立其一）。
+
+    對應原版 risk_mgmt 的 aggressive/conservative/neutral debator；TW 化為結構化輸出，
+    避免純自由文字辯論帶來的失真（每方需明確表態 stance_action + 證據點）。
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    stance: Literal["aggressive", "conservative", "neutral"]
+    stance_action: Literal["BUY", "HOLD", "SELL"]
+    """此風險立場支持的動作（供 RiskManager / Verifier 計票）。"""
+    points: list[str] = Field(min_length=2, max_length=6)
+    confidence: int = Field(ge=0, le=100)
+
+
 class FinalSignal(BaseModel):
     """Manager 綜合決策（單一 signal）— 跨表存到 analysis_reports.signal。"""
 
@@ -167,8 +214,41 @@ class FinalSignal(BaseModel):
         if isinstance(v, int | float):
             return Decimal(str(v))
         if isinstance(v, str):
-            return Decimal(v.strip())
+            try:
+                return Decimal(v.strip().rstrip("%"))
+            except Exception as e:
+                # 統一轉成 ValueError 讓 pydantic 接住（含 decimal.InvalidOperation）
+                raise ValueError(f"position_size_pct 無法轉為 Decimal：{v!r}") from e
         raise ValueError(f"position_size_pct 不支援的 type: {type(v).__name__}")
+
+    @model_validator(mode="after")
+    def _check_price_coherence(self) -> FinalSignal:
+        """跨欄位驗證：價位邏輯需自洽。
+
+        LLM 偶爾會吐出顛倒或方向錯誤的價位（如 BUY 卻把停損設在目標價之上、
+        或 target_price_low > target_price_high）。這些不自洽訊號會直接被
+        `signal_to_pending_order` 轉成 PendingOrder 等管理員核准——在此攔下，
+        讓 `llm_call_with_schema` 的 repair retry 要求 LLM 修正。
+        """
+        low = self.target_price_low
+        high = self.target_price_high
+        sl = self.stop_loss
+
+        # 1) 目標價區間：low 不可大於 high（防顛倒）
+        if low is not None and high is not None and low > high:
+            raise ValueError(f"target_price_low（{low}）不可大於 target_price_high（{high}）")
+
+        # 2) 停損方向需與動作一致
+        if self.action == "BUY" and sl is not None:
+            ref = low if low is not None else high
+            if ref is not None and sl >= ref:
+                raise ValueError(f"BUY 訊號的 stop_loss（{sl}）應低於目標價（{ref}）")
+        if self.action == "SELL" and sl is not None:
+            ref = high if high is not None else low
+            if ref is not None and sl <= ref:
+                raise ValueError(f"SELL 訊號的 stop_loss（{sl}）應高於目標價（{ref}）")
+
+        return self
 
 
 # ── exports ────────────────────────────────────────────
@@ -182,5 +262,7 @@ __all__ = [
     "MarketAnalysisResult",
     "NewsAnalysisResult",
     "NewsSupportingArticle",
+    "RiskArgument",
     "SentimentAnalysisResult",
+    "TraderProposal",
 ]

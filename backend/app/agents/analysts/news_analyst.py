@@ -16,7 +16,7 @@ from app.agents.base_analyst import BaseAnalyst, register_analyst
 from app.agents.llm_helpers import llm_call_with_schema, record_llm_usage
 from app.agents.prompts_loader import load_prompt, render_template
 from app.agents.schemas import NewsAnalysisResult
-from app.agents.state import AgentState
+from app.agents.state import AgentState, resolve_agent_model
 from app.core.database import rw_session
 from app.core.logging_config import get_logger
 from app.data_sources.base import DataKind, MarketRegion
@@ -102,6 +102,7 @@ class NewsAnalyst(BaseAnalyst):
             system_prompt,
             user_prompt,
             NewsAnalysisResult,
+            model=resolve_agent_model(state, self.name),
             max_tokens=2048,
             temperature=0.4,
         )
@@ -113,9 +114,12 @@ class NewsAnalyst(BaseAnalyst):
                     await record_llm_usage(
                         session,
                         analysis_id=analysis_id,
-                        user_id=None,
+                        user_id=state.get("user_id"),
                         provider=self.llm.name,
-                        model=getattr(self.llm, "default_model", "unknown"),
+                        model=(
+                            getattr(self.llm, "last_used_model", None)
+                            or getattr(self.llm, "default_model", "unknown")
+                        ),
                         usage=usage,
                         purpose="analyst.news",
                         latency_ms=latency_ms,

@@ -56,6 +56,8 @@ def _enqueue_run_analysis(
     *,
     analyst_types: list[str] | None = None,
     debate_rounds: int = 1,
+    risk_rounds: int = 0,
+    agent_models: dict[str, str] | None = None,
 ) -> None:
     """推 celery task；任何 enqueue 錯誤（如 redis 不可用）不應炸 router。
 
@@ -67,9 +69,14 @@ def _enqueue_run_analysis(
     try:
         from app.workers.tasks.run_analysis import run_analysis as run_analysis_task
 
-        kwargs: dict[str, object] = {"debate_rounds": int(debate_rounds)}
+        kwargs: dict[str, object] = {
+            "debate_rounds": int(debate_rounds),
+            "risk_rounds": int(risk_rounds),
+        }
         if analyst_types is not None:
             kwargs["analyst_types"] = list(analyst_types)
+        if agent_models:
+            kwargs["agent_models"] = dict(agent_models)
         run_analysis_task.apply_async(args=[analysis_id], kwargs=kwargs)
     except Exception:  # pragma: no cover - broker 不可用是 ops 問題
         # 不 re-raise；status=queued + orphan cleanup 兜底
@@ -78,6 +85,33 @@ def _enqueue_run_analysis(
         logging.getLogger(__name__).exception(
             "analysis.enqueue.failed", extra={"analysis_id": analysis_id}
         )
+
+
+# ════════════════ GET /llm-providers ════════════════
+# 註：須在 GET /{analysis_id} 之前註冊，否則 "llm-providers" 會被當成 analysis_id。
+
+
+@router.get("/llm-providers")
+async def get_llm_providers(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """回報目前可用（已配置金鑰）的 LLM provider 與預設模型。
+
+    前端據此標示／禁用無金鑰的模型選項，避免選了 GPT/Claude 卻被靜默降級為 Gemini。
+    """
+    from app.core.config import settings
+    from app.llm import available_providers
+
+    data = {
+        "available_providers": available_providers(settings),
+        "default_provider": settings.LLM_DEFAULT_PROVIDER,
+        "default_model": settings.LLM_DEFAULT_MODEL,
+    }
+    return JSONResponse(
+        status_code=200,
+        content=envelope_success(data, trace_id=_trace_id(request)),
+    )
 
 
 # ════════════════ POST / ════════════════
@@ -143,6 +177,8 @@ async def create_analysis(
         str(report.id),
         analyst_types=list(payload.analyst_types),
         debate_rounds=int(payload.debate_rounds),
+        risk_rounds=int(payload.risk_rounds),
+        agent_models=payload.agent_models,
     )
 
     body = AnalysisCreateResponse(

@@ -93,6 +93,25 @@ def test_qty_calculated_from_target_price() -> None:
     assert calculate_qty(Decimal("-1")) == 1
 
 
+def test_qty_tw_rounds_to_whole_lots() -> None:
+    """台股以「整張」(1000 股) 為單位：無條件捨去到整張、至少 1 張。"""
+    # 100000 / 50 = 2000 → 2 張 = 2000 股
+    assert calculate_qty(Decimal("50"), market="TWSE") == 2000
+    assert calculate_qty(Decimal("50"), market="TPEX") == 2000
+    # 高價股 100000 / 600 ≈ 166 股 → 不足一張 → 補到 1 張
+    assert calculate_qty(Decimal("600"), market="TWSE") == 1000
+    # 缺價 → 至少 1 張（骨架單）
+    assert calculate_qty(None, market="TWSE") == 1000
+    # 整張保證可被 1000 整除
+    assert calculate_qty(Decimal("123"), market="TWSE") % 1000 == 0
+
+
+def test_qty_us_per_share_unchanged() -> None:
+    """美股仍以「股」為單位、至少 1 股（行為不變）。"""
+    assert calculate_qty(Decimal("100"), market="NASDAQ") == 100  # 10000 / 100
+    assert calculate_qty(None, market="NASDAQ") == 1
+
+
 def test_pending_order_status_pending_and_uuid() -> None:
     order = signal_to_pending_order(
         _signal("BUY"),

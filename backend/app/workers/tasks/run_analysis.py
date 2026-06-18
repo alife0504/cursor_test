@@ -57,6 +57,8 @@ def run_analysis(
     analysis_id: str,
     analyst_types: list[str] | None = None,
     debate_rounds: int = 1,
+    risk_rounds: int = 0,
+    agent_models: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """主分析任務。
 
@@ -64,16 +66,18 @@ def run_analysis(
         analysis_id: analysis_reports.id（UUID 字串）。
         analyst_types: 要啟用的 Analyst 名稱清單；None / [] → graph 自動全選（依 region 過濾）。
         debate_rounds: Bull/Bear 辯論輪次（0 = 跳過）。
+        risk_rounds: 風險辯論輪次（0 = 關閉完整風險架構；>0 = 啟用 trader+風險團隊+verifier）。
     """
     logger.info(
-        "run_analysis.start analysis_id=%s types=%s rounds=%s",
+        "run_analysis.start analysis_id=%s types=%s rounds=%s risk_rounds=%s",
         analysis_id,
         analyst_types,
         debate_rounds,
+        risk_rounds,
     )
 
     try:
-        return _run_with_loop(analysis_id, analyst_types, debate_rounds)
+        return _run_with_loop(analysis_id, analyst_types, debate_rounds, risk_rounds, agent_models)
     except Exception as exc:
         logger.exception("run_analysis.unhandled analysis_id=%s", analysis_id)
         _safe_mark_failed(analysis_id, str(exc))
@@ -84,12 +88,16 @@ def _run_with_loop(
     analysis_id: str,
     analyst_types: list[str] | None,
     debate_rounds: int,
+    risk_rounds: int = 0,
+    agent_models: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """在新 event loop 中跑 async pipeline。"""
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(_async_pipeline(analysis_id, analyst_types, debate_rounds))
+        return loop.run_until_complete(
+            _async_pipeline(analysis_id, analyst_types, debate_rounds, risk_rounds, agent_models)
+        )
     finally:
         try:
             pending = asyncio.all_tasks(loop)
@@ -106,6 +114,8 @@ async def _async_pipeline(
     analysis_id: str,
     analyst_types: list[str] | None,
     debate_rounds: int,
+    risk_rounds: int = 0,
+    agent_models: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     started_at = datetime.now(tz=UTC)
 
@@ -147,6 +157,7 @@ async def _async_pipeline(
             market=report_data["market"],
             analyst_types=analyst_types or None,
             debate_rounds=int(debate_rounds),
+            risk_rounds=int(risk_rounds),
             llm=chain,
             tools=tools,
         )
@@ -159,11 +170,27 @@ async def _async_pipeline(
             analyst_types=analyst_types,
             llm_model=report_data["llm_model"],
             debate_rounds=int(debate_rounds),
+            user_id=report_data["user_id"],
+            agent_models=agent_models,
         )
+
+        # 完整架構：注入決策記憶（past_context）；僅風險層啟用時，且失敗不阻塞
+        if int(risk_rounds) > 0:
+            try:
+                from app.agents.memory import AgentMemory
+
+                initial["past_context"] = await AgentMemory().retrieve(
+                    symbol=report_data["symbol"],
+                    region="",
+                    situation=f"標的 {report_data['symbol']}（{report_data['market']}）投資決策",
+                )
+            except Exception as exc:
+                logger.warning("run_analysis.memory.retrieve_failed error=%s", exc)
 
         # recursion_limit 設大一點（多輪辯論可能多 hop）
         try:
-            final_state = await graph.ainvoke(initial, config={"recursion_limit": 25})
+            # recursion_limit 提高（完整風險架構多輪辯論 → 更多 hop）
+            final_state = await graph.ainvoke(initial, config={"recursion_limit": 50})
         except Exception as exc:
             logger.exception("run_analysis.graph.failed analysis_id=%s", analysis_id)
             _safe_mark_failed(analysis_id, f"graph failed: {exc}")
@@ -178,7 +205,9 @@ async def _async_pipeline(
         used_provider = getattr(chain, "last_used_provider", None) or getattr(
             chain, "primary", "google"
         )
-        used_model = report_data["llm_model"]
+        # 回報「實際使用的模型」而非「請求的模型」：若使用者選了缺金鑰的 provider，
+        # chain 會 fallback 到可用 provider 的預設模型 —— 誠實顯示真正跑的模型，避免誤導。
+        used_model = getattr(chain, "last_used_model", None) or report_data["llm_model"]
 
         _update_completed(
             analysis_id=analysis_id,
@@ -189,6 +218,22 @@ async def _async_pipeline(
             total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
             analyses=final_state.get("analyses") or {},
         )
+
+        # 完整架構：把本次決策寫進記憶（供未來 past_context）；僅風險層、失敗不阻塞
+        if int(risk_rounds) > 0 and signal_dict:
+            try:
+                from app.agents.memory import AgentMemory, build_situation_text
+
+                await AgentMemory().store(
+                    symbol=report_data["symbol"],
+                    region="",
+                    situation=build_situation_text(
+                        report_data["symbol"], final_state.get("analyses") or {}
+                    ),
+                    decision=signal_dict,
+                )
+            except Exception as exc:
+                logger.warning("run_analysis.memory.store_failed error=%s", exc)
 
         # 5. P14：建 pending_order（signal=BUY/SELL）
         pending_order_id: str | None = None

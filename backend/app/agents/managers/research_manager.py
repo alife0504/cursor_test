@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from decimal import Decimal
 from typing import Any
@@ -17,7 +18,7 @@ from typing import Any
 from app.agents.llm_helpers import llm_call_with_schema, record_llm_usage
 from app.agents.prompts_loader import load_prompt
 from app.agents.schemas import FinalSignal
-from app.agents.state import AgentState
+from app.agents.state import AgentState, resolve_agent_model
 from app.core.database import rw_session
 from app.core.logging_config import get_logger
 from app.llm.base_provider import BaseLLMProvider
@@ -50,6 +51,7 @@ class ResearchManager:
             system_prompt,
             user_prompt,
             FinalSignal,
+            model=resolve_agent_model(state, "manager"),
             max_tokens=3000,
             temperature=0.3,
         )
@@ -61,9 +63,12 @@ class ResearchManager:
                     await record_llm_usage(
                         session,
                         analysis_id=analysis_id,
-                        user_id=None,
+                        user_id=state.get("user_id"),
                         provider=self.llm.name,
-                        model=getattr(self.llm, "default_model", "unknown"),
+                        model=(
+                            getattr(self.llm, "last_used_model", None)
+                            or getattr(self.llm, "default_model", "unknown")
+                        ),
                         usage=usage,
                         purpose="manager.synthesize",
                         latency_ms=latency_ms,
@@ -90,6 +95,9 @@ class ResearchManager:
         return {
             "signal": signal_dict,
             "report_md": report_md,
+            # 完整架構：研究經理的決策理由即「研究計畫」，供 Trader / 風險團隊使用。
+            # 風險層關閉時這個 signal 即最終（向後相容）；開啟時會被 RiskManager 覆寫。
+            "investment_plan": signal.reasoning_zh,
             "llm_usage_total_tokens": int(state.get("llm_usage_total_tokens", 0) or 0)
             + usage.total_tokens,
         }
@@ -171,10 +179,7 @@ def _render_report_md(
     for name, content in analyses.items():
         parts.append(f"### {name}")
         parts.append("")
-        parts.append("```json")
-        parts.append(content)
-        parts.append("```")
-        parts.append("")
+        parts.extend(_fenced_block(content))
 
     if debate_history:
         parts.append("## Bull/Bear 辯論紀錄")
@@ -182,12 +187,25 @@ def _render_report_md(
         for h in debate_history:
             parts.append(f"### {h.get('role')} - Round {h.get('round')}")
             parts.append("")
-            parts.append("```json")
-            parts.append(str(h.get("content", "")))
-            parts.append("```")
-            parts.append("")
+            parts.extend(_fenced_block(str(h.get("content", ""))))
 
     return "\n".join(parts)
+
+
+def _fenced_block(content: str) -> list[str]:
+    """把 analyst / 辯論內容包成 Markdown 區塊（含結尾空行）。
+
+    內容是合法 JSON（正常情況）→ 美化後放進 ```json``` 區塊；
+    否則（如優雅降級時寫入的「⚠️ 資料不足…」純文字警語）→ 直接純文字，
+    避免把中文警語塞進 json fence 造成 Markdown 渲染破版。
+    """
+    text = content if isinstance(content, str) else str(content)
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return [text, ""]
+    pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+    return ["```json", pretty, "```", ""]
 
 
 __all__ = ["ResearchManager"]

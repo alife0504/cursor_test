@@ -72,6 +72,40 @@ def test_build_graph_empty_analyst_types_skips_all_analysts() -> None:
         assert name not in nodes
 
 
+# ── 完整風險架構（trader + 風險團隊 + verifier）建置 ─────
+
+
+def test_build_graph_risk_layer_includes_all_nodes() -> None:
+    """risk_rounds>0 + 有 llm → 應掛上 trader / 風險三辯論 / risk_manager / verifier。"""
+    dummy_llm = object()  # 只建圖不執行，dummy 即可通過各 agent 的 None 檢查
+    g = build_graph(
+        "2330", "TWSE", analyst_types=["market"], debate_rounds=1, risk_rounds=2, llm=dummy_llm
+    )
+    nodes = set(g.get_graph().nodes.keys())
+    for n in (
+        "manager",
+        "trader",
+        "risk_aggressive",
+        "risk_conservative",
+        "risk_neutral",
+        "risk_manager",
+        "verifier",
+    ):
+        assert n in nodes, f"完整架構缺 {n}；nodes={nodes}"
+
+
+def test_build_graph_risk_off_keeps_current_behavior() -> None:
+    """risk_rounds=0 → 不掛風險層（向後相容＝現狀，manager 仍是終結）。"""
+    dummy_llm = object()
+    g = build_graph(
+        "2330", "TWSE", analyst_types=["market"], debate_rounds=1, risk_rounds=0, llm=dummy_llm
+    )
+    nodes = set(g.get_graph().nodes.keys())
+    assert "manager" in nodes
+    for n in ("trader", "risk_aggressive", "risk_manager", "verifier"):
+        assert n not in nodes, f"風險層關閉不應有 {n}；nodes={nodes}"
+
+
 # ── stub graph 跑得起來 ────────────────────────────────
 
 
