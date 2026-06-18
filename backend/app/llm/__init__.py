@@ -41,6 +41,22 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def available_providers(settings: Settings) -> list[str]:
+    """回傳目前已配置 API key（即可實際使用）的 provider name list。
+
+    供前端標示／禁用「無對應金鑰」的模型選項，避免使用者選了 GPT/Claude 卻被
+    fallback chain 靜默降級為預設 Gemini 而不自知。順序固定：google → openai → anthropic。
+    """
+    out: list[str] = []
+    if settings.GOOGLE_API_KEY:
+        out.append("google")
+    if settings.OPENAI_API_KEY:
+        out.append("openai")
+    if settings.ANTHROPIC_API_KEY:
+        out.append("anthropic")
+    return out
+
+
 def get_llm_chain(settings: Settings) -> LLMFallbackChain:
     """建構 `LLMFallbackChain` — 只把有 API key 的 provider 加進來。
 
@@ -102,6 +118,7 @@ __all__ = [
     "LLMResponse",
     "OpenAIProvider",
     "TokenUsage",
+    "available_providers",
     "get_llm_chain",
     "get_llm_provider",
     "register_llm_provider",

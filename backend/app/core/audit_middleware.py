@@ -154,12 +154,12 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _client_ip(request: Request) -> str | None:
-        if request.client is None:
-            return None
-        host = request.client.host
+        from app.core.client_ip import get_client_ip
+
+        host = get_client_ip(request)
         if not host:
             return None
-        # 驗 IP 格式（與 auth_router._client_ip 同邏輯）
+        # 驗 IP 格式（testclient / 非法值 → None，避免炸 INET 欄位）
         import ipaddress
 
         try:

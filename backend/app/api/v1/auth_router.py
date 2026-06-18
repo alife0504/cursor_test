@@ -89,9 +89,9 @@ def _client_ip(request: Request) -> str | None:
     """
     import ipaddress
 
-    if request.client is None:
-        return None
-    host = request.client.host
+    from app.core.client_ip import get_client_ip
+
+    host = get_client_ip(request)
     if not host:
         return None
     try:

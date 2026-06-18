@@ -39,7 +39,7 @@ class GeminiProvider(BaseLLMProvider):
     """Google Gemini provider（預設 gemini-2.0-flash）。"""
 
     name: ClassVar[str] = "google"
-    default_model: ClassVar[str] = "gemini-2.0-flash"
+    default_model: ClassVar[str] = "gemini-2.5-flash"
 
     # Pricing：(input_per_1k_usd, output_per_1k_usd)
     # 來源：https://ai.google.dev/pricing（2026-05 抓取）
@@ -51,8 +51,12 @@ class GeminiProvider(BaseLLMProvider):
         "gemini-1.5-flash": (Decimal("0.000075"), Decimal("0.0003")),
         # gemini-1.5-pro：$1.25/1M input, $5.00/1M output
         "gemini-1.5-pro": (Decimal("0.00125"), Decimal("0.005")),
-        # gemini-2.5-flash（若可用）
-        "gemini-2.5-flash": (Decimal("0.0001"), Decimal("0.0004")),
+        # gemini-2.5-flash：$0.30/1M input, $2.50/1M output
+        "gemini-2.5-flash": (Decimal("0.0003"), Decimal("0.0025")),
+        # gemini-2.5-flash-lite：$0.10/1M input, $0.40/1M output
+        "gemini-2.5-flash-lite": (Decimal("0.0001"), Decimal("0.0004")),
+        # gemini-3.5-flash（若 API 已開放；暫沿用 2.5-flash 定價估算）
+        "gemini-3.5-flash": (Decimal("0.0003"), Decimal("0.0025")),
     }
 
     def __init__(self, settings: Settings) -> None:

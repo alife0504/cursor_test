@@ -54,6 +54,10 @@ def get_redis_pool(db: int) -> redis_async.ConnectionPool:
             socket_connect_timeout=5.0,
             socket_timeout=5.0,
             socket_keepalive=True,
+            # 韌性：定期健檢 idle 連線 + timeout 自動重試，避免休眠喚醒 / redis 重啟後
+            # 第一個請求拿到失效連線就報錯（pool 會自動重建連線）。
+            health_check_interval=30,
+            retry_on_timeout=True,
         )
     return _pools[db]
 

@@ -1,15 +1,17 @@
-"""AnthropicProvider — Anthropic Claude Haiku 3.5 預設。
+"""AnthropicProvider — Anthropic Claude Haiku 4.5 預設。
 
 依 PLAN.md 第 14.4 章 LLM Fallback Chain + 第 19.3 章 cost tracking。
 
 設計：
 - 直接用 `anthropic.AsyncAnthropic` SDK（不繞 langchain-anthropic），取 `response.usage`。
-- Pricing 表（2026-05 來源：https://www.anthropic.com/pricing）：
-    claude-haiku-3-5：input $0.80/1M, output $4.00/1M
-    claude-sonnet-4：input $3.00/1M, output $15.00/1M
+- Pricing 表（2026-06 來源：https://www.anthropic.com/pricing）：
+    claude-haiku-4-5：input $1.00/1M, output $5.00/1M
+    claude-sonnet-4-6：input $3.00/1M, output $15.00/1M
+    claude-opus-4-8：input $5.00/1M, output $25.00/1M
 - Anthropic SDK API：messages.create()；system 是獨立 param、user 走 messages list
   （與 OpenAI Chat API 不同；底層 protocol 差異大）。
-- model name pin 到具體日期版（PLAN 14 已知陷阱：Anthropic model name 變動快）。
+- ⚠️ Claude 3.5 Haiku/Sonnet（claude-3-5-*-20241022）已於 2026-02 退役（API 會 404），
+  故預設與定價表全面改用現役 4.x 系列 alias（不加日期 suffix）。
 
 P14 加入；註冊 name="anthropic"。
 """
@@ -37,21 +39,21 @@ logger = get_logger(__name__)
 
 @register_llm_provider
 class AnthropicProvider(BaseLLMProvider):
-    """Anthropic provider（預設 claude-haiku-3-5-20241022）。"""
+    """Anthropic provider（預設 claude-haiku-4-5）。"""
 
     name: ClassVar[str] = "anthropic"
-    default_model: ClassVar[str] = "claude-haiku-3-5-20241022"
+    default_model: ClassVar[str] = "claude-haiku-4-5"
 
     # Pricing：(input_per_1k_usd, output_per_1k_usd)
-    # 來源：https://www.anthropic.com/pricing（2026-05 抓取）
+    # 來源：https://www.anthropic.com/pricing（2026-06 抓取）。用 alias（不加日期 suffix）。
     pricing: ClassVar[dict[str, tuple[Decimal, Decimal]]] = {
-        # Claude Haiku 3.5: $0.80/1M input, $4.00/1M output
-        "claude-haiku-3-5-20241022": (Decimal("0.0008"), Decimal("0.004")),
-        # Claude Sonnet 4: $3.00/1M input, $15.00/1M output
-        "claude-sonnet-4-20250514": (Decimal("0.003"), Decimal("0.015")),
-        # 舊 alias / fallback（同價）
-        "claude-3-5-haiku-latest": (Decimal("0.0008"), Decimal("0.004")),
-        "claude-3-5-sonnet-latest": (Decimal("0.003"), Decimal("0.015")),
+        # Claude Haiku 4.5: $1.00/1M input, $5.00/1M output
+        "claude-haiku-4-5": (Decimal("0.001"), Decimal("0.005")),
+        "claude-haiku-4-5-20251001": (Decimal("0.001"), Decimal("0.005")),
+        # Claude Sonnet 4.6: $3.00/1M input, $15.00/1M output
+        "claude-sonnet-4-6": (Decimal("0.003"), Decimal("0.015")),
+        # Claude Opus 4.8: $5.00/1M input, $25.00/1M output
+        "claude-opus-4-8": (Decimal("0.005"), Decimal("0.025")),
     }
 
     def __init__(self, settings: Settings) -> None:

@@ -179,10 +179,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _client_ip(request: Request) -> str:
-        # P11 加 X-Forwarded-For 信任白名單
-        if request.client is None:
-            return "0.0.0.0"  # noqa: S104  # 沒 client 才退路 fallback；rate-limit key 用
-        return request.client.host or "0.0.0.0"  # noqa: S104
+        # 統一走 get_client_ip：預設只信任直連 peer，反向代理後可開 TRUST_PROXY_HEADERS
+        from app.core.client_ip import get_client_ip
+
+        return get_client_ip(request)
 
     @staticmethod
     def _user_id(request: Request) -> str | None:

@@ -54,10 +54,22 @@ class Settings(BaseSettings):
     SECRET_KEY_PREVIOUS: str | None = None
     """雙 key rotation 過渡期用（P8）。平時為 None。"""
     DATA_ENCRYPTION_KEY: str
-    """Fernet 加密 LINE/Telegram token（P14/P18）；必須與 SECRET_KEY 不同。"""
+    """Fernet 加密 Discord webhook / Telegram token（P14/P18）；必須與 SECRET_KEY 不同。"""
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
     CSP_PROD_ENABLED: bool = False
     """P18 才設 true（prod CSP nonce-based）。"""
+    TRUST_PROXY_HEADERS: bool = False
+    """部署在受信任反向代理（nginx 等）後才設 True，才會信任 X-Forwarded-For / X-Real-IP
+    取真實 client IP；預設 False（直連）以免任何人偽造標頭繞過限流 / 稽核。"""
+    TRUSTED_PROXY_HOPS: int = 1
+    """信任的反向代理層數（從應用連線端往回數），用於從 X-Forwarded-For 取對真實 client IP。"""
+
+    # ── 啟動韌性（避免依賴短暫不可用就把整個 process 殺掉）────────
+    STARTUP_PROBE_RETRIES: int = 10
+    """啟動時 DB/Redis/Qdrant 探測的重試次數（退避）；用盡才 fail-fast。
+    讓容器冷啟排序、筆電休眠喚醒、redis 重啟等短暫抖動不會一啟動就崩潰退出。"""
+    STARTUP_PROBE_DELAY_S: float = 2.0
+    """啟動探測每次重試的基礎退避秒數（實際 = min(delay×attempt, 10)）。"""
 
     # ── DB（連線池參數依第 14.1 章） ────────────────────────
     POSTGRES_HOST: str = "localhost"
@@ -101,15 +113,17 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: SecretStr | None = None
     ANTHROPIC_API_KEY: SecretStr | None = None
     LLM_DEFAULT_PROVIDER: Literal["google", "openai", "anthropic"] = "google"
-    LLM_DEFAULT_MODEL: str = "gemini-2.0-flash"
+    LLM_DEFAULT_MODEL: str = "gemini-2.5-flash"
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
-    ANTHROPIC_DEFAULT_MODEL: str = "claude-haiku-3-5-20241022"
+    ANTHROPIC_DEFAULT_MODEL: str = "claude-haiku-4-5"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
     LLM_MONTHLY_BUDGET_USD_DEFAULT: Decimal = Decimal("50.00")
     """用戶預設月預算（每用戶可個別覆寫）。"""
 
     # ── 通知（P18） ──────────────────────────────────────────
-    LINE_NOTIFY_TOKEN: SecretStr | None = None
+    DISCORD_WEBHOOK_URL: SecretStr | None = None
+    """系統層級 Discord Webhook（選用；取代已停服的 LINE Notify）。
+    使用者個人 webhook 存於 notification_settings.discord_webhook_encrypted。"""
     TELEGRAM_BOT_TOKEN: SecretStr | None = None
     TELEGRAM_CHAT_ID: str | None = None
 

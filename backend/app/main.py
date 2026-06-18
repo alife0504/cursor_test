@@ -19,6 +19,8 @@ Middleware（外 → 內）：
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -81,9 +83,45 @@ configure_logging()
 logger = get_logger(__name__)
 
 
+async def _probe_with_retry(
+    probe: Callable[[], Awaitable[None]],
+    *,
+    name: str,
+    retries: int,
+    delay_s: float,
+) -> None:
+    """跑 startup probe；失敗時退避重試，retries 用盡仍失敗才 raise。
+
+    目的：讓「依賴啟動較慢 / 短暫抖動」(容器冷啟排序、筆電休眠喚醒、redis 重啟)
+    不會一啟動就 raise 殺掉整個 process —— 服務能在依賴恢復後乾淨啟動，這對
+    「持續運行、不隨意停止」很關鍵。真正長時間掛掉才 fail-fast（交給 supervisor 重啟）。
+    """
+    last: Exception | None = None
+    total = max(1, retries)
+    for attempt in range(1, total + 1):
+        try:
+            await probe()
+            if attempt > 1:
+                logger.info("startup.probe.recovered", probe=name, attempt=attempt)
+            return
+        except Exception as e:  # startup probe 要吞所有錯再決定 retry/fail
+            last = e
+            logger.warning(
+                "startup.probe.retry",
+                probe=name,
+                attempt=attempt,
+                retries=total,
+                error=str(e),
+            )
+            if attempt < total:
+                await asyncio.sleep(min(delay_s * attempt, 10.0))
+    if last is not None:
+        raise last
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """startup → 跑 fail-fast probe；shutdown → dispose pool。"""
+    """startup → 跑 probe（退避重試）；shutdown → dispose pool。"""
     logger.info(
         "app.startup",
         version=settings.APP_VERSION,
@@ -93,20 +131,28 @@ async def lifespan(app: FastAPI):
 
     # 跳過 startup probe（pytest 用）
     if not settings.PYTEST_RUNNING:
+        _retries = settings.STARTUP_PROBE_RETRIES
+        _delay = settings.STARTUP_PROBE_DELAY_S
         try:
-            await test_db_connection()
+            await _probe_with_retry(
+                test_db_connection, name="postgres", retries=_retries, delay_s=_delay
+            )
         except Exception as e:
             logger.critical("db.startup_probe_failed", error=str(e))
             raise ExternalServiceError(message_zh="資料庫連線失敗", source="postgres") from e
 
         try:
-            await test_redis_connection()
+            await _probe_with_retry(
+                test_redis_connection, name="redis", retries=_retries, delay_s=_delay
+            )
         except Exception as e:
             logger.critical("redis.startup_probe_failed", error=str(e))
             raise ExternalServiceError(message_zh="Redis 連線失敗", source="redis") from e
 
         try:
-            await test_qdrant_connection()
+            await _probe_with_retry(
+                test_qdrant_connection, name="qdrant", retries=_retries, delay_s=_delay
+            )
         except Exception as e:
             logger.critical("qdrant.startup_probe_failed", error=str(e))
             raise ExternalServiceError(message_zh="Qdrant 連線失敗", source="qdrant") from e

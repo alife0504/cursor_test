@@ -46,7 +46,7 @@ def test_get_llm_provider_returns_gemini(settings_with_key: Any) -> None:
     prov = get_llm_provider("google", settings_with_key)
     assert isinstance(prov, GeminiProvider)
     assert prov.name == "google"
-    assert prov.default_model == "gemini-2.0-flash"
+    assert prov.default_model == "gemini-2.5-flash"
 
 
 def test_pricing_calc_cost_known_model(settings_with_key: Any) -> None:

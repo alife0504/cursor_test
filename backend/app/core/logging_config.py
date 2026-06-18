@@ -40,7 +40,7 @@ _SENSITIVE_FIELDS: frozenset[str] = frozenset(
         "token",
         "authorization",
         "auth",
-        "line_token",
+        "discord_webhook",
         "telegram_token",
         "refresh_token",
         "access_token",
@@ -57,7 +57,7 @@ _SENSITIVE_FIELDS: frozenset[str] = frozenset(
         "alpha_vantage_api_key",
         "finnhub_api_key",
         "telegram_bot_token",
-        "line_notify_token",
+        "discord_webhook_url",
     }
 )
 

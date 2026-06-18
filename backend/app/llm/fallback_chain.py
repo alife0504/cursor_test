@@ -43,6 +43,23 @@ FALLBACK_CHAIN: dict[str, list[str]] = {
 }
 
 
+def provider_for_model(model: str | None) -> str | None:
+    """依 model id 前綴推斷對應 provider（per-agent 跨 provider 模型路由用）。
+
+    gemini* → google；gpt*/o1*/o3* → openai；claude* → anthropic；無法判斷 → None。
+    """
+    if not model:
+        return None
+    m = model.lower().removeprefix("models/")
+    if m.startswith("gemini") or m.startswith("text-embedding"):
+        return "google"
+    if m.startswith(("gpt", "o1", "o3", "o4", "chatgpt")):
+        return "openai"
+    if m.startswith("claude"):
+        return "anthropic"
+    return None
+
+
 class LLMFallbackChain:
     """LLM Provider Fallback Chain（PLAN 14.4）。
 
@@ -71,6 +88,9 @@ class LLMFallbackChain:
         self.primary: str = primary
         # 每次 generate 後更新（供外部讀，記錄 cost 用）
         self.last_used_provider: str | None = None
+        # 最近一次實際送出的 model id（per-agent 覆寫 / fallback 後可能 != default_model）；
+        # record_llm_usage 用它寫對「實際使用的模型」而非 provider 預設。
+        self.last_used_model: str | None = None
 
     @property
     def name(self) -> str:
@@ -134,12 +154,17 @@ class LLMFallbackChain:
                 last_skipped.append(provider_name)
                 continue
 
+            # 指定的 model 若不屬於本 provider（fallback 到別家）→ 用該 provider 預設模型，
+            # 避免把 gpt-* 丟給 Gemini 這種無意義呼叫。
+            pm = provider_for_model(model)
+            effective_model = model if (pm is None or pm == provider_name) else None
+
             try:
                 resp = await provider.generate(
                     system=system,
                     user=user,
                     tools=tools,
-                    model=model,
+                    model=effective_model,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
@@ -173,6 +198,8 @@ class LLMFallbackChain:
                         error=str(cb_exc),
                     )
             self.last_used_provider = provider_name
+            # 記錄實際送出的 model（effective_model 為 None 表示用該 provider 預設）
+            self.last_used_model = effective_model or getattr(provider, "default_model", None)
             logger.info(
                 "llm_fallback.success",
                 provider=provider_name,
@@ -209,9 +236,13 @@ class LLMFallbackChain:
 
         Analyst 可以無痛從 GeminiProvider 換成 LLMFallbackChain。
         used_provider 寫到 self.last_used_provider；caller 透過 chain.name 拿到。
+
+        per-agent 模型：若給 model，依其 provider 當 primary（gpt→openai、claude→anthropic、
+        gemini→google）；無法判斷則用 self.primary。
         """
+        primary = provider_for_model(model) or self.primary
         resp, _used = await self.generate_with_chain(
-            self.primary,
+            primary,
             system,
             user,
             tools=tools,
@@ -249,4 +280,4 @@ class LLMFallbackChain:
         )
 
 
-__all__ = ["FALLBACK_CHAIN", "LLMFallbackChain"]
+__all__ = ["FALLBACK_CHAIN", "LLMFallbackChain", "provider_for_model"]

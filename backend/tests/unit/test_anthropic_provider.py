@@ -44,23 +44,23 @@ def test_anthropic_registered() -> None:
 def test_default_model(settings_with_key: Any) -> None:
     prov = AnthropicProvider(settings_with_key)
     assert prov.name == "anthropic"
-    assert prov.default_model == "claude-haiku-3-5-20241022"
+    assert prov.default_model == "claude-haiku-4-5"
 
 
 def test_pricing_haiku(settings_with_key: Any) -> None:
-    """claude-haiku-3-5：input $0.80/1M, output $4.00/1M。
+    """claude-haiku-4-5：input $1.00/1M, output $5.00/1M。
 
-    1000 input + 500 output → 0.0008*1 + 0.004*0.5 = 0.0008 + 0.002 = 0.0028
+    1000 input + 500 output → 0.001*1 + 0.005*0.5 = 0.001 + 0.0025 = 0.0035
     """
     prov = AnthropicProvider(settings_with_key)
-    cost = prov.calc_cost("claude-haiku-3-5-20241022", 1000, 500)
-    assert cost == Decimal("0.002800")
+    cost = prov.calc_cost("claude-haiku-4-5", 1000, 500)
+    assert cost == Decimal("0.003500")
 
 
 def test_pricing_sonnet(settings_with_key: Any) -> None:
-    """claude-sonnet-4：input $3.00/1M, output $15.00/1M。"""
+    """claude-sonnet-4-6：input $3.00/1M, output $15.00/1M。"""
     prov = AnthropicProvider(settings_with_key)
-    cost = prov.calc_cost("claude-sonnet-4-20250514", 2000, 1000)
+    cost = prov.calc_cost("claude-sonnet-4-6", 2000, 1000)
     # 0.003 * 2 + 0.015 * 1 = 0.006 + 0.015 = 0.021
     assert cost == Decimal("0.021000")
 
@@ -114,6 +114,6 @@ async def test_generate_parses_content_and_usage(
     assert resp.usage.input_tokens == 200
     assert resp.usage.output_tokens == 100
     assert resp.usage.total_tokens == 300
-    # 200*0.0008/1000 + 100*0.004/1000 = 0.00016 + 0.0004 = 0.00056
-    assert resp.usage.cost_usd == Decimal("0.000560")
+    # 預設模型 claude-haiku-4-5：200*0.001/1000 + 100*0.005/1000 = 0.0002 + 0.0005 = 0.0007
+    assert resp.usage.cost_usd == Decimal("0.000700")
     assert resp.finish_reason == "end_turn"
