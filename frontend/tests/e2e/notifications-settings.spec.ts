@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 // Phase 17 § T:notifications 流程
 //   - 進頁、看到表單欄位
 //   - 修改訂閱事件 → 儲存按鈕
-//   - 不真打 LINE / Telegram(後端 endpoint 已 mock 「不真打外部」)
+//   - 不真打 Discord / Telegram(後端 endpoint 已 mock 「不真打外部」)
 
 test.describe("Phase 17 notifications settings", () => {
   test.beforeEach(async ({ page }) => {
@@ -17,7 +17,7 @@ test.describe("Phase 17 notifications settings", () => {
     await expect(page.getByRole("heading", { name: "通知設定" })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByText("LINE Notify Token")).toBeVisible();
+    await expect(page.getByText("Discord Webhook URL")).toBeVisible();
     await expect(page.getByText("Telegram chat_id")).toBeVisible();
     await expect(page.getByRole("button", { name: /儲存設定/ })).toBeVisible();
   });

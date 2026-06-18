@@ -41,21 +41,21 @@ class NotificationService:
         patch: dict[str, Any],
         request_id: str | None = None,
     ) -> NotificationSetting:
-        """部分更新；line_token / telegram_bot_token 進 DB 前先 Fernet 加密。
+        """部分更新；discord_webhook / telegram_bot_token 進 DB 前先 Fernet 加密。
 
-        - line_token / telegram_bot_token=None → 不變
-        - line_token / telegram_bot_token="" → 清空
+        - discord_webhook / telegram_bot_token=None → 不變
+        - discord_webhook / telegram_bot_token="" → 清空
         - 其他值 → 加密寫入對應 *_encrypted 欄位
         """
         normalized: dict[str, Any] = {}
         for k, v in patch.items():
-            if k == "line_token":
+            if k == "discord_webhook":
                 if v is None:
                     continue
                 if v == "":
-                    normalized["line_token_encrypted"] = None
+                    normalized["discord_webhook_encrypted"] = None
                 else:
-                    normalized["line_token_encrypted"] = encrypt_str(v)
+                    normalized["discord_webhook_encrypted"] = encrypt_str(v)
             elif k == "telegram_bot_token":
                 if v is None:
                     continue
@@ -91,7 +91,7 @@ class NotificationService:
         """測試發送。
 
         dry_run=True（預設）：只驗 credentials 可解密 → 寫 log，不真打外部。
-        dry_run=False：透過 dispatcher 真打 LINE / Telegram。
+        dry_run=False：透過 dispatcher 真打 Discord / Telegram。
 
         失敗時寫 failed + 中文錯誤訊息。
         """
@@ -100,14 +100,14 @@ class NotificationService:
         settings = await self.repo.get_settings(user.id)
         status = "queued"
         error_msg: str | None = None
-        if channel == "line":
-            token_enc = getattr(settings, "line_token_encrypted", None) if settings else None
-            if not token_enc:
+        if channel == "discord":
+            webhook_enc = getattr(settings, "discord_webhook_encrypted", None) if settings else None
+            if not webhook_enc:
                 status = "failed"
-                error_msg = "尚未設定 LINE token"
+                error_msg = "尚未設定 Discord Webhook"
             else:
                 try:
-                    decrypt_str(token_enc)
+                    decrypt_str(webhook_enc)
                     status = "sent" if dry_run else "queued"
                 except ValidationError as e:
                     status = "failed"
@@ -136,7 +136,7 @@ class NotificationService:
             error_msg = f"不支援的 channel：{channel}"
 
         # 真打模式：dispatcher 後台送（不影響 audit log）
-        if not dry_run and error_msg is None and channel in ("line", "telegram"):
+        if not dry_run and error_msg is None and channel in ("discord", "telegram"):
             try:
                 dispatcher = get_dispatcher()
                 dispatcher.dispatch_in_background(
@@ -190,16 +190,16 @@ class NotificationService:
     # ── 給 router 用：把 ORM 物件序列化成 response，遮蔽 token ──
     @staticmethod
     def serialize_settings(row: NotificationSetting | None, user_id: UUID) -> dict[str, Any]:
-        """轉 ORM → response dict（line_token / telegram_bot_token 永遠遮蔽）。
+        """轉 ORM → response dict（discord_webhook / telegram_bot_token 永遠遮蔽）。
 
-        P18：新增 line_token_set / telegram_bot_token_set 旗標，方便前端判斷
-        「已設定」與否，不需顯示真實 token。
+        P18：新增 discord_webhook_set / telegram_bot_token_set 旗標，方便前端判斷
+        「已設定」與否，不需顯示真實 webhook/token。
         """
         if row is None:
             return {
                 "user_id": str(user_id),
-                "line_token_masked": None,
-                "line_token_set": False,
+                "discord_webhook_masked": None,
+                "discord_webhook_set": False,
                 "telegram_bot_token_set": False,
                 "telegram_chat_id": None,
                 "email_enabled": False,
@@ -211,8 +211,8 @@ class NotificationService:
             }
         return {
             "user_id": str(row.user_id),
-            "line_token_masked": mask_token(row.line_token_encrypted),
-            "line_token_set": bool(row.line_token_encrypted),
+            "discord_webhook_masked": mask_token(row.discord_webhook_encrypted),
+            "discord_webhook_set": bool(row.discord_webhook_encrypted),
             "telegram_bot_token_set": bool(row.telegram_bot_token_encrypted),
             "telegram_chat_id": row.telegram_chat_id,
             "email_enabled": bool(row.email_enabled),

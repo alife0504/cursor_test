@@ -9,7 +9,7 @@
 6. notifier 失敗 → 寫入 DLQ
 
 策略：
-- 用 httpx.MockTransport 攔截外部 HTTP（不真打 LINE/Telegram）
+- 用 httpx.MockTransport 攔截外部 HTTP（不真打 Discord/Telegram）
 - 直接呼叫 dispatcher.dispatch（不跑完整 analysis worker）
 - 驗收 notification_log + celery_dead_letters DB 狀態
 
@@ -65,10 +65,10 @@ async def _seed_notification_settings(
     *,
     enabled_events: list[str] | None = None,
     enabled_channels: list[str] | None = None,
-    with_line: bool = True,
+    with_discord: bool = True,
     with_telegram: bool = False,
 ) -> None:
-    """寫一筆 settings；line/telegram token 用 encrypt_str 預先加密。"""
+    """寫一筆 settings；discord webhook / telegram token 用 encrypt_str 預先加密。"""
     async with db_session_maker() as s:
         existing = (
             await s.execute(
@@ -78,8 +78,10 @@ async def _seed_notification_settings(
         if existing is None:
             existing = NotificationSetting(user_id=user_id)
             s.add(existing)
-        if with_line:
-            existing.line_token_encrypted = encrypt_str("FAKE_LINE_TOKEN_123")
+        if with_discord:
+            existing.discord_webhook_encrypted = encrypt_str(
+                "https://discord.com/api/webhooks/123456789/FAKE_DISCORD_WEBHOOK_TOKEN"
+            )
         if with_telegram:
             existing.telegram_bot_token_encrypted = encrypt_str("99:FAKE_BOT_TOKEN")
             existing.telegram_chat_id = "-1001234567890"
@@ -144,7 +146,7 @@ async def test_analysis_completed_dispatches_to_subscriber(
         assert len(logs) >= 1
         assert logs[0].status == "sent"
         assert logs[0].event_type == "analysis.completed"
-        assert logs[0].channel == "line"
+        assert logs[0].channel == "discord"
     finally:
         await mock_client.aclose()
         await _cleanup_for_user(db_session_maker, user.id)
@@ -288,7 +290,7 @@ async def test_notification_failure_writes_dlq(make_test_user, db_session_maker)
     await _seed_notification_settings(
         db_session_maker, user.id, enabled_events=["analysis.completed"]
     )
-    # 用 succeed=False 的 mock client → LINE 回 500 → notifier 回 NotifyResult(success=False)
+    # 用 succeed=False 的 mock client → Discord 回 500 → notifier 回 NotifyResult(success=False)
     mock_client = _make_mock_client(succeed=False)
     dispatcher = NotificationDispatcher(http_client=mock_client)
     try:

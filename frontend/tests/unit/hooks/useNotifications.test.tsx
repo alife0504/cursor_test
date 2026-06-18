@@ -30,11 +30,11 @@ function makeWrapper() {
 }
 
 describe("useNotificationSettings", () => {
-  test("回傳設定物件(line_token_masked + enabled_events)", async () => {
+  test("回傳設定物件(discord_webhook_masked + enabled_events)", async () => {
     mock.onGet("/notifications/settings").reply(200, {
       data: {
         user_id: "u1",
-        line_token_masked: "***abc",
+        discord_webhook_masked: "***abc",
         telegram_chat_id: null,
         email_enabled: false,
         enabled_events: ["analysis.completed"],
@@ -45,7 +45,7 @@ describe("useNotificationSettings", () => {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.line_token_masked).toBe("***abc");
+    expect(result.current.data?.discord_webhook_masked).toBe("***abc");
     expect(result.current.data?.enabled_events).toContain("analysis.completed");
   });
 });
@@ -71,7 +71,7 @@ describe("useUpdateNotificationSettings", () => {
 });
 
 describe("useSendTestNotification", () => {
-  test("POST channel=line 成功", async () => {
+  test("POST channel=discord 成功", async () => {
     let body: Record<string, unknown> | null = null;
     mock.onPost("/notifications/test").reply((config) => {
       body = JSON.parse(config.data);
@@ -80,7 +80,7 @@ describe("useSendTestNotification", () => {
         {
           data: {
             id: 1,
-            channel: "line",
+            channel: "discord",
             event_type: "test",
             payload: {},
             status: "sent",
@@ -93,8 +93,8 @@ describe("useSendTestNotification", () => {
     const { result } = renderHook(() => useSendTestNotification(), {
       wrapper: makeWrapper(),
     });
-    const out = await result.current.mutateAsync({ channel: "line", message: "x" });
-    expect(body!.channel).toBe("line");
+    const out = await result.current.mutateAsync({ channel: "discord", message: "x" });
+    expect(body!.channel).toBe("discord");
     expect(out.status).toBe("sent");
   });
 });
@@ -105,7 +105,7 @@ describe("useNotificationLogs", () => {
       data: [
         {
           id: 1,
-          channel: "line",
+          channel: "discord",
           event_type: "test",
           payload: {},
           status: "sent",

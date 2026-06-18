@@ -17,9 +17,9 @@ import {
   useUpdateNotificationSettings,
 } from "@/hooks/useNotifications";
 
-// Phase 17 § N:通知設定
-//   - PLAN 已知陷阱:後端只回 line_token_masked,前端不去 GET 真值;
-//     寫入時 line_token 為新值,空字串清空,None 不變(對齊 backend schema)
+// Phase 17 § N:通知設定（LINE Notify 已停服 → 改 Discord Webhook）
+//   - PLAN 已知陷阱:後端只回 discord_webhook_masked,前端不去 GET 真值;
+//     寫入時 discord_webhook 為新值,空字串清空,None 不變(對齊 backend schema)
 //   - 訂閱事件 checkbox
 //   - 測試發送按鈕
 //   - 通知歷史 log cursor pagination
@@ -37,7 +37,7 @@ export default function NotificationsPage() {
   const updateMut = useUpdateNotificationSettings();
   const testMut = useSendTestNotification();
 
-  const [lineToken, setLineToken] = useState<string>("");
+  const [discordWebhook, setDiscordWebhook] = useState<string>("");
   const [chatId, setChatId] = useState<string>("");
   const [events, setEvents] = useState<string[]>([]);
   const [emailEnabled, setEmailEnabled] = useState<boolean>(false);
@@ -63,22 +63,22 @@ export default function NotificationsPage() {
   const handleSave = async () => {
     try {
       await updateMut.mutateAsync({
-        // 空字串 = 不更新 token(避免 PUT 把使用者已存的 token 清掉)
-        line_token: lineToken === "" ? null : lineToken,
+        // 空字串 = 不更新(避免 PUT 把使用者已存的 webhook 清掉)
+        discord_webhook: discordWebhook === "" ? null : discordWebhook,
         telegram_chat_id: chatId === "" ? null : chatId,
         email_enabled: emailEnabled,
         enabled_events: events,
         quiet_hours_start: qhStart || null,
         quiet_hours_end: qhEnd || null,
       });
-      setLineToken("");
+      setDiscordWebhook("");
       toast.success("通知設定已儲存");
     } catch (e) {
       toast.error(`儲存失敗:${(e as Error).message}`);
     }
   };
 
-  const handleTest = async (channel: "line" | "telegram") => {
+  const handleTest = async (channel: "discord" | "telegram") => {
     try {
       await testMut.mutateAsync({
         channel,
@@ -94,7 +94,7 @@ export default function NotificationsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="通知設定"
-        description="LINE Notify / Telegram 通知與訂閱事件"
+        description="Discord / Telegram 通知與訂閱事件"
       />
 
       <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
@@ -104,14 +104,14 @@ export default function NotificationsPage() {
         <section className="grid gap-4 rounded-lg border bg-card p-4 card-hover">
           <h3 className="text-sm font-medium">頻道設定</h3>
 
-          {/* LINE token */}
+          {/* Discord webhook */}
           <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="line-token" className="text-xs">
-                LINE Notify Token
-                {settings.data?.line_token_masked ? (
+              <Label htmlFor="discord-webhook" className="text-xs">
+                Discord Webhook URL
+                {settings.data?.discord_webhook_masked ? (
                   <span className="ml-2 text-xs text-success">
-                    （已設定：{settings.data.line_token_masked}）
+                    （已設定：{settings.data.discord_webhook_masked}）
                   </span>
                 ) : (
                   <span className="ml-2 text-xs text-muted-foreground">
@@ -120,19 +120,19 @@ export default function NotificationsPage() {
                 )}
               </Label>
               <Input
-                id="line-token"
-                value={lineToken}
-                onChange={(e) => setLineToken(e.target.value)}
-                placeholder="輸入新 token 以更新,留空不變"
+                id="discord-webhook"
+                value={discordWebhook}
+                onChange={(e) => setDiscordWebhook(e.target.value)}
+                placeholder="https://discord.com/api/webhooks/... ，留空不變"
                 type="password"
               />
             </div>
             <Button
               variant="outline"
-              onClick={() => handleTest("line")}
-              disabled={testMut.isPending || !settings.data?.line_token_masked}
+              onClick={() => handleTest("discord")}
+              disabled={testMut.isPending || !settings.data?.discord_webhook_masked}
             >
-              測試 LINE
+              測試 Discord
             </Button>
           </div>
 

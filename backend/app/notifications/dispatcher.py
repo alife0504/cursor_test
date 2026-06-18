@@ -195,22 +195,22 @@ class NotificationDispatcher:
         enabled = row.enabled_channels
         wanted = set(enabled) if enabled else None  # None = all
 
-        # LINE
-        if (wanted is None or "line" in wanted) and row.line_token_encrypted:
+        # Discord（取代已停服的 LINE Notify）
+        if (wanted is None or "discord" in wanted) and row.discord_webhook_encrypted:
             try:
-                token = decrypt_str(row.line_token_encrypted)
+                webhook_url = decrypt_str(row.discord_webhook_encrypted)
                 out.append(
                     _ResolvedTarget(
                         user_id=row.user_id,
-                        notifier_name="line",
-                        credentials={"token": token},
+                        notifier_name="discord",
+                        credentials={"webhook_url": webhook_url},
                         quiet_hours_start=row.quiet_hours_start,
                         quiet_hours_end=row.quiet_hours_end,
                     )
                 )
             except Exception as exc:
                 logger.warning(
-                    "NotificationDispatcher.decrypt.line_failed user=%s error=%s",
+                    "NotificationDispatcher.decrypt.discord_failed user=%s error=%s",
                     row.user_id,
                     exc,
                 )

@@ -25,7 +25,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, short_enum
 
-NOTIFICATION_CHANNEL_VALUES = ("line", "telegram", "email", "webhook")
+# 'line' 已停用，但保留於可讀值清單：DB 仍可能有歷史 channel='line' 的 notification_log
+# 列，SQLAlchemy 讀取時會以此 enum 驗證，移除會讓讀取歷史列崩潰（與 migration 0018 的
+# CHECK 一致）。新寫入一律用 discord。
+NOTIFICATION_CHANNEL_VALUES = ("line", "discord", "telegram", "email", "webhook")
 NOTIFICATION_STATUS_VALUES = ("queued", "sent", "failed", "retry")
 
 
@@ -70,7 +73,7 @@ class NotificationLog(Base):
 
 
 class NotificationSetting(Base):
-    """每用戶通知偏好（1:1 與 users）。LINE token 用 Fernet 加密儲存。"""
+    """每用戶通知偏好（1:1 與 users）。Discord webhook / Telegram token 用 Fernet 加密儲存。"""
 
     __tablename__ = "notification_settings"
 
@@ -85,15 +88,15 @@ class NotificationSetting(Base):
         nullable=False,
     )
 
-    line_token_encrypted: Mapped[str | None] = mapped_column(Text)
-    """Fernet 加密後的 LINE Notify token（PLAN 19.4）。"""
+    discord_webhook_encrypted: Mapped[str | None] = mapped_column(Text)
+    """Fernet 加密後的 Discord Webhook URL（取代已停服的 LINE Notify；PLAN 19.4）。"""
     telegram_bot_token_encrypted: Mapped[str | None] = mapped_column(Text)
     """Phase 18 加：Fernet 加密的 Telegram Bot Token（機敏；與 chat_id 分開）。"""
     telegram_chat_id: Mapped[str | None] = mapped_column(String(50))
     email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     enabled_channels: Mapped[list | None] = mapped_column(JSONB)
-    """如 ["line", "email"] — 啟用的 channel 清單。"""
+    """如 ["discord", "email"] — 啟用的 channel 清單。"""
     enabled_events: Mapped[list | None] = mapped_column(JSONB)
     """如 ["analysis.completed", "order.approved"] — 接收的事件類型。"""
 

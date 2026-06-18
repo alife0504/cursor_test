@@ -50,7 +50,7 @@ export function useUpdateNotificationSettings() {
 }
 
 export interface SendTestNotificationVars {
-  channel: "line" | "telegram";
+  channel: "discord" | "telegram";
   message: string;
 }
 

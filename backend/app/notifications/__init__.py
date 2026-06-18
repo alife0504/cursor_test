@@ -4,7 +4,7 @@
 - BaseNotifier：所有通知器的抽象基底
 - NOTIFIER_REGISTRY / register_notifier：plugin pattern 註冊表
 - NotifyEvent / NotifyResult：dispatcher 與 notifier 間的 DTO
-- LINENotifier / TelegramNotifier：兩個內建 adapter
+- DiscordNotifier / TelegramNotifier：兩個內建 adapter（LINE Notify 已停服，改 Discord Webhook）
 - NotificationDispatcher：依用戶 settings 過濾、發送、失敗 DLQ
 """
 
@@ -18,14 +18,14 @@ from app.notifications.base import (
     NotifyResult,
     register_notifier,
 )
+from app.notifications.discord_notifier import DiscordNotifier
 from app.notifications.dispatcher import NotificationDispatcher, get_dispatcher
-from app.notifications.line_notifier import LINENotifier
 from app.notifications.telegram_notifier import TelegramNotifier
 
 __all__ = [
     "NOTIFIER_REGISTRY",
     "BaseNotifier",
-    "LINENotifier",
+    "DiscordNotifier",
     "NotificationDispatcher",
     "NotifyEvent",
     "NotifyLevel",

@@ -1,6 +1,7 @@
 """Phase 11 — /api/v1/notifications/* schemas。
 
-LINE token 用 Fernet 加密儲存；response 永遠遮蔽（不回傳明文）。
+Discord webhook URL 用 Fernet 加密儲存；response 永遠遮蔽（不回傳明文）。
+（LINE Notify 已停服，改 Discord Webhook。）
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from pydantic import Field, field_validator
 
 from app.schemas.common import BaseSchema
 
-ALLOWED_CHANNELS = {"line", "telegram", "email", "webhook"}
+ALLOWED_CHANNELS = {"discord", "telegram", "email", "webhook"}
 ALLOWED_EVENTS = {
     "analysis.completed",
     "analysis.failed",
@@ -27,12 +28,12 @@ ALLOWED_EVENTS = {
 class NotificationSettingsOut(BaseSchema):
     """GET /api/v1/notifications/settings 回應。
 
-    P18：line_token / telegram_bot_token 永遠遮蔽（只回 is_set / masked）。
+    P18：discord_webhook / telegram_bot_token 永遠遮蔽（只回 is_set / masked）。
     """
 
     user_id: UUID
-    line_token_masked: str | None = None
-    line_token_set: bool = False
+    discord_webhook_masked: str | None = None
+    discord_webhook_set: bool = False
     telegram_bot_token_set: bool = False
     telegram_chat_id: str | None = None
     email_enabled: bool = False
@@ -46,12 +47,12 @@ class NotificationSettingsOut(BaseSchema):
 class NotificationSettingsUpdate(BaseSchema):
     """PUT /api/v1/notifications/settings 的 body。
 
-    line_token / telegram_bot_token / telegram_chat_id 為 None → 不變；
+    discord_webhook / telegram_bot_token / telegram_chat_id 為 None → 不變；
     為空字串 → 清空；
     其他值 → 加密寫入（token 類）或直接寫入（chat_id）。
     """
 
-    line_token: str | None = Field(default=None, max_length=500)
+    discord_webhook: str | None = Field(default=None, max_length=500)
     telegram_bot_token: str | None = Field(default=None, max_length=500)
     telegram_chat_id: str | None = Field(default=None, max_length=50)
     email_enabled: bool | None = None
@@ -101,10 +102,10 @@ class NotificationTestRequest(BaseSchema):
     """POST /api/v1/notifications/test。
 
     P18：dry_run=True（預設）→ 寫 NotificationLog 但不真打外部；
-    dry_run=False → 真打 LINE/Telegram（需 token 已設）。
+    dry_run=False → 真打 Discord/Telegram（需 webhook/token 已設）。
     """
 
-    channel: str = Field(default="line", max_length=20)
+    channel: str = Field(default="discord", max_length=20)
     message: str = Field(default="TradingAgents-TW 測試通知", max_length=500)
     dry_run: bool = Field(default=True)
 

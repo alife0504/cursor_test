@@ -160,7 +160,9 @@ export interface AnalysisCreateBody {
   symbol: string;
   analyst_types: string[];
   llm_model: string;
+  agent_models?: Record<string, string>;
   debate_rounds: number;
+  risk_rounds?: number;
   risk_tolerance?: string | null;
   notes?: string | null;
 }
@@ -360,7 +362,8 @@ export type NotificationEvent =
 
 export interface NotificationSettings {
   user_id: string;
-  line_token_masked?: string | null;
+  discord_webhook_masked?: string | null;
+  discord_webhook_set?: boolean;
   telegram_chat_id?: string | null;
   email_enabled: boolean;
   enabled_channels?: string[] | null;
@@ -371,7 +374,7 @@ export interface NotificationSettings {
 }
 
 export interface NotificationSettingsUpdate {
-  line_token?: string | null;
+  discord_webhook?: string | null;
   telegram_chat_id?: string | null;
   email_enabled?: boolean | null;
   enabled_channels?: string[] | null;
