@@ -12,6 +12,11 @@ RUN npm ci --no-audit --no-fund
 FROM node:20-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# ⚠️ Next.js rewrites() 在 build 時求值並烤進 routes-manifest，執行期改 env 無效。
+# 故後端內網位址必須在 build 時就給：stack-up 走 compose 內網 → http://backend:8000。
+# prod 可用 build arg 覆寫（如指向 nginx 內部位址）。
+ARG BACKEND_INTERNAL_URL=http://backend:8000
+ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

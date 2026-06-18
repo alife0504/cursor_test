@@ -223,6 +223,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # rewrites() 在 build 時烤死後端位址 → 必須 build-time 給內網 service 名
+        BACKEND_INTERNAL_URL: http://backend:8000
     container_name: ta-frontend
     image: tradingagents-frontend:dev
     profiles: ["frontend"]
