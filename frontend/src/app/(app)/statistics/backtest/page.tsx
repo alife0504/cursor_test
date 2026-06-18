@@ -67,6 +67,35 @@ export default function StatisticsBacktestPage() {
     data.length > 0 ? Math.min(...data.map((d) => d.drawdown)) : 0;
   const totalReturn = data.length > 0 ? ((finalEquity - 1_000_000) / 1_000_000) * 100 : 0;
 
+  // 投資人做回測最常看的指標（mock：由 equity curve 推導；v1.1 改由真實回測引擎回傳）
+  const dailyReturns = useMemo(() => {
+    const rs: number[] = [];
+    for (let i = 1; i < data.length; i++) {
+      rs.push(data[i].equity / data[i - 1].equity - 1);
+    }
+    return rs;
+  }, [data]);
+
+  const sharpe = useMemo(() => {
+    if (dailyReturns.length < 2) return 0;
+    const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+    const variance =
+      dailyReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / (dailyReturns.length - 1);
+    const sd = Math.sqrt(variance);
+    return sd === 0 ? 0 : (mean / sd) * Math.sqrt(252); // 年化夏普
+  }, [dailyReturns]);
+
+  const winRate = useMemo(() => {
+    if (dailyReturns.length === 0) return 0;
+    return (dailyReturns.filter((r) => r > 0).length / dailyReturns.length) * 100;
+  }, [dailyReturns]);
+
+  const annualizedReturn = useMemo(() => {
+    const days = data.length;
+    if (days === 0 || finalEquity <= 0) return 0;
+    return (Math.pow(finalEquity / 1_000_000, 252 / days) - 1) * 100;
+  }, [data.length, finalEquity]);
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -128,6 +157,22 @@ export default function StatisticsBacktestPage() {
           <p className="text-xs text-muted-foreground">最大回撤</p>
           <p className="num text-2xl font-bold text-bear">
             {maxDD.toFixed(2)}%
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card p-3 card-hover">
+          <p className="text-xs text-muted-foreground">夏普值</p>
+          <p className="num text-2xl font-bold">{sharpe.toFixed(2)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-3 card-hover">
+          <p className="text-xs text-muted-foreground">勝率</p>
+          <p className="num text-2xl font-bold">{winRate.toFixed(1)}%</p>
+        </div>
+        <div className="rounded-lg border bg-card p-3 card-hover">
+          <p className="text-xs text-muted-foreground">年化報酬</p>
+          <p
+            className={`num text-2xl font-bold ${annualizedReturn >= 0 ? "text-bull" : "text-bear"}`}
+          >
+            {annualizedReturn.toFixed(2)}%
           </p>
         </div>
       </section>

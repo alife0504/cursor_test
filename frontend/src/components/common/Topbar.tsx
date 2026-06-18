@@ -1,19 +1,12 @@
 "use client";
 
-import {
-  CandlestickChart,
-  LogOut,
-  Menu,
-  Moon,
-  Search,
-  Sun,
-  User,
-} from "lucide-react";
+import { CandlestickChart, LogOut, Menu, Moon, Sun, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
 import { NotificationBell } from "@/components/common/NotificationBell";
+import { StockPicker } from "@/components/common/StockPicker";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +28,6 @@ export function Topbar() {
   const user = useAuthStore((s) => s.user);
   const logoutStore = useAuthStore((s) => s.logout);
   const setMobileNavOpen = useUiStore((s) => s.setMobileNavOpen);
-  const toggleCommand = useUiStore((s) => s.toggleCommand);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -59,10 +51,6 @@ export function Topbar() {
   };
 
   const initial = user?.email?.[0]?.toUpperCase() ?? "?";
-  const platformMod =
-    mounted && typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
-      ? "⌘"
-      : "Ctrl";
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-4">
@@ -89,29 +77,14 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-1.5 md:gap-2">
-        {/* ⌘K 快捷觸發 */}
-        <button
-          type="button"
-          onClick={() => toggleCommand()}
-          aria-label="開啟全域搜尋"
-          className="hidden h-8 items-center gap-2 rounded-md border bg-muted/40 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
-        >
-          <Search className="h-3.5 w-3.5" />
-          <span>搜尋股票、頁面、分析...</span>
-          <kbd className="ml-2 rounded border bg-background px-1.5 py-0.5 text-[10px] font-mono font-medium">
-            {platformMod}K
-          </kbd>
-        </button>
-        {/* Mobile：⌘K icon-only */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => toggleCommand()}
-          aria-label="開啟全域搜尋"
-          className="md:hidden"
-        >
-          <Search className="h-4 w-4" />
-        </Button>
+        {/* 右上 inline 股票搜尋（與「多股比較」一致；⌘K 全域搜尋仍可用鍵盤觸發） */}
+        <StockPicker
+          onSelect={(s) =>
+            router.push(`/analysis/new?symbol=${encodeURIComponent(s.symbol)}`)
+          }
+          placeholder="搜尋股票代號 / 名稱..."
+          className="w-40 sm:w-56 md:w-64"
+        />
 
         {/* 通知 bell */}
         <NotificationBell />
