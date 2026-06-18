@@ -87,7 +87,7 @@ export default function AuthLayout({
                   { icon: LineChart, text: "4 種 Analyst 自動跑技術 / 財報 / 新聞 / 籌碼" },
                   { icon: MessagesSquare, text: "Bull / Bear 多輪辯論 + Manager 綜合結論" },
                   { icon: ShieldCheck, text: "JWT 輪替 · RBAC · Audit Hash Chain 不可竄改" },
-                  { icon: FileDown, text: "PDF / MD / XLSX 匯出 + LINE / Telegram 通知" },
+                  { icon: FileDown, text: "PDF / MD / XLSX 匯出 + Discord / Telegram 通知" },
                 ].map(({ icon: Icon, text }) => (
                   <li
                     key={text}

@@ -62,7 +62,7 @@ export default function OnboardingPage() {
           body="選定股票後,送出多智能體分析任務。Bull / Bear 兩位分析師會展開辯論,結論交由 Manager 收斂。"
         />
         <Section
-          title="3. 等待 LINE / Email 通知"
+          title="3. 等待 Discord / Email 通知"
           body="分析完成、重大訊號出現或訂單待核准時,系統會主動通知你。"
         />
       </CardContent>

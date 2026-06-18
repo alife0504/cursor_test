@@ -43,7 +43,7 @@ const ACTIONS: ActionItem[] = [
   },
   {
     label: "通知設定",
-    description: "LINE / Telegram 設定",
+    description: "Discord / Telegram 設定",
     href: "/notifications",
     icon: Bell,
     accent: "bull",

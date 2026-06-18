@@ -14,7 +14,8 @@
         images-build bandit trivy-scan \
         prod-up prod-down prod-logs prod-ps prod-restart \
         backup restore verify-backup slo-report dr-drill-a \
-        generate-cert
+        generate-cert \
+        stack-up stack-down stack-restart stack-ps stack-logs
 
 help:  ## 顯示可用 target
 	@echo "TradingAgents-TW Makefile (v0.3.0 - Phase 2)"
@@ -55,6 +56,31 @@ restart:  ## 重啟三服務
 
 ps:  ## 看服務狀態
 	docker compose ps
+
+# ── 全棧「持續運行」（解決網站隨時停止：整個 web tier 容器化 + 自動重啟）────────
+# 為何用這個：host 跑 uvicorn/next dev 沒有監督，崩潰 / 關終端機 / 筆電休眠就停了不會回來。
+# 容器全部 restart:unless-stopped → 崩潰自動重啟、開機（Docker Desktop 起來）自動拉起。
+# Windows 把 6379/6333 列保留 port，故用高位 port 發佈（內網仍走 6379/6333）。
+STACK_PORTS = REDIS_PORT=16379 QDRANT_PORT=16333 QDRANT_GRPC_PORT=16334
+
+stack-up:  ## 【推薦】全棧持續運行：infra+backend+worker+beat+frontend，皆自動重啟
+	$(STACK_PORTS) docker compose --profile frontend up -d --build
+	@echo ""
+	@echo "✅ 全棧已啟動，容器會自動重啟（不再隨意停止服務）。"
+	@echo "   前端 http://localhost:3000    後端 http://localhost:8000/health/ready"
+	@sleep 6 && $(STACK_PORTS) docker compose --profile frontend ps
+
+stack-restart:  ## 重建並重啟全棧（套用最新程式碼）
+	$(STACK_PORTS) docker compose --profile frontend up -d --build
+
+stack-down:  ## 停止全棧（保留資料 volume）
+	$(STACK_PORTS) docker compose --profile frontend down
+
+stack-ps:  ## 看全棧狀態（含 backend/frontend）
+	$(STACK_PORTS) docker compose --profile frontend ps
+
+stack-logs:  ## 跟全棧 log（backend + frontend + worker）
+	$(STACK_PORTS) docker compose --profile frontend logs -f --tail=100 backend frontend celery_worker
 
 psql:  ## 用 superuser 進 psql（互動）
 	docker compose exec timescaledb psql -U postgres -d tradingagents_tw

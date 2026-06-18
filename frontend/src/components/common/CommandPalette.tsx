@@ -67,7 +67,7 @@ const PAGES: Array<{
   { href: "/portfolio/history", label: "交易記錄", keywords: "history orders", icon: Briefcase },
   { href: "/news/sentiment", label: "新聞情緒", keywords: "news sentiment", icon: Newspaper },
   { href: "/news/announcements", label: "重大公告", keywords: "announcements", icon: Newspaper },
-  { href: "/notifications", label: "通知設定", keywords: "notifications line telegram", icon: Bell },
+  { href: "/notifications", label: "通知設定", keywords: "notifications discord telegram", icon: Bell },
   { href: "/admin/users", label: "用戶管理", keywords: "admin users", icon: Cog, adminOnly: true },
   { href: "/admin/audit", label: "審計日誌", keywords: "admin audit", icon: Cog, adminOnly: true },
   { href: "/admin/system", label: "系統監控", keywords: "admin system metrics", icon: Cog, adminOnly: true },
