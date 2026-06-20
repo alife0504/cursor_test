@@ -68,8 +68,16 @@ export function useAnalysisWS<T = unknown>(
         };
         ws.onmessage = (e) => {
           try {
-            const parsed = JSON.parse(e.data) as WSEvent<T>;
-            setEvents((prev) => [...prev, parsed]);
+            // 後端 streaming.py 送的是 { event, data, ts }；統一正規化成
+            // { type, payload, ts } 讓 buildFlowNodes / 詳情頁的 e.type / e.payload 真的讀得到。
+            const raw = JSON.parse(e.data) as Record<string, unknown>;
+            const normalized: WSEvent<T> = {
+              type: (raw.type ?? raw.event ?? "unknown") as string,
+              payload: (raw.payload ?? raw.data) as T,
+              ts: raw.ts as string | undefined,
+              trace_id: raw.trace_id as string | undefined,
+            };
+            setEvents((prev) => [...prev, normalized]);
           } catch {
             // 收到非 JSON event,當作 raw text 包起來
             setEvents((prev) => [...prev, { type: "raw", payload: e.data as T }]);

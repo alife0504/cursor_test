@@ -10,10 +10,11 @@ import type { WSEvent } from "@/hooks/useWebSocket";
 //   debate(b):  bear:round_N
 //   manager:    manager
 //
-// 後端 streaming event 約定(PLAN 14 / agents/streaming.py):
-//   type: started / analyst_completed / debate_argument / synthesis_completed / completed / failed
-//   payload 視 type 不同;analyst_completed: { name }
-//   debate_argument: { round_num, role }
+// 後端 streaming event 約定(PLAN 14 / agents/streaming.py)：
+//   後端送 { event, data, ts }；useWebSocket hook 已正規化成 { type, payload, ts }。
+//   analyst_completed: data.node = analyst 名（market/...）
+//   debate_argument:   data.role = bull/bear、data.round = 輪數
+//   （本檔仍相容舊欄位 name / round_num）
 
 export interface BuildArgs {
   analysis: AnalysisDetail | null | undefined;
@@ -48,20 +49,25 @@ export function buildFlowNodes({
   const debateDone = new Set<string>(); // e.g. "bull:1"
   let managerDone = false;
   let failed = false;
-  let started = false;
+  // 即使 WS 事件漏接 / 斷線，status=running 也讓節點顯示「running」而非凍在 pending
+  let started = analysis.status === "running";
 
   for (const ev of events) {
     if (ev.type === "started") started = true;
     if (ev.type === "analyst_completed") {
-      const payload = ev.payload as { name?: string } | undefined;
-      if (payload?.name) analystDone.add(payload.name);
+      // 後端 data 以 node 帶 analyst 名（相容舊 name 欄位）
+      const payload = ev.payload as { node?: string; name?: string } | undefined;
+      const name = payload?.node ?? payload?.name;
+      if (name) analystDone.add(name);
     }
     if (ev.type === "debate_argument") {
+      // 後端 data 以 round 帶輪數（相容舊 round_num 欄位）
       const payload = ev.payload as
-        | { round_num?: number; role?: string }
+        | { round?: number; round_num?: number; role?: string }
         | undefined;
-      if (payload?.role && payload?.round_num) {
-        debateDone.add(`${payload.role}:${payload.round_num}`);
+      const round = payload?.round ?? payload?.round_num;
+      if (payload?.role && round) {
+        debateDone.add(`${payload.role}:${round}`);
       }
     }
     if (ev.type === "synthesis_completed" || ev.type === "completed") {
