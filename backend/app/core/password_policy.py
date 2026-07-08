@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 MIN_LENGTH = 12
 MAX_LENGTH = 128
+# bcrypt 只取前 72 bytes（超過的部分被靜默忽略 → 「不同密碼視為相同」的弱點；
+# bcrypt 5.x 起更會直接 raise）。在設定密碼時就擋掉，login 不受影響。
+# 注意是 UTF-8 bytes：中文字每字 3 bytes，約 24 個中文字就到頂。
+MAX_BCRYPT_BYTES = 72
 RECENT_HISTORY_LIMIT = 5
 
 # 特殊字元 = 除 ASCII letter/digit 之外的所有 printable
@@ -56,6 +60,15 @@ def validate_password(password: str, user_email: str | None = None) -> None:
             message_zh=f"密碼長度需 ≤ {MAX_LENGTH} 字元",
             field="password",
             max_length=MAX_LENGTH,
+        )
+    if len(password.encode("utf-8")) > MAX_BCRYPT_BYTES:
+        raise ValidationError(
+            message_zh=(
+                f"密碼過長：UTF-8 編碼需 ≤ {MAX_BCRYPT_BYTES} bytes"
+                "（bcrypt 上限；中文字每字佔 3 bytes）"
+            ),
+            field="password",
+            max_bytes=MAX_BCRYPT_BYTES,
         )
 
     missing: list[str] = []
@@ -128,6 +141,7 @@ class PasswordHistoryService:
 
 
 __all__ = [
+    "MAX_BCRYPT_BYTES",
     "MAX_LENGTH",
     "MIN_LENGTH",
     "RECENT_HISTORY_LIMIT",

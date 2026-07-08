@@ -1,5 +1,6 @@
 "use client";
 
+import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -93,6 +94,7 @@ export default function NotificationsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
+        icon={Bell}
         title="通知設定"
         description="Discord / Telegram 通知與訂閱事件"
       />

@@ -68,6 +68,22 @@ export const LLM_MODELS: LLMModelOption[] = [
     outputPricePer1m: 15.0,
     description: "Anthropic,品質高,需有效金鑰",
   },
+  {
+    id: "claude-sonnet-5",
+    label: "Claude Sonnet 5",
+    provider: "anthropic",
+    inputPricePer1m: 3.0,
+    outputPricePer1m: 15.0,
+    description: "Anthropic,現役 Sonnet,近 Opus 品質,需有效金鑰",
+  },
+  {
+    id: "claude-opus-4-8",
+    label: "Claude Opus 4.8",
+    provider: "anthropic",
+    inputPricePer1m: 5.0,
+    outputPricePer1m: 25.0,
+    description: "Anthropic,最強旗艦,最貴,需有效金鑰",
+  },
 ];
 
 /** 簡單預估:依 analyst 數量 x debate 輪數 x 風險輪數估算 USD;v1.0 概略值 */

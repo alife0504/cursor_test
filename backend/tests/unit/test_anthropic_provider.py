@@ -14,7 +14,7 @@ import pytest
 from pydantic import SecretStr
 
 from app.core.errors import ExternalServiceError
-from app.llm.anthropic_provider import AnthropicProvider
+from app.llm.anthropic_provider import AnthropicProvider, _rejects_sampling_params
 from app.llm.base_provider import LLM_PROVIDER_REGISTRY
 
 pytestmark = pytest.mark.unit
@@ -68,6 +68,80 @@ def test_pricing_sonnet(settings_with_key: Any) -> None:
 def test_pricing_unknown(settings_with_key: Any) -> None:
     prov = AnthropicProvider(settings_with_key)
     assert prov.calc_cost("nope", 1000, 500) == Decimal("0")
+
+
+def test_pricing_sonnet5(settings_with_key: Any) -> None:
+    """claude-sonnet-5：input $3.00/1M, output $15.00/1M（v1.1 新增）。"""
+    prov = AnthropicProvider(settings_with_key)
+    # 2000*0.003/1000 + 1000*0.015/1000 = 0.006 + 0.015 = 0.021
+    assert prov.calc_cost("claude-sonnet-5", 2000, 1000) == Decimal("0.021000")
+
+
+def test_pricing_fable5(settings_with_key: Any) -> None:
+    """claude-fable-5：input $10.00/1M, output $50.00/1M（v1.1 新增）。"""
+    prov = AnthropicProvider(settings_with_key)
+    # 1000*0.010/1000 + 1000*0.050/1000 = 0.010 + 0.050 = 0.060
+    assert prov.calc_cost("claude-fable-5", 1000, 1000) == Decimal("0.060000")
+
+
+# ── sampling 參數守衛（Opus 4.7+/Sonnet 5/Fable 5 拒收 temperature）────
+
+
+def test_rejects_sampling_params_matrix() -> None:
+    # 現役 4.7+/5 系列 → 拒收
+    assert _rejects_sampling_params("claude-opus-4-8") is True
+    assert _rejects_sampling_params("claude-opus-4-7") is True
+    assert _rejects_sampling_params("claude-sonnet-5") is True
+    assert _rejects_sampling_params("claude-fable-5") is True
+    # 仍接受 temperature 者
+    assert _rejects_sampling_params("claude-haiku-4-5") is False
+    assert _rejects_sampling_params("claude-sonnet-4-6") is False
+    assert _rejects_sampling_params("") is False
+
+
+def _mock_client() -> Any:
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "ok"
+    fake_usage = MagicMock()
+    fake_usage.input_tokens = 10
+    fake_usage.output_tokens = 5
+    fake_resp = MagicMock()
+    fake_resp.content = [text_block]
+    fake_resp.usage = fake_usage
+    fake_resp.stop_reason = "end_turn"
+    fake_messages = MagicMock()
+    fake_messages.create = AsyncMock(return_value=fake_resp)
+    fake_client = MagicMock()
+    fake_client.messages = fake_messages
+    return fake_client
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_temperature_for_sonnet5(
+    settings_with_key: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonnet 5 → messages.create 不可帶 temperature（否則 400）。"""
+    prov = AnthropicProvider(settings_with_key)
+    client = _mock_client()
+    monkeypatch.setattr(prov, "_client", client, raising=False)
+    await prov.generate(system="s", user="u", model="claude-sonnet-5", temperature=0.7)
+    kwargs = client.messages.create.call_args.kwargs
+    assert "temperature" not in kwargs
+    assert kwargs["model"] == "claude-sonnet-5"
+
+
+@pytest.mark.asyncio
+async def test_generate_keeps_temperature_for_haiku(
+    settings_with_key: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Haiku 4.5 仍接受 temperature → 應照常帶。"""
+    prov = AnthropicProvider(settings_with_key)
+    client = _mock_client()
+    monkeypatch.setattr(prov, "_client", client, raising=False)
+    await prov.generate(system="s", user="u", model="claude-haiku-4-5", temperature=0.7)
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["temperature"] == 0.7
 
 
 @pytest.mark.asyncio

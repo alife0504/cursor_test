@@ -16,6 +16,8 @@ interface StockPickerProps {
   className?: string;
   /** 預設 false：全部市場；true 時只搜 TW。 */
   twOnly?: boolean;
+  /** true 時禁用（灰階、不可輸入）；用於與自動選股互斥。 */
+  disabled?: boolean;
 }
 
 function useDebounced<T>(value: T, ms = 200): T {
@@ -39,6 +41,7 @@ export function StockPicker({
   triggerLabel,
   className,
   twOnly = false,
+  disabled = false,
 }: StockPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -125,6 +128,7 @@ export function StockPicker({
           aria-controls={listboxId}
           aria-autocomplete="list"
           autoComplete="off"
+          disabled={disabled}
           value={text}
           placeholder={placeholder}
           onChange={(e) => {
@@ -137,6 +141,7 @@ export function StockPicker({
             "h-10 w-full rounded-lg border border-input bg-background py-2 pr-3 pl-9 text-sm",
             "placeholder:text-muted-foreground outline-none",
             "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+            "disabled:cursor-not-allowed disabled:opacity-60",
           )}
         />
       </div>

@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse
 from app.api.dependencies import admin_only, get_current_user
 from app.core.cursor import Cursor, build_page_response, clamp_limit
 from app.core.database import get_rw_session
-from app.core.errors import QuotaExceededError, ValidationError
+from app.core.errors import QuotaExceededError, RateLimitError, ValidationError
 from app.core.idempotency import IdempotencyService, compute_request_hash
 from app.core.response_envelope import envelope_success
 from app.core.validators import validate_uuid
@@ -49,6 +49,20 @@ def _dispatcher(request: Request):
 
 def _get_service(request: Request, session: AsyncSession) -> AnalysisService:
     return AnalysisService(session, dispatcher=_dispatcher(request))
+
+
+_TW_ONLY_ANALYSTS = {"sentiment", "chip"}
+
+
+def _analysts_for_region(analyst_types: list[str], region: str) -> list[str]:
+    """自動選股（批次）時，依市場過濾分析師。
+
+    美股不支援台股專屬的情緒面 / 籌碼面；濾掉後若空則退回通用三面（技術/基本/新聞）。
+    """
+    if region.upper() != "US":
+        return list(analyst_types)
+    filtered = [a for a in analyst_types if a not in _TW_ONLY_ANALYSTS]
+    return filtered or ["market", "fundamental", "news"]
 
 
 def _enqueue_run_analysis(
@@ -147,6 +161,27 @@ async def create_analysis(
             content=envelope_success(existing.response, trace_id=_trace_id(request)),
         )
 
+    # PLAN 19.3 L5：每使用者分析建立 10/hr（在 replay 之後 → replay 不扣次數）。
+    # 配額檢查（L6）有 TOCTOU：突發大量建立會全數通過（usage 尚未入帳），
+    # L5 是把「單一時窗可燒掉的 LLM 成本」綁上限的第一道防線。fail-open（Redis 掛不擋）。
+    from app.core.rate_limit import L5_ANALYSIS, RateLimiter
+    from app.core.redis_client import RedisDB, get_redis
+
+    _rl_redis = await get_redis(RedisDB.RATELIMIT)
+    _rl = await RateLimiter(_rl_redis).check(
+        f"{L5_ANALYSIS.key_prefix}{user.id}",
+        limit=L5_ANALYSIS.limit,
+        window_sec=L5_ANALYSIS.window_sec,
+    )
+    if not _rl.allowed:
+        raise RateLimitError(
+            message_zh=(
+                f"分析建立頻率過高（每小時限 {L5_ANALYSIS.limit} 次），"
+                f"請 {_rl.retry_after_sec} 秒後再試"
+            ),
+            retry_after_sec=_rl.retry_after_sec,
+        )
+
     # P14：月配額檢查（在 idempotency 之後，避免 replay 也擋）
     # PYTEST_RUNNING 不跳過：integration test 需驗證 402；單測直接 mock service。
     # 用 router 注入的 session 避免跨 event loop 開新 pool。
@@ -160,31 +195,69 @@ async def create_analysis(
         )
 
     service = _get_service(request, session)
-    report = await service.create_analysis(
-        user=user,
-        symbol=payload.symbol,
-        analyst_types=payload.analyst_types,
-        llm_model=payload.llm_model,
-        debate_rounds=payload.debate_rounds,
-        risk_tolerance=payload.risk_tolerance,
-        request_id=_trace_id(request),
-    )
+    trace_id = _trace_id(request)
 
-    # P12：實際推 celery task（在 service commit 完之後）
-    # P13：把 analyst_types + debate_rounds 透過 task kwargs 傳遞
-    # （DB 模型未存這兩個欄位，audit_logs 雖有但讀取脆弱，故用 task 參數）
-    _enqueue_run_analysis(
-        str(report.id),
-        analyst_types=list(payload.analyst_types),
-        debate_rounds=int(payload.debate_rounds),
-        risk_rounds=int(payload.risk_rounds),
-        agent_models=payload.agent_models,
-    )
+    # 決定要分析的股票清單：
+    #   - 指定個股（payload.symbol）→ 單筆（原行為）
+    #   - 自動選股（payload.screen_level）→ 後端依等級批次篩選（純數據、不呼叫 LLM）
+    screened_count = 0
+    if payload.symbol:
+        symbols: list[str] = [payload.symbol]
+        effective_analysts = list(payload.analyst_types)
+        is_batch = False
+    else:
+        from app.core.config import settings as _settings
+        from app.services.screening_service import ScreeningService
 
+        region = payload.market or "TW"
+        candidates = await ScreeningService(session).select_symbols(
+            region, payload.screen_level or "high"
+        )
+        screened = [c.symbol for c in candidates]
+        if not screened:
+            raise ValidationError(
+                message_zh="自動選股：目前市場無符合條件的股票，請改為指定個股或稍後再試",
+                field="screen_level",
+            )
+        screened_count = len(screened)
+        # ⚠️ 硬上限：篩出的候選可能多達數百檔，但一次全跑完整分析成本/時間巨大、
+        # 會爆月配額，故只實際建立排序後前 N 檔的分析（其餘為候選、未分析）。
+        symbols = screened[: max(1, _settings.SCREEN_MAX_ANALYSES)]
+        # 美股不支援台股專屬分析師（情緒 / 籌碼）→ 後端自我保護過濾
+        effective_analysts = _analysts_for_region(payload.analyst_types, region)
+        is_batch = True
+
+    # P12：service commit 後才推 celery task。
+    # P13：analyst_types + debate_rounds 透過 task kwargs 傳（DB 未存這兩欄位）。
+    reports = []
+    for sym in symbols:
+        report = await service.create_analysis(
+            user=user,
+            symbol=sym,
+            analyst_types=effective_analysts,
+            llm_model=payload.llm_model,
+            debate_rounds=payload.debate_rounds,
+            risk_tolerance=payload.risk_tolerance,
+            request_id=trace_id,
+        )
+        _enqueue_run_analysis(
+            str(report.id),
+            analyst_types=list(effective_analysts),
+            debate_rounds=int(payload.debate_rounds),
+            risk_rounds=int(payload.risk_rounds),
+            agent_models=payload.agent_models,
+        )
+        reports.append(report)
+
+    first = reports[0]
     body = AnalysisCreateResponse(
-        analysis_id=report.id,
-        status=report.status,
+        analysis_id=first.id,
+        status=first.status,
         estimated_seconds=180,
+        count=len(reports),
+        analysis_ids=[r.id for r in reports],
+        screened_symbols=list(symbols) if is_batch else [],
+        screened_count=screened_count,
     ).model_dump(mode="json")
 
     await idem.record_response(

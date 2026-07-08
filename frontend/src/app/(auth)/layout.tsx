@@ -13,6 +13,7 @@ import {
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
+import { Illustration } from "@/components/common/Illustration";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n/messages";
 
@@ -57,6 +58,11 @@ export default function AuthLayout({
         <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl shadow-2xl ring-1 ring-white/10 lg:grid-cols-[1.05fr_0.95fr]">
           {/* 左：品牌 hero（lg+） */}
           <aside className="relative hidden flex-col justify-between gap-10 p-10 lg:flex">
+            {/* 多 Agent 協作插畫 — 右下裝飾（絕對定位，不佔版面高度） */}
+            <Illustration
+              name="agents"
+              className="pointer-events-none absolute bottom-16 right-4 h-32 opacity-40"
+            />
             <div className="flex items-center gap-2.5">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 ring-1 ring-inset ring-white/15 backdrop-blur">
                 <CandlestickChart className="h-5 w-5" />

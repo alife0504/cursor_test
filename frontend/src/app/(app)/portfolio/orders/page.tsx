@@ -192,6 +192,7 @@ export default function OrdersPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={ListChecks}
         title="待核准訂單"
         description="分析完成後若 signal=BUY/SELL 自動產生 PENDING 訂單。雙重確認核准。"
         actions={

@@ -1,5 +1,6 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { BarChart } from "@/components/common/BarChart";
@@ -99,6 +100,7 @@ export default function StatisticsBacktestPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Sparkles}
         title="回測結果"
         description="策略 + 期間 → equity curve / drawdown"
       />

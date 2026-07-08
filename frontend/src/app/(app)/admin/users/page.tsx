@@ -24,6 +24,7 @@ export default function AdminUsersPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Users}
         title="用戶管理"
         description="建立 / 啟用停用 / 重設密碼。此頁僅 ADMIN 可看"
         actions={<CreateUserButton />}

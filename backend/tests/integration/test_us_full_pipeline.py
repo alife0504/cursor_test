@@ -93,7 +93,7 @@ class _ScriptedLLM:
         self._mapping = [
             ("技術面分析師", VALID_MARKET),
             ("基本面分析師", VALID_FUNDAMENTAL),
-            ("新聞情緒分析師", VALID_NEWS),
+            ("新聞與總經分析師", VALID_NEWS),
             ("看多（Bull）研究員", VALID_BULL),
             ("看空（Bear）研究員", VALID_BEAR),
             ("首席投資策略長", VALID_FINAL),
@@ -181,6 +181,20 @@ class _FakeUSTools:
             }
         ]
 
+    async def get_market_news(self, days_back=7, max_items=20, market=None):
+        return [
+            {
+                "id": "m1",
+                "title": "Fed holds rates steady, markets rally",
+                "summary": "macro tailwind",
+                "source": "Reuters",
+                "url": "https://example.com/m1",
+                "sentiment": "positive",
+                "sentiment_score": "0.30",
+                "published_at": "2026-05-10T09:00:00",
+            }
+        ]
+
     async def get_announcements(self, symbol, days_back=30):
         return []
 
@@ -224,6 +238,7 @@ def patched_rw_session(monkeypatch):
         "app.agents.analysts.fundamental_analyst.rw_session",
         "app.agents.analysts.news_analyst.rw_session",
         "app.agents.analysts.sentiment_analyst.rw_session",
+        "app.agents.analysts.chip_analyst.rw_session",
         "app.agents.researchers.bull_researcher.rw_session",
         "app.agents.researchers.bear_researcher.rw_session",
         "app.agents.managers.research_manager.rw_session",
@@ -263,8 +278,9 @@ def test_aapl_completes_with_mock_llm(patched_rw_session, patched_streaming) -> 
     analyses = final.get("analyses") or {}
     # 美股 3 個 analyst
     assert {"market", "fundamental", "news"}.issubset(analyses.keys())
-    # 不含 sentiment
+    # 不含 sentiment / chip（皆 TW only）
     assert "sentiment" not in analyses
+    assert "chip" not in analyses
     # signal + report_md
     signal = final.get("signal") or {}
     assert signal.get("action") in {"BUY", "HOLD", "SELL"}

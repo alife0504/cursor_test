@@ -78,7 +78,7 @@ export function QuickActions() {
                 ACCENT[a.accent],
               )}
             >
-              <Icon className="h-5 w-5" />
+              <Icon className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
             </span>
             <span className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">{a.label}</span>

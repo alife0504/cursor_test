@@ -74,12 +74,19 @@ function buildCrumbs(pathname: string): Crumb[] {
   return crumbs;
 }
 
-export function Breadcrumbs({ className }: { className?: string }) {
+export function Breadcrumbs({
+  className,
+  alwaysShow = false,
+}: {
+  className?: string;
+  /** true：單層（如 /dashboard）也顯示 — Topbar 內嵌用，避免左側空蕩 */
+  alwaysShow?: boolean;
+}) {
   const pathname = usePathname();
   const crumbs = useMemo(() => buildCrumbs(pathname || ""), [pathname]);
 
-  // dashboard 自己一個頁不顯麵包屑
-  if (crumbs.length <= 1) return null;
+  // dashboard 自己一個頁預設不顯麵包屑
+  if (crumbs.length === 0 || (!alwaysShow && crumbs.length <= 1)) return null;
 
   return (
     <nav

@@ -110,7 +110,7 @@ export interface AnalysisSummary {
 
 /** Analyst raw output 的結構（後端 P14+ 寫入 analysis_reports.analyst_outputs）。 */
 export interface AnalystOutput {
-  /** 分析師類型：market / fundamental / news / sentiment */
+  /** 分析師類型：market / fundamental / news / sentiment / chip */
   type?: string;
   /** 信心度 0-1 */
   score?: number | string | null;
@@ -157,7 +157,10 @@ export interface DebateMessage {
 }
 
 export interface AnalysisCreateBody {
-  symbol: string;
+  // 指定個股（symbol）與自動選股（screen_level）二擇一
+  symbol?: string;
+  screen_level?: "basic" | "low" | "mid" | "high";
+  market?: "TW" | "US";
   analyst_types: string[];
   llm_model: string;
   agent_models?: Record<string, string>;
@@ -171,6 +174,12 @@ export interface AnalysisCreateResponse {
   analysis_id: UUID;
   status: string;
   estimated_seconds: number;
+  // 批次（自動選股）時 count > 1；指定個股為 1
+  count?: number;
+  analysis_ids?: UUID[];
+  screened_symbols?: string[];
+  // 篩出的候選總數（可能 > count；實際只建立前 count 檔分析）
+  screened_count?: number;
 }
 
 export type OrderSide = "BUY" | "SELL" | string;

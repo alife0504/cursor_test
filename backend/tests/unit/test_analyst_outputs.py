@@ -12,6 +12,7 @@ import pytest
 
 from app.agents.analyst_outputs import build_analyst_outputs
 from app.agents.schemas import (
+    ChipAnalysisResult,
     FundamentalAnalysisResult,
     MarketAnalysisResult,
     NewsAnalysisResult,
@@ -87,12 +88,27 @@ def test_news_has_no_trade_signal() -> None:
     n = build_analyst_outputs({"news": raw})["news"]
     # 新聞情緒不是交易訊號
     assert "signal" not in n or n["signal"] is None
-    assert any("市場情緒：正面" in p for p in n["key_points"])
+    assert any("新聞情緒：正面" in p for p in n["key_points"])
     assert any("焦點：" in p for p in n["key_points"])
 
 
-def test_sentiment_margin_signal_maps() -> None:
-    raw = SentimentAnalysisResult(
+def test_news_macro_fields_surface_in_output() -> None:
+    raw = NewsAnalysisResult(
+        summary=_SUMMARY,
+        sentiment="正面",
+        key_topics=["AI"],
+        impact_assessment="短線偏多，但須留意追高風險。",
+        macro_context="Fed 暗示降息、外資回流台股。",
+        macro_bias="偏多",
+        confidence=70,
+    ).model_dump_json()
+    n = build_analyst_outputs({"news": raw})["news"]
+    assert any("總經偏向：偏多" in p for p in n["key_points"])
+    assert n["metrics"]["macro_bias"] == "偏多"
+
+
+def test_chip_margin_signal_maps() -> None:
+    raw = ChipAnalysisResult(
         summary=_SUMMARY,
         institutional_flow="大量買超",
         foreign_position_change="外資連三日買超合計 1.2 萬張。",
@@ -101,9 +117,28 @@ def test_sentiment_margin_signal_maps() -> None:
         risk_factors=["融資餘額偏高"],
         confidence=55,
     ).model_dump_json()
-    s = build_analyst_outputs({"sentiment": raw})["sentiment"]
+    s = build_analyst_outputs({"chip": raw})["chip"]
     assert s["signal"] == "SELL"  # margin_trading_signal=看空
     assert any("法人動向：大量買超" in p for p in s["key_points"])
+
+
+def test_sentiment_emotion_maps_signal_and_points() -> None:
+    raw = SentimentAnalysisResult(
+        summary=_SUMMARY,
+        market_sentiment="悲觀",
+        sentiment_score="-0.35",
+        buzz_level="高",
+        momentum="轉弱",
+        key_drivers=["外資賣超題材發酵"],
+        contrarian_flag=True,
+        risk_factors=["情緒極端，留意反轉"],
+        confidence=58,
+    ).model_dump_json()
+    s = build_analyst_outputs({"sentiment": raw})["sentiment"]
+    assert s["signal"] == "SELL"  # 悲觀 → SELL
+    assert any("市場情緒：悲觀" in p for p in s["key_points"])
+    assert any("討論熱度：高" in p for p in s["key_points"])
+    assert any("反轉" in p for p in s["key_points"])  # contrarian flag
 
 
 def test_stub_plain_text_falls_back_to_report_md() -> None:
@@ -126,7 +161,7 @@ def test_dict_input_supported() -> None:
         {"news": {"summary": "x" * 50, "sentiment": "中性", "confidence": 50}}
     )
     assert out["news"]["score"] == 50
-    assert any("市場情緒：中性" in p for p in out["news"]["key_points"])
+    assert any("新聞情緒：中性" in p for p in out["news"]["key_points"])
 
 
 def test_empty_input_returns_empty_dict() -> None:

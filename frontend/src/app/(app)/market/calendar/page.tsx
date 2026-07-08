@@ -115,6 +115,7 @@ export default function MarketCalendarPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={CalendarDays}
         title="財報日曆"
         description="法說會、除權息、股東會時程"
       />

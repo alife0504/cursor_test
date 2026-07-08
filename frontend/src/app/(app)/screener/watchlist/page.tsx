@@ -25,6 +25,7 @@ export default function WatchlistPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Star}
         title="自選股清單"
         description="管理你關注的股票；後續可從這裡發起分析"
         actions={<AddWatchlistButton />}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Clock, Cpu, Database, HardDrive, ListChecks } from "lucide-react";
+import { Activity, Clock, Cog, Cpu, Database, HardDrive, ListChecks } from "lucide-react";
 import { useMemo } from "react";
 
 import { BarChart } from "@/components/common/BarChart";
@@ -74,6 +74,7 @@ export default function AdminSystemPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Cog}
         title="系統監控"
         description="API 可用性、延遲、磁碟、佇列等關鍵指標（/metrics 摘要）"
       />

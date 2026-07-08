@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Megaphone } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
@@ -40,6 +40,7 @@ export default function NewsAnnouncementsPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Megaphone}
         title="重大公告"
         description="TW MOPS + US SEC EDGAR（依股票查詢）"
       />

@@ -16,7 +16,8 @@ def _bullish() -> dict[str, str]:
         "market": json.dumps({"short_term_view": "看多"}),
         "fundamental": json.dumps({"long_term_view": "看多"}),
         "news": json.dumps({"sentiment": "正面"}),
-        "sentiment": json.dumps({"institutional_flow": "大量買超"}),
+        "sentiment": json.dumps({"market_sentiment": "樂觀"}),
+        "chip": json.dumps({"institutional_flow": "大量買超"}),
     }
 
 
@@ -25,7 +26,8 @@ def _bearish() -> dict[str, str]:
         "market": json.dumps({"short_term_view": "看空"}),
         "fundamental": json.dumps({"long_term_view": "看空"}),
         "news": json.dumps({"sentiment": "負面"}),
-        "sentiment": json.dumps({"institutional_flow": "大量賣超"}),
+        "sentiment": json.dumps({"market_sentiment": "悲觀"}),
+        "chip": json.dumps({"institutional_flow": "大量賣超"}),
     }
 
 

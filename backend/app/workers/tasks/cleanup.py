@@ -1,6 +1,6 @@
 """Orphan cleanup + idempotency_keys 過期清理（PLAN 第 15.4、14.5 章）。
 
-每日 04:00：
+每小時 :40（原每日 04:00；提高頻率讓 worker 崩潰留下的 running 孤兒盡快收斂）：
 - analysis_reports: status='running' 超過 30 分 → 'failed'
 - pending_orders: status='PENDING' 超過 7 天 → 'EXPIRED'
 - password_reset_tokens: expires_at < now → 刪

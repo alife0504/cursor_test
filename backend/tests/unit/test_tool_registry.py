@@ -207,11 +207,33 @@ async def test_get_news_returns_metadata_list() -> None:
     assert out[0]["sentiment_score"] == "0.85"
 
 
-def test_get_langchain_tools_yields_eight_tools() -> None:
-    """get_langchain_tools 應回 8 個工具（即使 langchain 沒裝也至少不 raise）。"""
+def test_get_langchain_tools_yields_nine_tools() -> None:
+    """get_langchain_tools 應回 9 個工具（v1.1 新增 get_market_news）。"""
     s = _MockSession()
     r = ToolRegistry(_make_factory(s))
     tools = r.get_langchain_tools()
-    # 若 langchain_core 沒裝會回 []；若有裝會 = 8
+    # 若 langchain_core 沒裝會回 []；若有裝會 = 9
     assert isinstance(tools, list)
-    assert len(tools) in (0, 8)
+    assert len(tools) in (0, 9)
+
+
+@pytest.mark.asyncio
+async def test_get_market_news_returns_macro_rows() -> None:
+    s = _MockSession()
+
+    class _Row:
+        id = uuid4()
+        title = "台股大盤：外資回補、電子權值走強"
+        summary = "加權指數收紅"
+        source = "cnyes"
+        url = "https://news.example.com/macro"
+        sentiment = "positive"
+        sentiment_score = Decimal("0.40")
+        published_at = datetime.now(tz=UTC) - timedelta(days=1)
+
+    s.queue([_Row()])
+    r = ToolRegistry(_make_factory(s))
+    out = await r.get_market_news(days_back=7, max_items=10, market="TWSE")
+    assert len(out) == 1
+    assert out[0]["title"].startswith("台股大盤")
+    assert out[0]["sentiment_score"] == "0.40"

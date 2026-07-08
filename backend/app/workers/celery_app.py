@@ -112,10 +112,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.financial.sync_institutional_tw",
         "schedule": crontab(hour=15, minute=0, day_of_week="mon-fri"),
     },
-    # Orphan cleanup 每日 04:00（PLAN 15.4）
-    "cleanup-orphans-daily": {
+    # Orphan cleanup 每小時（PLAN 15.4 原為每日 04:00；worker 崩潰留下的
+    # status='running' 孤兒會讓前端無止境 5s 輪詢 → 改每小時，最慢 ~1.5h 內收斂）
+    "cleanup-orphans-hourly": {
         "task": "app.workers.tasks.cleanup.cleanup_orphans",
-        "schedule": crontab(hour=4, minute=0),
+        "schedule": crontab(minute=40),
     },
     # Idempotency-Key TTL 清理（每日 04:15，避開 orphan task）
     "cleanup-idempotency-daily": {

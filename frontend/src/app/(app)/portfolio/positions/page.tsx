@@ -78,6 +78,7 @@ export default function PortfolioPositionsPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Wallet}
         title="模擬持倉"
         description="由已核准的訂單聚合計算；v1.1 將支援即時市價與 P&L"
       />

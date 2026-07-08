@@ -1,0 +1,32 @@
+## 個股基本資訊
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+
+## 近 30 日三大法人買賣超摘要
+- 外資：累積 {foreign_net} 張（買 {foreign_buy} / 賣 {foreign_sell}）
+- 投信：累積 {trust_net} 張（買 {trust_buy} / 賣 {trust_sell}）
+- 自營商：累積 {dealer_net} 張（買 {dealer_buy} / 賣 {dealer_sell}）
+- 三大法人合計淨買賣超：{total_net} 張
+
+### 三大法人逐日明細（近 10 個交易日）
+{institutional_table}
+
+## 近 30 日融資融券摘要
+- 融資餘額起 → 終：{margin_balance_start} → {margin_balance_end} 張（變動 {margin_balance_change}）
+- 融券餘額起 → 終：{short_balance_start} → {short_balance_end} 張（變動 {short_balance_change}）
+- 券資比（最新）：{short_to_margin_ratio}%
+
+### 融資融券逐日明細（近 10 個交易日）
+{margin_table}
+
+## 近 12 個月營收摘要
+- 最新月：{latest_month} 營收 {latest_revenue}（年增 {latest_yoy}%）
+- 累計年增率（最新月）：{ytd_yoy}%
+
+### 月營收明細
+{monthly_revenue_table}
+
+## 你的任務
+請依上述資料，產出籌碼面分析。
+**最後輸出**：繁體中文綜述 + ```json``` 區塊（符合 SentimentAnalysisResult schema）。

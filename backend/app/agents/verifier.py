@@ -84,12 +84,21 @@ def _safe_json(raw: Any) -> dict[str, Any] | None:
 
 
 _NEWS_SENTIMENT = {"極度正面": 2, "正面": 1, "中性": 0, "負面": -1, "極度負面": -2}
+# 情緒面分析師（新聞情緒聚合）的方向票
+_MARKET_SENTIMENT = {"極度樂觀": 2, "樂觀": 1, "中性": 0, "悲觀": -1, "極度悲觀": -2}
 _INST_FLOW = {"大量買超": 2, "小量買超": 1, "中性": 0, "小量賣超": -1, "大量賣超": -2}
 _VIEW = {"看多": 1, "看空": -1, "中性": 0}
 
 
 def _direction_votes(analyses: dict[str, Any]) -> tuple[int, int, int]:
-    """彙整方向票。回 (net, n_structured, n_total)。"""
+    """彙整方向票。回 (net, n_structured, n_total)。
+
+    以「欄位探測」計票（不依賴 analyst 名稱）：
+    - market/fundamental → short_term_view / long_term_view
+    - news → sentiment（新聞語氣）
+    - sentiment（情緒面）→ market_sentiment（樂觀/悲觀）
+    - chip（籌碼面）→ institutional_flow / margin_trading_signal
+    """
     net = 0
     n_structured = 0
     n_total = len(analyses)
@@ -101,6 +110,7 @@ def _direction_votes(analyses: dict[str, Any]) -> tuple[int, int, int]:
         net += _VIEW.get(d.get("short_term_view"), 0)
         net += _VIEW.get(d.get("long_term_view"), 0)
         net += _NEWS_SENTIMENT.get(d.get("sentiment"), 0)
+        net += _MARKET_SENTIMENT.get(d.get("market_sentiment"), 0)
         net += _INST_FLOW.get(d.get("institutional_flow"), 0)
         net += _VIEW.get(d.get("margin_trading_signal"), 0)
     return net, n_structured, n_total

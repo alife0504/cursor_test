@@ -4,13 +4,20 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-export type AnalystType = "market" | "fundamental" | "news" | "sentiment";
+export type AnalystType =
+  | "market"
+  | "fundamental"
+  | "news"
+  | "sentiment"
+  | "chip";
 
 export interface AnalystOption {
   id: AnalystType;
   label: string;
   description: string;
   twOnly?: boolean;
+  /** twOnly 時,美股禁用卡片顯示的原因 */
+  twOnlyReason?: string;
 }
 
 const OPTIONS: AnalystOption[] = [
@@ -26,14 +33,22 @@ const OPTIONS: AnalystOption[] = [
   },
   {
     id: "news",
-    label: "News(新聞 / 公告)",
-    description: "近期新聞分群與摘要",
+    label: "News(新聞 / 總經)",
+    description: "個股新聞 / 公告 + 大盤總經脈絡",
   },
   {
     id: "sentiment",
     label: "Sentiment(情緒)",
-    description: "PTT / 論壇情緒;僅支援台股",
+    description: "新聞情緒聚合:市場情緒溫度 / 熱度 / 動能",
     twOnly: true,
+    twOnlyReason: "情緒面以台股新聞語氣聚合,僅支援台股",
+  },
+  {
+    id: "chip",
+    label: "Chip(籌碼面)",
+    description: "三大法人 / 融資融券 / 月營收",
+    twOnly: true,
+    twOnlyReason: "籌碼面（三大法人 / 融資券）為台股專屬資料",
   },
 ];
 
@@ -96,7 +111,7 @@ export function AnalystChooser({ value, onChange, market }: AnalystChooserProps)
               </Label>
               <span className="text-xs text-muted-foreground">
                 {isDisabled
-                  ? "籌碼面（三大法人 / 融資券）為台股專屬資料"
+                  ? (o.twOnlyReason ?? "此分析師僅支援台股")
                   : o.description}
               </span>
             </div>

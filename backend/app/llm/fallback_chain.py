@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from app.core.errors import ExternalServiceError
@@ -41,6 +42,45 @@ FALLBACK_CHAIN: dict[str, list[str]] = {
     "openai": ["google", "anthropic"],
     "anthropic": ["google", "openai"],
 }
+
+
+# 暫時性錯誤特徵（provider 會把原始例外包成 ExternalServiceError，故比對訊息 + 例外鏈）。
+# 對齊上游 v0.3.1：這類錯誤（限流 / 過載 / 5xx / 逾時）退避重試多半就過，不該整輪失敗。
+_TRANSIENT_SIGNATURES: tuple[str, ...] = (
+    "429",
+    "rate limit",
+    "ratelimit",
+    "rate_limit",
+    "resource_exhausted",
+    "resourceexhausted",
+    "overloaded",
+    "500",
+    "502",
+    "503",
+    "504",
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "service unavailable",
+    "serviceunavailable",
+    "unavailable",
+    "deadline exceeded",
+    "connection reset",
+    "connection error",
+)
+
+
+def is_transient_llm_error(exc: BaseException) -> bool:
+    """判斷是否為值得退避重試的暫時性錯誤（掃例外鏈 cause/context）。"""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        msg = f"{type(cur).__name__} {cur}".lower()
+        if any(sig in msg for sig in _TRANSIENT_SIGNATURES):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 def provider_for_model(model: str | None) -> str | None:
@@ -77,15 +117,29 @@ class LLMFallbackChain:
         providers: dict[str, BaseLLMProvider],
         *,
         primary: str = "google",
+        max_retries: int | None = None,
+        retry_base_delay: float | None = None,
     ) -> None:
         """Args:
         providers: name → provider 實例。空 dict 會在第一次呼叫時 raise。
         primary: 預設 primary provider name；可在 generate_with_chain 覆寫。
+        max_retries: 單一 provider 對暫時性錯誤的重試次數；None → 讀 settings.LLM_MAX_RETRIES。
+        retry_base_delay: 重試退避基礎秒數；None → 讀 settings.LLM_RETRY_BASE_DELAY_S。
         """
         if not providers:
             raise ValueError("LLMFallbackChain 至少需要一個 provider")
         self.providers: dict[str, BaseLLMProvider] = providers
         self.primary: str = primary
+        # 暫時性錯誤重試參數（lazy 讀 settings，允許 caller / 測試覆寫）
+        if max_retries is None or retry_base_delay is None:
+            from app.core.config import settings
+
+            if max_retries is None:
+                max_retries = settings.LLM_MAX_RETRIES
+            if retry_base_delay is None:
+                retry_base_delay = settings.LLM_RETRY_BASE_DELAY_S
+        self._max_retries: int = max(0, int(max_retries))
+        self._retry_base_delay: float = float(retry_base_delay)
         # 每次 generate 後更新（供外部讀，記錄 cost 用）
         self.last_used_provider: str | None = None
         # 最近一次實際送出的 model id（per-agent 覆寫 / fallback 後可能 != default_model）；
@@ -159,17 +213,39 @@ class LLMFallbackChain:
             pm = provider_for_model(model)
             effective_model = model if (pm is None or pm == provider_name) else None
 
-            try:
-                resp = await provider.generate(
-                    system=system,
-                    user=user,
-                    tools=tools,
-                    model=effective_model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
-            except Exception as exc:
-                last_exc = exc
+            # 同一 provider 內對暫時性錯誤（429 / 5xx / timeout）退避重試（PLAN 14.4 / 上游 v0.3.1）。
+            # 只有 Google 金鑰時，fallback chain 無別家可轉，這層重試是唯一的韌性來源。
+            resp = None
+            attempt_exc: Exception | None = None
+            for attempt in range(self._max_retries + 1):
+                try:
+                    resp = await provider.generate(
+                        system=system,
+                        user=user,
+                        tools=tools,
+                        model=effective_model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                    attempt_exc = None
+                    break
+                except Exception as exc:
+                    attempt_exc = exc
+                    if attempt < self._max_retries and is_transient_llm_error(exc):
+                        delay = self._retry_base_delay * (2**attempt)
+                        logger.warning(
+                            "llm_fallback.transient_retry",
+                            provider=provider_name,
+                            attempt=attempt + 1,
+                            delay_s=delay,
+                            error=str(exc),
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    break
+
+            if attempt_exc is not None:
+                last_exc = attempt_exc
                 if cb is not None:
                     try:
                         await cb.record_failure()
@@ -182,8 +258,8 @@ class LLMFallbackChain:
                 logger.warning(
                     "llm_fallback.provider_failed",
                     provider=provider_name,
-                    error=str(exc),
-                    error_type=type(exc).__name__,
+                    error=str(attempt_exc),
+                    error_type=type(attempt_exc).__name__,
                 )
                 continue
 
@@ -280,4 +356,9 @@ class LLMFallbackChain:
         )
 
 
-__all__ = ["FALLBACK_CHAIN", "LLMFallbackChain", "provider_for_model"]
+__all__ = [
+    "FALLBACK_CHAIN",
+    "LLMFallbackChain",
+    "is_transient_llm_error",
+    "provider_for_model",
+]

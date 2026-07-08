@@ -159,6 +159,7 @@ export default function AuditPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={ScrollText}
         title="審計日誌"
         description="Tamper-evident 紀錄（hash chain）。僅 ADMIN 可看"
       />

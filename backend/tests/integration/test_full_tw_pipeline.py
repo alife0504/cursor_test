@@ -53,9 +53,24 @@ VALID_NEWS = {
     "key_topics": ["AI", "毛利"],
     "supporting_articles": [],
     "impact_assessment": "短線正面影響預期偏正向",
+    "macro_context": "Fed 暗示放緩升息，外資回流台股，大盤氛圍偏多。",
+    "macro_bias": "偏多",
     "confidence": 60,
 }
+# 情緒面（新聞情緒聚合，v1.1 新設）
 VALID_SENTIMENT = {
+    "summary": "X" * 200,
+    "market_sentiment": "樂觀",
+    "sentiment_score": "0.45",
+    "buzz_level": "中",
+    "momentum": "轉強",
+    "key_drivers": ["AI 訂單利多發酵"],
+    "contrarian_flag": False,
+    "risk_factors": ["追高風險"],
+    "confidence": 62,
+}
+# 籌碼面（原 sentiment，v1.1 正名為 chip）
+VALID_CHIP = {
     "summary": "X" * 200,
     "institutional_flow": "大量買超",
     "foreign_position_change": "外資連 5 日買超合計 12000 張",
@@ -98,11 +113,14 @@ class _ScriptedLLM:
     def __init__(self) -> None:
         self.calls: list[str] = []
         # role 對應 payload
+        # 註：chip 的 system prompt 內含「情緒面分析師」字樣（界線說明），
+        # 故 籌碼面 必須排在 情緒面 之前比對，否則 chip prompt 會誤命中情緒 payload。
         self._mapping = [
             ("技術面分析師", VALID_MARKET),
             ("基本面分析師", VALID_FUNDAMENTAL),
-            ("新聞情緒分析師", VALID_NEWS),
-            ("籌碼面分析師", VALID_SENTIMENT),
+            ("新聞與總經分析師", VALID_NEWS),
+            ("籌碼面分析師", VALID_CHIP),
+            ("情緒面分析師", VALID_SENTIMENT),
             ("看多（Bull）研究員", VALID_BULL),
             ("看空（Bear）研究員", VALID_BEAR),
             ("首席投資策略長", VALID_FINAL),
@@ -185,6 +203,20 @@ class _FakeTools:
             }
         ]
 
+    async def get_market_news(self, days_back=7, max_items=20, market=None):
+        return [
+            {
+                "id": "m1",
+                "title": "台股大盤：外資回補、電子權值走強",
+                "summary": "加權指數收紅",
+                "source": "cnyes",
+                "url": "https://example.com/m1",
+                "sentiment": "positive",
+                "sentiment_score": "0.40",
+                "published_at": "2026-05-10T09:00:00",
+            }
+        ]
+
     async def get_announcements(self, symbol, days_back=30):
         return []
 
@@ -258,6 +290,7 @@ def patched_rw_session(monkeypatch):
         "app.agents.analysts.fundamental_analyst.rw_session",
         "app.agents.analysts.news_analyst.rw_session",
         "app.agents.analysts.sentiment_analyst.rw_session",
+        "app.agents.analysts.chip_analyst.rw_session",
         "app.agents.researchers.bull_researcher.rw_session",
         "app.agents.researchers.bear_researcher.rw_session",
         "app.agents.managers.research_manager.rw_session",
@@ -283,13 +316,14 @@ def test_2330_completes_with_stub_llm(patched_rw_session) -> None:
     )
     final = asyncio.run(g.ainvoke(state, config={"recursion_limit": 25}))
 
-    # 4 analyst 結果
+    # 5 analyst 結果
     analyses = final.get("analyses") or {}
     assert set(analyses.keys()) >= {
         "market",
         "fundamental",
         "news",
         "sentiment",
+        "chip",
     }, f"missing analysts: {set(analyses.keys())}"
 
     # signal + report_md
@@ -329,8 +363,8 @@ def test_debate_rounds_creates_correct_history_entries(patched_rw_session) -> No
     assert rounds == [1, 1, 2, 2]
 
 
-def test_us_pipeline_excludes_sentiment(patched_rw_session) -> None:
-    """US 應跳過 sentiment（TW only），其餘 3 個 analyst 正常跑。"""
+def test_us_pipeline_excludes_tw_only_analysts(patched_rw_session) -> None:
+    """US 應跳過 sentiment / chip（皆 TW only），其餘 3 個 analyst 正常跑。"""
     llm = _ScriptedLLM()
     tools = _FakeTools()
 
@@ -345,4 +379,5 @@ def test_us_pipeline_excludes_sentiment(patched_rw_session) -> None:
     final = asyncio.run(g.ainvoke(state, config={"recursion_limit": 25}))
     analyses = final.get("analyses") or {}
     assert "sentiment" not in analyses
+    assert "chip" not in analyses
     assert {"market", "fundamental", "news"}.issubset(analyses.keys())

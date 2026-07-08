@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Newspaper } from "lucide-react";
 import { useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
@@ -35,6 +35,7 @@ export default function NewsSentimentPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Newspaper}
         title="新聞情緒"
         description="個股近期新聞與情緒分佈（資料來源：Qdrant + 各家新聞 source）"
       />

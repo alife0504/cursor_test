@@ -30,15 +30,15 @@ def _state(symbol: str, market: str, analyst_types: list[str] | None = None) -> 
     )
 
 
-def test_tw_pipeline_includes_all_four_analysts() -> None:
-    """TW 跑完整 pipeline → analyses 應有 market/fundamental/news/sentiment 四個 key。"""
+def test_tw_pipeline_includes_all_five_analysts() -> None:
+    """TW 跑完整 pipeline → analyses 應有 market/fundamental/news/sentiment/chip 五個 key。"""
     g = build_graph("2330", "TWSE", debate_rounds=1)
     state = _state("2330", "TWSE")
     final = asyncio.run(g.ainvoke(state))
     analyses = final.get("analyses") or {}
-    assert set(analyses.keys()) >= {"market", "fundamental", "news", "sentiment"}
+    assert set(analyses.keys()) >= {"market", "fundamental", "news", "sentiment", "chip"}
     # 每個 Analyst 都應產出 [stub] 字串
-    for name in ("market", "fundamental", "news", "sentiment"):
+    for name in ("market", "fundamental", "news", "sentiment", "chip"):
         assert "[stub]" in analyses[name], f"{name} 應為 stub 輸出"
     # placeholder_manager 應產出 report_md（且含 [stub] 標籤）
     assert final.get("report_md")
@@ -49,13 +49,14 @@ def test_tw_pipeline_includes_all_four_analysts() -> None:
     assert "[stub]" in outputs["market"]["report_md"]
 
 
-def test_us_pipeline_excludes_sentiment() -> None:
-    """US 跑完整 pipeline → analyses 不應含 sentiment。"""
+def test_us_pipeline_excludes_tw_only_analysts() -> None:
+    """US 跑完整 pipeline → analyses 不應含 sentiment / chip（皆 TW only）。"""
     g = build_graph("AAPL", "NASDAQ", debate_rounds=1)
     state = _state("AAPL", "NASDAQ")
     final = asyncio.run(g.ainvoke(state))
     analyses = final.get("analyses") or {}
     assert "sentiment" not in analyses
+    assert "chip" not in analyses
     # market/fundamental/news 必須有
     assert {"market", "fundamental", "news"}.issubset(analyses.keys())
     assert final.get("report_md")

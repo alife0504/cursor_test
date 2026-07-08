@@ -1,14 +1,21 @@
-"""SentimentAnalyst — 籌碼/情緒面分析師（TW only）。
+"""SentimentAnalyst — 情緒面分析師（TW only，v1.1 新設）。
 
-P13 完整版：
-- 抓近 30 日三大法人買賣超 + 融資融券 + 12 個月營收。
-- 後端算累積外資/投信/自營商淨買賣超 + 融資融券變化。
-- LLM 結構化輸出 SentimentAnalysisResult。
+原版 tauric 的 sentiment 分析師吃社群媒體（Reddit）。本環境無社群爬蟲資料，
+改以「新聞情緒聚合」重建：綜合個股新聞語氣 + 大盤新聞語氣 + 情緒分數
+（news_metadata.sentiment / sentiment_score），推導市場情緒、討論熱度與動能。
+
+與其他分析師的界線：
+- 與 news（新聞摘要）區隔：sentiment 不做議題整理，只量化「情緒溫度與變化」。
+- 與 chip（籌碼面）區隔：chip 看法人/融資券的資金流，sentiment 看輿論語氣。
+
+降級策略：
+- 完全無新聞（個股 + 大盤皆空）→ 回中性 stub 結果（confidence 低），不 raise、不炸圖。
 """
 
 from __future__ import annotations
 
 import time
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar
 
@@ -18,25 +25,29 @@ from app.agents.prompts_loader import load_prompt, render_template
 from app.agents.schemas import SentimentAnalysisResult
 from app.agents.state import AgentState, resolve_agent_model
 from app.core.database import rw_session
-from app.core.errors import ExternalServiceError, ValidationError
+from app.core.errors import ValidationError
 from app.core.logging_config import get_logger
 from app.data_sources.base import DataKind, MarketRegion
 
 logger = get_logger(__name__)
 
+# news_metadata.sentiment enum → 數值分數（供後端粗聚合，LLM 再據此細判）
+_SENTIMENT_WORD_TO_SCORE: dict[str, float] = {
+    "positive": 1.0,
+    "neutral": 0.0,
+    "negative": -1.0,
+    "unknown": 0.0,
+}
+
 
 @register_analyst
 class SentimentAnalyst(BaseAnalyst):
-    """籌碼/情緒面分析師（台股 only）。"""
+    """情緒面分析師（台股 only）— 新聞情緒聚合。"""
 
     name: ClassVar[str] = "sentiment"
-    display_name_zh: ClassVar[str] = "籌碼面分析師"
+    display_name_zh: ClassVar[str] = "情緒面分析師"
     supported_regions: ClassVar[list[MarketRegion]] = [MarketRegion.TW]
-    required_data_kinds: ClassVar[list[DataKind]] = [
-        DataKind.INSTITUTIONAL,
-        DataKind.MARGIN,
-        DataKind.MONTHLY_REVENUE,
-    ]
+    required_data_kinds: ClassVar[list[DataKind]] = [DataKind.NEWS]
 
     async def analyze(self, state: AgentState) -> dict[str, Any]:
         symbol = state.get("symbol", "?")
@@ -44,13 +55,13 @@ class SentimentAnalyst(BaseAnalyst):
 
         if self.llm is None or self.tools is None:
             text = (
-                f"[stub] {self.display_name_zh} 對 {symbol} 的籌碼面分析。"
+                f"[stub] {self.display_name_zh} 對 {symbol} 的情緒面分析。"
                 "（無 LLM/tools 注入，回 framework stub）"
             )
             logger.info("analyst.sentiment.stub", symbol=symbol)
             return {"analyses": {self.name: text}}
 
-        # Region 防呆（不該在 US 上跑）
+        # Region 防呆（僅台股）
         if state.get("region", "TW") != "TW":
             raise ValidationError(
                 message_zh="SentimentAnalyst 僅支援台股",
@@ -60,67 +71,57 @@ class SentimentAnalyst(BaseAnalyst):
 
         company = await self.tools.get_company_info(symbol)
 
+        # 近 7 日個股新聞 + 近 14 日大盤新聞（前 7 vs 後 7 用來看動能）
+        stock_news = await self.tools.get_news(symbol, days_back=7, max_items=30)
         try:
-            institutional = await self.tools.get_institutional(symbol, days_back=30)
+            market_news = await self.tools.get_market_news(days_back=7, max_items=20, market="TWSE")
         except Exception as exc:
-            logger.warning("sentiment.institutional.failed", symbol=symbol, error=str(exc))
-            institutional = []
+            logger.warning("sentiment.market_news_failed", symbol=symbol, error=str(exc))
+            market_news = []
 
-        try:
-            margin = await self.tools.get_margin(symbol, days_back=30)
-        except Exception as exc:
-            logger.warning("sentiment.margin.failed", symbol=symbol, error=str(exc))
-            margin = []
-
-        try:
-            monthly = await self.tools.get_monthly_revenue(symbol, months_back=12)
-        except Exception as exc:
-            logger.warning("sentiment.monthly_revenue.failed", symbol=symbol, error=str(exc))
-            monthly = []
-
-        # 至少一種資料才有意義；全空 → raise
-        if not institutional and not margin and not monthly:
-            raise ExternalServiceError(
-                message_zh=f"{symbol} 無任何籌碼面資料（三大法人/融資融券/月營收皆空）",
-                analyst="sentiment",
-                symbol=symbol,
+        # 完全無資料 → 中性 stub（不 raise，交由圖續跑其餘分析師）
+        if not stock_news and not market_news:
+            empty = SentimentAnalysisResult(
+                summary=(
+                    f"近 7 日內未檢索到與 {symbol} 相關的個股新聞，亦無台股大盤新聞可供情緒判讀。"
+                    "資料量不足，無法形成有意義的情緒溫度，confidence 設為偏低。"
+                    "建議結合技術面、基本面與籌碼面結論綜合判讀。"
+                ),
+                market_sentiment="中性",
+                sentiment_score=Decimal("0"),
+                buzz_level="低",
+                momentum="持平",
+                key_drivers=[],
+                contrarian_flag=False,
+                risk_factors=["情緒資料不足，判讀可靠度低"],
+                confidence=20,
             )
+            logger.info("sentiment_analyst.no_data", symbol=symbol)
+            return {
+                "analyses": {self.name: empty.model_dump_json()},
+                "llm_usage_total_tokens": int(state.get("llm_usage_total_tokens", 0) or 0),
+            }
 
-        agg = _aggregate(institutional, margin)
+        stock_agg = _aggregate_sentiment(stock_news)
+        market_agg = _aggregate_sentiment(market_news)
 
         user_prompt = render_template(
             "sentiment_analyst_user_template",
             symbol=symbol,
             company_name=company.get("name") or symbol,
             industry=company.get("industry") or "未提供",
-            foreign_buy=_fmt(agg.get("foreign_buy"), int_=True),
-            foreign_sell=_fmt(agg.get("foreign_sell"), int_=True),
-            foreign_net=_fmt(agg.get("foreign_net"), int_=True),
-            trust_buy=_fmt(agg.get("trust_buy"), int_=True),
-            trust_sell=_fmt(agg.get("trust_sell"), int_=True),
-            trust_net=_fmt(agg.get("trust_net"), int_=True),
-            dealer_buy=_fmt(agg.get("dealer_buy"), int_=True),
-            dealer_sell=_fmt(agg.get("dealer_sell"), int_=True),
-            dealer_net=_fmt(agg.get("dealer_net"), int_=True),
-            total_net=_fmt(agg.get("total_net"), int_=True),
-            institutional_table=_format_inst_table(institutional[-10:]),
-            margin_balance_start=_fmt(agg.get("margin_balance_start"), int_=True),
-            margin_balance_end=_fmt(agg.get("margin_balance_end"), int_=True),
-            margin_balance_change=_fmt(agg.get("margin_balance_change"), int_=True),
-            short_balance_start=_fmt(agg.get("short_balance_start"), int_=True),
-            short_balance_end=_fmt(agg.get("short_balance_end"), int_=True),
-            short_balance_change=_fmt(agg.get("short_balance_change"), int_=True),
-            short_to_margin_ratio=_fmt(agg.get("short_to_margin_ratio")),
-            margin_table=_format_margin_table(margin[-10:]),
-            latest_month=(
-                f"{monthly[-1].get('year')}-{int(monthly[-1].get('month') or 0):02d}"
-                if monthly
-                else "無資料"
-            ),
-            latest_revenue=_fmt(monthly[-1].get("revenue") if monthly else None, int_=True),
-            latest_yoy=_fmt(monthly[-1].get("revenue_yoy") if monthly else None),
-            ytd_yoy=_fmt(monthly[-1].get("ytd_yoy") if monthly else None),
-            monthly_revenue_table=_format_monthly_table(monthly),
+            stock_news_count=len(stock_news),
+            stock_pos=stock_agg["pos"],
+            stock_neu=stock_agg["neu"],
+            stock_neg=stock_agg["neg"],
+            stock_avg_score=_fmt_score(stock_agg["avg_score"]),
+            market_news_count=len(market_news),
+            market_pos=market_agg["pos"],
+            market_neu=market_agg["neu"],
+            market_neg=market_agg["neg"],
+            market_avg_score=_fmt_score(market_agg["avg_score"]),
+            stock_news_table=_format_news_table(stock_news),
+            market_news_table=_format_news_table(market_news),
         )
         system_prompt = load_prompt("sentiment_analyst_system")
 
@@ -132,7 +133,7 @@ class SentimentAnalyst(BaseAnalyst):
             SentimentAnalysisResult,
             model=resolve_agent_model(state, self.name),
             max_tokens=2048,
-            temperature=0.3,
+            temperature=0.4,
         )
         latency_ms = int((time.monotonic() - t0) * 1000)
 
@@ -159,7 +160,7 @@ class SentimentAnalyst(BaseAnalyst):
         logger.info(
             "analyst.sentiment.done",
             symbol=symbol,
-            institutional_flow=result.institutional_flow,
+            market_sentiment=result.market_sentiment,
             confidence=result.confidence,
             tokens=usage.total_tokens,
             latency_ms=latency_ms,
@@ -175,119 +176,54 @@ class SentimentAnalyst(BaseAnalyst):
 # ── 聚合 helpers ───────────────────────────────────────
 
 
-def _aggregate(
-    institutional: list[dict[str, Any]],
-    margin: list[dict[str, Any]],
-) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+def _aggregate_sentiment(news: list[dict[str, Any]]) -> dict[str, Any]:
+    """統計一批新聞的情緒分布 + 平均分數。
 
-    def _sum(key: str) -> Decimal:
-        total = Decimal("0")
-        for r in institutional:
-            v = _d(r.get(key))
-            if v is not None:
-                total += v
-        return total
-
-    out["foreign_buy"] = _sum("foreign_buy")
-    out["foreign_sell"] = _sum("foreign_sell")
-    out["foreign_net"] = _sum("foreign_net")
-    out["trust_buy"] = _sum("trust_buy")
-    out["trust_sell"] = _sum("trust_sell")
-    out["trust_net"] = _sum("trust_net")
-    out["dealer_buy"] = _sum("dealer_buy")
-    out["dealer_sell"] = _sum("dealer_sell")
-    out["dealer_net"] = _sum("dealer_net")
-    out["total_net"] = out["foreign_net"] + out["trust_net"] + out["dealer_net"]
-
-    if margin:
-        first = margin[0]
-        last = margin[-1]
-        mb_s = _d(first.get("margin_balance")) or Decimal("0")
-        mb_e = _d(last.get("margin_balance")) or Decimal("0")
-        sb_s = _d(first.get("short_balance")) or Decimal("0")
-        sb_e = _d(last.get("short_balance")) or Decimal("0")
-        out["margin_balance_start"] = mb_s
-        out["margin_balance_end"] = mb_e
-        out["margin_balance_change"] = mb_e - mb_s
-        out["short_balance_start"] = sb_s
-        out["short_balance_end"] = sb_e
-        out["short_balance_change"] = sb_e - sb_s
-        if mb_e > 0:
-            out["short_to_margin_ratio"] = sb_e / mb_e * Decimal("100")
-    return out
+    優先用 sentiment_score（-1~1 連續值）；缺則以 sentiment enum 映射粗分。
+    """
+    counter: Counter[str] = Counter()
+    scores: list[float] = []
+    for r in news:
+        word = (r.get("sentiment") or "unknown").lower()
+        counter[word] += 1
+        raw_score = r.get("sentiment_score")
+        val = _to_float(raw_score)
+        if val is None:
+            val = _SENTIMENT_WORD_TO_SCORE.get(word, 0.0)
+        scores.append(val)
+    avg = sum(scores) / len(scores) if scores else 0.0
+    return {
+        "pos": counter.get("positive", 0),
+        "neu": counter.get("neutral", 0) + counter.get("unknown", 0),
+        "neg": counter.get("negative", 0),
+        "avg_score": avg,
+    }
 
 
-def _d(v: Any) -> Decimal | None:
+def _to_float(v: Any) -> float | None:
     if v is None:
         return None
-    if isinstance(v, Decimal):
-        return v
     try:
-        return Decimal(str(v))
+        return float(Decimal(str(v)))
     except (InvalidOperation, TypeError, ValueError):
         return None
 
 
-def _fmt(v: Any, *, int_: bool = False) -> str:
-    if v is None:
-        return "無資料"
-    try:
-        if int_:
-            return f"{int(float(v)):,}"
-        return f"{float(v):,.2f}"
-    except (TypeError, ValueError):
-        return str(v)
+def _fmt_score(v: float) -> str:
+    return f"{v:+.2f}"
 
 
-def _format_inst_table(rows: list[dict[str, Any]]) -> str:
+def _format_news_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "(無三大法人資料)"
-    lines = [
-        "| 日期 | 外資淨 | 投信淨 | 自營商淨 | 合計淨 |",
-        "|---|---|---|---|---|",
-    ]
-    for r in rows:
-        fn = _d(r.get("foreign_net")) or Decimal("0")
-        tn = _d(r.get("trust_net")) or Decimal("0")
-        dn = _d(r.get("dealer_net")) or Decimal("0")
+        return "(無相關新聞)"
+    lines = ["| 標題 | 來源 | 發布時間 | sentiment | score |", "|---|---|---|---|---|"]
+    for r in rows[:20]:
+        title = (r.get("title") or "")[:100].replace("|", "/")
+        score = r.get("sentiment_score")
         lines.append(
-            f"| {r.get('date', '')} | {fn:,.0f} | {tn:,.0f} | {dn:,.0f} | {fn + tn + dn:,.0f} |"
-        )
-    return "\n".join(lines)
-
-
-def _format_margin_table(rows: list[dict[str, Any]]) -> str:
-    if not rows:
-        return "(無融資融券資料)"
-    lines = [
-        "| 日期 | 融資餘額 | 融資增減 | 融券餘額 | 融券增減 |",
-        "|---|---|---|---|---|",
-    ]
-    for r in rows:
-        lines.append(
-            f"| {r.get('date', '')} | "
-            f"{_fmt(r.get('margin_balance'), int_=True)} | "
-            f"{_fmt((r.get('margin_buy') or 0) - (r.get('margin_sell') or 0), int_=True)} | "
-            f"{_fmt(r.get('short_balance'), int_=True)} | "
-            f"{_fmt((r.get('short_buy') or 0) - (r.get('short_sell') or 0), int_=True)} |"
-        )
-    return "\n".join(lines)
-
-
-def _format_monthly_table(rows: list[dict[str, Any]]) -> str:
-    if not rows:
-        return "(無月營收資料)"
-    lines = ["| 年月 | 營收 | YoY% | MoM% |", "|---|---|---|---|"]
-    for r in rows[-12:]:
-        ym = (
-            f"{r.get('year')}-{int(r.get('month') or 0):02d}"
-            if r.get("month") is not None
-            else str(r.get("year"))
-        )
-        lines.append(
-            f"| {ym} | {_fmt(r.get('revenue'), int_=True)} | "
-            f"{_fmt(r.get('revenue_yoy'))} | {_fmt(r.get('revenue_mom'))} |"
+            f"| {title} | {r.get('source') or ''} | "
+            f"{r.get('published_at') or ''} | {r.get('sentiment') or 'unknown'} | "
+            f"{score if score is not None else '-'} |"
         )
     return "\n".join(lines)
 

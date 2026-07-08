@@ -10,19 +10,38 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.schemas.common import BaseSchema
 
-ALLOWED_ANALYST_TYPES = {"market", "sentiment", "news", "fundamental"}
-"""P13 修正：與 SentimentAnalyst.name 對齊（P11 遺留 "social"，會擋掉合法請求）。"""
+ALLOWED_ANALYST_TYPES = {"market", "sentiment", "news", "fundamental", "chip"}
+"""與 ANALYST_REGISTRY 對齊。v1.1：新增 chip（籌碼面）；sentiment 正名為情緒面
+（新聞情緒聚合），原籌碼面實作改名為 chip。"""
 DEFAULT_LLM_MODEL = "gemini-2.5-flash"
+SCREEN_LEVELS = {"low", "mid", "high"}
+"""自動選股篩選等級（與前端 ScreenLevelChooser / screening_service 對齊）。
+基本 floor 永遠套用、非可選等級，故不在此。"""
 
 
 class AnalysisCreateRequest(BaseSchema):
-    """POST /api/v1/analysis 的 request body。"""
+    """POST /api/v1/analysis 的 request body。
 
-    symbol: str = Field(min_length=1, max_length=20)
+    兩種模式（擇一）：
+    - **指定個股**：帶 `symbol` → 建立單筆分析（原行為）。
+    - **自動選股**：不帶 `symbol`、帶 `screen_level` → 送出後由後端依等級批次篩選
+      （`market` 指定篩選市場，預設 TW），對選出的每檔各建一筆分析。
+    """
+
+    symbol: str | None = Field(default=None, max_length=20)
+    screen_level: str | None = Field(
+        default=None,
+        description="自動選股等級（basic/low/mid/high）；未帶 symbol 時必填",
+    )
+    market: str | None = Field(
+        default=None,
+        max_length=4,
+        description="自動選股的篩選市場（TW/US）；未帶 symbol 時使用，預設 TW",
+    )
     analyst_types: list[str] = Field(default_factory=lambda: ["market"])
     llm_model: str = Field(default=DEFAULT_LLM_MODEL, max_length=100)
     debate_rounds: int = Field(default=1, ge=0, le=5)
@@ -38,6 +57,45 @@ class AnalysisCreateRequest(BaseSchema):
     )
     risk_tolerance: str | None = Field(default=None, max_length=20)
     notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+    @field_validator("screen_level")
+    @classmethod
+    def validate_screen_level(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in SCREEN_LEVELS:
+            raise ValueError(f"screen_level 不支援 {v!r}；允許值：{sorted(SCREEN_LEVELS)}")
+        return v
+
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().upper()
+        if v not in {"TW", "US"}:
+            raise ValueError("market 僅允許 TW / US")
+        return v
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> AnalysisCreateRequest:
+        """symbol 與 screen_level 二擇一：指定個股 vs 自動選股。"""
+        if not self.symbol and not self.screen_level:
+            raise ValueError("必須提供 symbol（指定個股）或 screen_level（自動選股）其一")
+        if self.symbol and self.screen_level:
+            raise ValueError("symbol 與 screen_level 不可同時提供（擇一）")
+        # 自動選股模式：market 預設 TW
+        if self.screen_level and not self.market:
+            self.market = "TW"
+        return self
 
     @field_validator("agent_models")
     @classmethod
@@ -73,11 +131,21 @@ class AnalysisCreateRequest(BaseSchema):
 
 
 class AnalysisCreateResponse(BaseSchema):
-    """POST /api/v1/analysis 的成功回應。"""
+    """POST /api/v1/analysis 的成功回應。
+
+    - 指定個股：`analysis_id` = 該筆；`count` = 1；`analysis_ids` = [該筆]。
+    - 自動選股：`analysis_id` = 第一筆（前端可直接跳轉）；`count` = 建立筆數；
+      `analysis_ids` = 全部；`screened_symbols` = 篩選選出的股票代號。
+    """
 
     analysis_id: UUID
     status: str
     estimated_seconds: int = 180
+    count: int = 1
+    analysis_ids: list[UUID] = Field(default_factory=list)
+    screened_symbols: list[str] = Field(default_factory=list)
+    screened_count: int = 0
+    """自動選股篩出的候選總數（可能 > count；實際只建立前 count 檔分析，其餘為候選）。"""
 
 
 class AnalysisSummary(BaseSchema):
@@ -140,6 +208,7 @@ class DebateMessageOut(BaseSchema):
 __all__ = [
     "ALLOWED_ANALYST_TYPES",
     "DEFAULT_LLM_MODEL",
+    "SCREEN_LEVELS",
     "AnalysisCreateRequest",
     "AnalysisCreateResponse",
     "AnalysisDetail",

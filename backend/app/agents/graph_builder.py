@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from app.agents.analysts import (  # noqa: F401  side-effect: 觸發 register_analyst
+    ChipAnalyst,
     FundamentalAnalyst,
     MarketAnalyst,
     NewsAnalyst,

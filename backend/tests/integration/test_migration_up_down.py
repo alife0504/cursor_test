@@ -2,14 +2,18 @@
 
 驗證每個 migration 都正確寫 downgrade，且 full 雙向 cycle 不會卡。
 
-注意：
-- 此測試會破壞性 down/up；放最後跑（pytest 預設 alphabetical 順序，
-  test_migration_up_down 排在 test_schema 之後）。
-- 結束時保證 schema 在 head（避免污染下個測試）。
+⚠️ 破壞性警告（2026-07-02 事故教訓）：
+- downgrade base 會 DROP 所有表 → **連同資料一起消失**。此測試若對著
+  「有資料的 dev DB」跑，會把 stock_list / users / 分析歷史全部清空
+  （已實際發生過一次，靠 seed 腳本重建）。
+- 因此 downgrade 類測試預設 skip，必須明確設
+  `MIGRATION_TEST_ALLOW_DESTRUCTIVE=1` 才會執行（CI 的拋棄式 DB 再開）。
+- upgrade head 是 idempotent、無破壞性，不受此 gate 影響。
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -17,6 +21,12 @@ from alembic import command
 from alembic.config import Config
 
 pytestmark = pytest.mark.integration
+
+_DESTRUCTIVE_OK = os.environ.get("MIGRATION_TEST_ALLOW_DESTRUCTIVE") == "1"
+_SKIP_REASON = (
+    "破壞性 downgrade 測試：會清空目標 DB 的所有資料。"
+    "只能對拋棄式 DB 跑，需明確設 MIGRATION_TEST_ALLOW_DESTRUCTIVE=1"
+)
 
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -31,11 +41,12 @@ def _config() -> Config:
 
 
 def test_upgrade_head_succeeds() -> None:
-    """alembic upgrade head 應成功（idempotent）。"""
+    """alembic upgrade head 應成功（idempotent；無破壞性，不需 gate）。"""
     cfg = _config()
     command.upgrade(cfg, "head")
 
 
+@pytest.mark.skipif(not _DESTRUCTIVE_OK, reason=_SKIP_REASON)
 def test_downgrade_one_succeeds_and_back() -> None:
     """alembic downgrade -1 後再 upgrade head，schema 回到 head。"""
     cfg = _config()
@@ -47,6 +58,7 @@ def test_downgrade_one_succeeds_and_back() -> None:
         command.upgrade(cfg, "head")
 
 
+@pytest.mark.skipif(not _DESTRUCTIVE_OK, reason=_SKIP_REASON)
 def test_full_downgrade_to_base_succeeds() -> None:
     """alembic downgrade base 後再 upgrade head，schema 完整重建。"""
     cfg = _config()

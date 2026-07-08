@@ -100,8 +100,12 @@ def test_dsn_helpers() -> None:
 
 
 def test_redis_url_with_db() -> None:
-    """redis_url(db=N) 產出正確 URL。"""
-    s = Settings(**_make_kwargs(REDIS_HOST="cache.local"))  # type: ignore[arg-type]
+    """redis_url(db=N) 產出正確 URL。
+
+    REDIS_PORT 必須顯式固定：本機常帶 REDIS_PORT=16379（Windows 保留 port 雷）
+    跑測試，不固定會被 shell env 滲入而 flaky。
+    """
+    s = Settings(**_make_kwargs(REDIS_HOST="cache.local", REDIS_PORT=6379))  # type: ignore[arg-type]
     assert s.redis_url(db=3) == "redis://:redis-pwd@cache.local:6379/3"
     assert s.redis_url(db=0) == "redis://:redis-pwd@cache.local:6379/0"
 

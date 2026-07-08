@@ -24,9 +24,9 @@ pytestmark = pytest.mark.unit
 # ── ANALYST_REGISTRY 註冊驗證 ─────────────────────────────
 
 
-def test_all_four_analysts_registered() -> None:
-    """匯入 graph_builder 應觸發 4 個 Analyst 註冊。"""
-    expected = {"market", "fundamental", "news", "sentiment"}
+def test_all_five_analysts_registered() -> None:
+    """匯入 graph_builder 應觸發 5 個 Analyst 註冊（含 v1.1 新增 chip）。"""
+    expected = {"market", "fundamental", "news", "sentiment", "chip"}
     actual = set(ANALYST_REGISTRY.keys()) & expected
     assert actual == expected, f"missing: {expected - actual}"
 
@@ -34,19 +34,21 @@ def test_all_four_analysts_registered() -> None:
 # ── build_graph 結構 ────────────────────────────────────
 
 
-def test_build_graph_tw_includes_sentiment() -> None:
-    """TW symbol 應含 sentiment node（TW only Analyst）。"""
+def test_build_graph_tw_includes_tw_only_analysts() -> None:
+    """TW symbol 應含 sentiment（情緒面）與 chip（籌碼面）node（皆 TW only）。"""
     g = build_graph("2330", "TWSE", debate_rounds=1)
     nodes = set(g.get_graph().nodes.keys())
     assert "sentiment" in nodes, f"TW graph 應有 sentiment node；nodes={nodes}"
+    assert "chip" in nodes, f"TW graph 應有 chip node；nodes={nodes}"
     assert "manager" in nodes
 
 
-def test_build_graph_us_excludes_sentiment() -> None:
-    """US symbol 應不含 sentiment（sentiment 是 TW only）。"""
+def test_build_graph_us_excludes_tw_only_analysts() -> None:
+    """US symbol 應不含 sentiment / chip（皆 TW only）。"""
     g = build_graph("AAPL", "NASDAQ", debate_rounds=1)
     nodes = set(g.get_graph().nodes.keys())
     assert "sentiment" not in nodes, f"US graph 不應含 sentiment；nodes={nodes}"
+    assert "chip" not in nodes, f"US graph 不應含 chip；nodes={nodes}"
     assert "market" in nodes
     assert "fundamental" in nodes
     assert "news" in nodes
@@ -60,6 +62,15 @@ def test_build_graph_filters_by_analyst_types() -> None:
     assert "fundamental" not in nodes
     assert "news" not in nodes
     assert "sentiment" not in nodes
+    assert "chip" not in nodes
+
+
+def test_build_graph_chip_selectable() -> None:
+    """chip 可單獨被選（TW only）。"""
+    g = build_graph("2330", "TWSE", analyst_types=["chip"], debate_rounds=0)
+    nodes = set(g.get_graph().nodes.keys())
+    assert "chip" in nodes
+    assert "market" not in nodes
 
 
 def test_build_graph_empty_analyst_types_skips_all_analysts() -> None:
@@ -67,8 +78,8 @@ def test_build_graph_empty_analyst_types_skips_all_analysts() -> None:
     g = build_graph("2330", "TWSE", analyst_types=[], debate_rounds=0)
     nodes = set(g.get_graph().nodes.keys())
     assert "manager" in nodes
-    # 4 個 Analyst 都不該存在
-    for name in ("market", "fundamental", "news", "sentiment"):
+    # 5 個 Analyst 都不該存在
+    for name in ("market", "fundamental", "news", "sentiment", "chip"):
         assert name not in nodes
 
 

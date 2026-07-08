@@ -44,6 +44,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint("ck_notification_log_channel", "notification_log", type_="check")
+    # 歷史 log 可能已有 channel='discord' 的列（升級後實際發過通知），
+    # 直接套舊 CHECK 會 CheckViolation → 先映射為語意最接近的 'webhook'。
+    op.execute("UPDATE notification_log SET channel = 'webhook' WHERE channel = 'discord'")
     op.create_check_constraint(
         "ck_notification_log_channel", "notification_log", _CHANNEL_CHECK_OLD
     )

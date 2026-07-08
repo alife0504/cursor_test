@@ -365,7 +365,7 @@ export function Sidebar() {
   const role = useAuthStore((s) => s.user?.role);
   const isAdmin = role === "ADMIN";
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-brand-gradient text-sidebar-foreground md:flex">
+    <aside className="hidden h-screen w-56 shrink-0 flex-col border-r border-sidebar-border bg-brand-gradient text-sidebar-foreground md:flex">
       <SidebarBrand />
       <NavList pathname={pathname} isAdmin={isAdmin} />
       <SidebarFooter role={role} />

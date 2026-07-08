@@ -1,5 +1,6 @@
 "use client";
 
+import { TrendingUp } from "lucide-react";
 import { useState } from "react";
 
 import { ChartContainer } from "@/components/common/ChartContainer";
@@ -39,6 +40,7 @@ export default function MarketOverviewPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={TrendingUp}
         title="市場總覽"
         description="大盤指數、漲跌家數、漲跌幅 / 成交量榜"
         actions={<MarketSwitcher value={market} onChange={setMarket} />}

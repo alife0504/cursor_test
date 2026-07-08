@@ -134,6 +134,7 @@ export default function TradeHistoryPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={History}
         title="交易記錄"
         description="全部訂單（含 APPROVED / REJECTED / PENDING 等）；可篩選 symbol 與方向"
       />

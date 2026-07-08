@@ -2,7 +2,7 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
-import { Activity, ArrowRight, Coins, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, ArrowRight, Coins, History, TrendingDown, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
@@ -131,6 +131,7 @@ export default function HistoryPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={History}
         title="分析歷史"
         description="檢視過往分析、訊號與費用"
       />

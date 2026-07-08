@@ -50,6 +50,17 @@ _VALID_NEWS = {
 }
 _VALID_SENT = {
     "summary": "X" * 200,
+    "market_sentiment": "樂觀",
+    "sentiment_score": "0.4",
+    "buzz_level": "中",
+    "momentum": "轉強",
+    "key_drivers": ["利多發酵"],
+    "contrarian_flag": False,
+    "risk_factors": ["追高風險"],
+    "confidence": 62,
+}
+_VALID_CHIP = {
+    "summary": "X" * 200,
     "institutional_flow": "大量買超",
     "foreign_position_change": "外資連 5 日買超合計 8000 張",
     "margin_trading_signal": "看多",
@@ -86,11 +97,14 @@ class _ScriptedLLM:
     default_model: ClassVar[str] = "fake-cross-1.0"
 
     def __init__(self) -> None:
+        # 註：chip 的 system prompt 內含「情緒面分析師」字樣（界線說明），
+        # 故 籌碼面 必須排在 情緒面 之前比對，否則 chip prompt 會誤命中情緒 payload。
         self._mapping = [
             ("技術面分析師", _VALID_MARKET),
             ("基本面分析師", _VALID_FUND),
-            ("新聞情緒分析師", _VALID_NEWS),
-            ("籌碼面分析師", _VALID_SENT),
+            ("新聞與總經分析師", _VALID_NEWS),
+            ("籌碼面分析師", _VALID_CHIP),
+            ("情緒面分析師", _VALID_SENT),
             ("看多（Bull）研究員", _VALID_BULL),
             ("看空（Bear）研究員", _VALID_BEAR),
             ("首席投資策略長", _VALID_FINAL),
@@ -172,6 +186,20 @@ class _FakeTools:
             }
         ]
 
+    async def get_market_news(self, days_back=7, max_items=20, market=None):
+        return [
+            {
+                "id": "m1",
+                "title": "大盤總經新聞",
+                "summary": "x",
+                "source": "fake",
+                "url": "https://example.com/m1",
+                "sentiment": "neutral",
+                "sentiment_score": "0.1",
+                "published_at": "2026-05-10T09:00:00",
+            }
+        ]
+
     async def get_announcements(self, symbol, days_back=30):
         return []
 
@@ -243,6 +271,7 @@ def patched_rw_session(monkeypatch):
         "app.agents.analysts.fundamental_analyst.rw_session",
         "app.agents.analysts.news_analyst.rw_session",
         "app.agents.analysts.sentiment_analyst.rw_session",
+        "app.agents.analysts.chip_analyst.rw_session",
         "app.agents.researchers.bull_researcher.rw_session",
         "app.agents.researchers.bear_researcher.rw_session",
         "app.agents.managers.research_manager.rw_session",
@@ -273,12 +302,12 @@ def test_2330_full_pipeline_end_to_end_mock_llm(patched_rw_session, patched_stre
     )
     final = asyncio.run(g.ainvoke(state, config={"recursion_limit": 25}))
     analyses = final.get("analyses") or {}
-    assert {"market", "fundamental", "news", "sentiment"}.issubset(analyses.keys())
+    assert {"market", "fundamental", "news", "sentiment", "chip"}.issubset(analyses.keys())
     assert (final.get("signal") or {}).get("action") in {"BUY", "HOLD", "SELL"}
 
 
 def test_aapl_full_pipeline_end_to_end_mock_llm(patched_rw_session, patched_streaming) -> None:
-    """美股 AAPL 完整跑：3 analyst（無 sentiment）+ 1 round + manager。"""
+    """美股 AAPL 完整跑：3 analyst（無 sentiment / chip）+ 1 round + manager。"""
     llm = _ScriptedLLM()
     tools = _FakeTools()
     g = build_graph("AAPL", "NASDAQ", debate_rounds=1, llm=llm, tools=tools)
@@ -292,5 +321,6 @@ def test_aapl_full_pipeline_end_to_end_mock_llm(patched_rw_session, patched_stre
     final = asyncio.run(g.ainvoke(state, config={"recursion_limit": 25}))
     analyses = final.get("analyses") or {}
     assert "sentiment" not in analyses
+    assert "chip" not in analyses
     assert {"market", "fundamental", "news"}.issubset(analyses.keys())
     assert (final.get("signal") or {}).get("action") in {"BUY", "HOLD", "SELL"}

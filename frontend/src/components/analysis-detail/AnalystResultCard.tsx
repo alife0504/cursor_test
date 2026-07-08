@@ -1,9 +1,10 @@
 "use client";
 
 import {
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Coins,
+  Gauge,
   Newspaper,
   Sparkles,
   TrendingUp,
@@ -35,13 +36,18 @@ const ANALYST_META: Record<
   },
   news: {
     label: "新聞面 Analyst",
-    description: "近期新聞與重大事件影響評估",
+    description: "個股新聞 / 公告 + 大盤總經脈絡",
     icon: Newspaper,
   },
   sentiment: {
+    label: "情緒面 Analyst",
+    description: "新聞情緒聚合：市場情緒溫度 / 熱度 / 動能（TW only）",
+    icon: Gauge,
+  },
+  chip: {
     label: "籌碼面 Analyst",
-    description: "三大法人、融資融券、PTT 情緒（TW only）",
-    icon: CheckCircle2,
+    description: "三大法人、融資融券、月營收（TW only）",
+    icon: Coins,
   },
 };
 

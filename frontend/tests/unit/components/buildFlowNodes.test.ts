@@ -21,9 +21,21 @@ describe("buildFlowNodes", () => {
     expect(nodes).toEqual([]);
   });
 
-  test("running 狀態:全部 pending(無 events)", () => {
+  test("running 狀態:無 events 也顯示 running(WS 漏接時不凍在 pending)", () => {
+    // 49fcc8c 之後的行為:status=running 即視為 started,
+    // 即使 WS 事件全漏接,節點也以 running 呈現而非凍在 pending
     const nodes = buildFlowNodes({
       analysis: baseAnalysis,
+      analystTypes: ["market"],
+      events: [],
+    });
+    const market = nodes.find((n) => n.id === "analyst:market");
+    expect(market?.state).toBe("running");
+  });
+
+  test("queued 狀態:全部 pending(無 events)", () => {
+    const nodes = buildFlowNodes({
+      analysis: { ...baseAnalysis, status: "queued" },
       analystTypes: ["market"],
       events: [],
     });

@@ -61,11 +61,23 @@ class NewsAnalyst(BaseAnalyst):
             logger.warning("news_analyst.announcements_failed", symbol=symbol, error=str(exc))
             announcements = []
 
-        # 新聞為空：回固定 neutral 結果（不 raise，prompt 上明確說可空）
-        if not news and not announcements:
+        # 總經/大盤新聞（symbol=NULL 的市場層級新聞）— 原版 get_global_news 等價功能。
+        # 失敗不擋（總經是加分脈絡，不是必要條件）。
+        market_kind = "US" if region == "US" else "TWSE"
+        try:
+            macro_news = await self.tools.get_market_news(
+                days_back=7, max_items=15, market=market_kind
+            )
+        except Exception as exc:
+            logger.warning("news_analyst.macro_news_failed", symbol=symbol, error=str(exc))
+            macro_news = []
+
+        # 個股新聞、公告、總經新聞全空 → 回固定 neutral 結果（不 raise，prompt 上明確說可空）。
+        if not news and not announcements and not macro_news:
             empty_result = NewsAnalysisResult(
                 summary=(
-                    f"近 7 日內未檢索到與 {symbol} 相關的新聞或公告（cnyes RSS / 公開資訊觀測站）。"
+                    f"近 7 日內未檢索到與 {symbol} 相關的新聞或公告，亦無大盤/總經新聞"
+                    "（cnyes RSS / 公開資訊觀測站）。"
                     "資料量不足，無法做出有意義的情緒判斷，confidence 設為偏低。"
                     "建議使用者：1) 確認資料管線運作 2) 拉長觀察窗口 3) 結合其他分析師結論判讀。"
                 ),
@@ -73,6 +85,8 @@ class NewsAnalyst(BaseAnalyst):
                 key_topics=[],
                 supporting_articles=[],
                 impact_assessment="期間內無相關新聞，情緒中性。",
+                macro_context="",
+                macro_bias="未提供",
                 confidence=20,
             )
             logger.info("news_analyst.no_data", symbol=symbol)
@@ -93,6 +107,8 @@ class NewsAnalyst(BaseAnalyst):
             news_count=len(news),
             news_table=_format_news_table(news),
             announcements_table=_format_ann_table(announcements),
+            macro_news_count=len(macro_news),
+            macro_news_table=_format_news_table(macro_news),
         )
         system_prompt = load_prompt("news_analyst_system")
 

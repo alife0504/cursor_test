@@ -258,6 +258,65 @@ class ToolRegistry:
         logger.info("tool.get_news", symbol=symbol, days_back=days_back, rows=len(out))
         return out
 
+    # ════════════════ 4b. get_market_news（大盤/總經）════════════════
+
+    async def get_market_news(
+        self,
+        days_back: int = 7,
+        max_items: int = 20,
+        market: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """取得近 N 日大盤/總經新聞（symbol 為空的市場層級新聞）。
+
+        cnyes RSS `/rss/cat/tw_stock` 抓的是「台股總覽」大盤新聞，ingestion 以
+        symbol=NULL 存入 news_metadata。此工具撈那批「非個股」新聞，供 News/Sentiment
+        分析師建立總經脈絡（原版 get_global_news 的等價功能）。
+
+        Args:
+            days_back: 回溯天數（1~90）。
+            max_items: 最多回傳筆數（1~100）。
+            market: 選填，"TWSE"/"TPEX"/"US"…；給則只回該市場的大盤新聞。
+
+        Returns:
+            list of {id, title, summary, source, url, sentiment, sentiment_score, published_at}。
+        """
+        if days_back <= 0 or days_back > 90:
+            raise ValidationError(message_zh="days_back 必須在 1~90 之間")
+        if max_items <= 0 or max_items > 100:
+            raise ValidationError(message_zh="max_items 必須在 1~100 之間")
+        since = datetime.now(tz=UTC) - timedelta(days=days_back)
+        async with self.ro() as session:
+            conds = [
+                NewsMetadata.symbol.is_(None),
+                NewsMetadata.published_at >= since,
+            ]
+            if market:
+                conds.append(NewsMetadata.market == market)
+            stmt = (
+                select(NewsMetadata)
+                .where(*conds)
+                .order_by(NewsMetadata.published_at.desc())
+                .limit(max_items)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+        out = [
+            {
+                "id": str(r.id),
+                "title": r.title,
+                "summary": r.summary,
+                "source": r.source,
+                "url": r.url,
+                "sentiment": r.sentiment,
+                "sentiment_score": (
+                    str(r.sentiment_score) if r.sentiment_score is not None else None
+                ),
+                "published_at": r.published_at.isoformat() if r.published_at else None,
+            }
+            for r in rows
+        ]
+        logger.info("tool.get_market_news", days_back=days_back, market=market, rows=len(out))
+        return out
+
     # ════════════════ 5. get_announcements ════════════════
 
     async def get_announcements(
@@ -452,6 +511,11 @@ class ToolRegistry:
                 coroutine=self.get_news,
                 name="get_news",
                 description="取得個股近 N 日新聞元資料；arg: symbol (str), days_back (int, default 7), max_items (int, default 20)",
+            ),
+            StructuredTool.from_function(
+                coroutine=self.get_market_news,
+                name="get_market_news",
+                description="取得近 N 日大盤/總經新聞（非個股）；arg: days_back (int, default 7), max_items (int, default 20), market (str, optional)",
             ),
             StructuredTool.from_function(
                 coroutine=self.get_announcements,

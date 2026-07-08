@@ -60,9 +60,9 @@ def test_beat_schedule_has_us_ohlcv() -> None:
 
 
 def test_beat_schedule_has_cleanup_orphans() -> None:
-    """Orphan cleanup 每日排程（PLAN 15.4）。"""
+    """Orphan cleanup 每小時排程（原 PLAN 15.4 每日；改每小時加速孤兒收斂）。"""
     sched = celery_app.conf.beat_schedule
-    assert "cleanup-orphans-daily" in sched
+    assert "cleanup-orphans-hourly" in sched
     assert "cleanup-idempotency-daily" in sched
 
 

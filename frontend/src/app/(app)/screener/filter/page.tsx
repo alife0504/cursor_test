@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Globe, Layers, LineChart, ListFilter } from "lucide-react";
+import { Filter, Globe, Layers, LineChart, ListFilter } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -122,6 +122,7 @@ export default function ScreenerFilterPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Filter}
         title="選股篩選器"
         description="PE / 殖利率 / EPS 成長 / RSI / 市值多條件複合篩選"
       />

@@ -1,6 +1,10 @@
 import { Inbox, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import {
+  Illustration,
+  type IllustrationName,
+} from "@/components/common/Illustration";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +17,8 @@ interface EmptyStateProps {
   secondaryAction?: { label: string; onClick: () => void };
   /** "card"：完整置中卡片（預設）；"inline"：精簡 inline 樣式（widget 用） */
   variant?: "card" | "inline";
+  /** card variant 的插畫場景（預設 empty；搜尋類頁面可用 search） */
+  illustration?: IllustrationName;
   className?: string;
 }
 
@@ -23,6 +29,7 @@ export function EmptyState({
   action,
   secondaryAction,
   variant = "card",
+  illustration = "empty",
   className,
 }: EmptyStateProps) {
   if (variant === "inline") {
@@ -60,8 +67,14 @@ export function EmptyState({
         className,
       )}
     >
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background text-muted-foreground shadow-soft ring-1 ring-border">
-        <Icon className="h-7 w-7" />
+      <div className="relative">
+        <Illustration name={illustration} className="h-28" />
+        {/* 呼叫端有指定語意 icon 時，以小徽章疊在插畫角落保留語意 */}
+        {Icon !== Inbox ? (
+          <span className="absolute bottom-2 right-6 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-soft ring-4 ring-background">
+            <Icon className="h-4 w-4" />
+          </span>
+        ) : null}
       </div>
       <div className="space-y-1 max-w-md">
         <p className="font-semibold">{title}</p>

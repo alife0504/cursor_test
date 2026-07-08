@@ -34,8 +34,9 @@ describe("estimateCostUsd", () => {
   });
 
   test("Claude Haiku 比 Gemini 貴", () => {
+    // claude-haiku-3-5 已退役(2026-02),現役 alias 為 claude-haiku-4-5
     const cheap = estimateCostUsd("gemini-2.0-flash", 2, 1);
-    const expensive = estimateCostUsd("claude-haiku-3-5", 2, 1);
+    const expensive = estimateCostUsd("claude-haiku-4-5", 2, 1);
     expect(expensive.high).toBeGreaterThan(cheap.high);
   });
 

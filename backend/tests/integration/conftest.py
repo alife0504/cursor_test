@@ -135,10 +135,21 @@ def auth_client(auth_app):
 
 
 def _docker_services_reachable() -> bool:
-    """測試前確認 docker 起來（DB + Redis）。"""
+    """測試前確認 docker 起來（DB + Redis）。
+
+    port 從 settings 讀（跟 app 實際連線一致），不能寫死 5432/6379：
+    Windows 把 6379 列入保留 port，本機 compose 是用 REDIS_PORT=16379 發佈的，
+    寫死會讓整合測試在這台機器永遠 skip。
+    """
     import socket
 
-    for host, port in [("localhost", 5432), ("localhost", 6379)]:
+    from app.core.config import settings
+
+    checks = [
+        (settings.POSTGRES_HOST, int(settings.POSTGRES_PORT)),
+        (settings.REDIS_HOST, int(settings.REDIS_PORT)),
+    ]
+    for host, port in checks:
         try:
             with socket.create_connection((host, port), timeout=1):
                 pass

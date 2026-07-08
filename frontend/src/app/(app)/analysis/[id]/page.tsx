@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAnalysisDebate, useAnalysisDetail } from "@/hooks/useAnalysis";
 import { useAnalysisWS } from "@/hooks/useWebSocket";
 
-const DEFAULT_ANALYSTS = ["market", "fundamental", "news", "sentiment"];
+const DEFAULT_ANALYSTS = ["market", "fundamental", "news", "sentiment", "chip"];
 
 // 分析詳情頁：
 //   - StatusStepper（5 階段視覺化）

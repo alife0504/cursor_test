@@ -37,8 +37,20 @@ def client() -> TestClient:
 
 
 def _docker_services_reachable() -> bool:
-    """簡單 socket 檢測 docker 服務是否可達（不可達就 skip ready 測試）。"""
-    for host, port in [("localhost", 5432), ("localhost", 6379), ("localhost", 6333)]:
+    """簡單 socket 檢測 docker 服務是否可達（不可達就 skip ready 測試）。
+
+    port 必須從 settings 讀（跟 app 實際連線一致）——Windows 本機 compose 用
+    REDIS_PORT=16379 / QDRANT_PORT=16333 高位 port 發佈，寫死 6379 會誤判
+    「服務沒起」，讓 503 測試在 deps 其實可達時執行而失敗。
+    """
+    from app.core.config import settings
+
+    checks = [
+        (settings.POSTGRES_HOST, int(settings.POSTGRES_PORT)),
+        (settings.REDIS_HOST, int(settings.REDIS_PORT)),
+        (settings.QDRANT_HOST, int(settings.QDRANT_PORT)),
+    ]
+    for host, port in checks:
         try:
             with socket.create_connection((host, port), timeout=1):
                 pass

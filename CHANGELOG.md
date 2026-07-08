@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [1.1.0] — Unreleased（開發中，2026-07-06，Opus 4.8）— 自動選股預篩選 + 上游 v0.2.5~v0.3.1 對照修補
+
+> 兩件事：① 依使用者需求新增「自動選股預篩選」（在昂貴的多 Agent pipeline 前先用純數據篩股省 LLM）；② 對照上游 TauricResearch/TradingAgents v0.2.5→v0.3.1 的變動，客觀評估後只套用適合本 TW 版的部分。
+> 驗證：後端 513 unit 全綠、ruff 乾淨；前端 tsc 0 錯。screening 對真實 dev DB 選股正確（basic/low/mid/high = 6/4/3/2）、批次端點端到端測過（screen_level=high → count=2）。
+> 註：本版建立在 v1.0.2 之後一系列尚未提交的工作（Discord 遷移／完整風險架構／per-agent 模型／5 分析師重構）之上。
+
+### Added — 自動選股預篩選（未指定個股時的 fallback）
+- 新 [screening_service.py](backend/app/services/screening_service.py)：`ScreeningService.select_symbols(region, level)` — 取近期日均成交額前 N 檔流動性候選池 → 撈近 90 日 K 算價量指標（MA20/60、RSI14、20 日報酬、波動、量比）→ 純函式 `select_candidates()` 依等級加權評分（百分位排名）取前 N（**保證比例**）。門檻/權重全集中檔案頂部常數，方便微調。
+- config 加 `SCREEN_BASE_COUNT`(6)／`SCREEN_POOL_SIZE`(60)／`SCREEN_LOOKBACK_DAYS`(90)／`SCREEN_MIN_PRICE`／`SCREEN_MIN_AVG_TURNOVER`（floor 全濾空時自動放寬）。
+- `AnalysisCreateRequest` `symbol` 改選填、加 `screen_level`(basic/low/mid/high)＋`market`(TW/US)，model_validator 強制 symbol⊕screen_level 二擇一；回應加 `count/analysis_ids/screened_symbols`。[analysis_router](backend/app/api/v1/analysis_router.py) 分流：有 symbol→單筆；無 symbol→篩選→逐檔建立（美股自動濾掉情緒/籌碼）。
+- 前端 [analysis/new/page.tsx](frontend/src/app/(app)/analysis/new/page.tsx) 加「2. 自動選股篩選」步驟卡（新元件 [ScreenLevelChooser.tsx](frontend/src/components/analysis-new/ScreenLevelChooser.tsx)，對齊 AnalystChooser 風格），原步驟順延；未選股也可送出、批次回應跳 /analysis/history；step2 加 TW/US 篩選市場切換；預估卡按檔數估算。
+
+### Security — 批次分析硬上限 + 全棧相依性審計（深度審查）
+- **批次分析硬上限（重要）**：自動選股雖可篩出低級約 600 檔，但一次對數百檔各建完整多 Agent 分析會瞬間爆掉 $50 月配額 / 跑數小時。新增 `SCREEN_MAX_ANALYSES`(預設 30) 硬上限——[analysis_router](backend/app/api/v1/analysis_router.py) 只實際建立「篩選排序後前 N 檔」的分析，其餘為候選未分析；回應加 `screened_count`（篩出總數），前端預估卡與 toast 誠實顯示「篩選候選 X 檔 / 實際分析前 N 檔」。
+- **相依性審計（pip-audit + npm audit）**：記錄結果、依風險分級（未盲目升級，避免破壞已運行系統）：
+  - 前端 **Next.js 14.2.35** 有 6 個 advisory（DoS / cache-poisoning / WS SSRF / CSP-nonce XSS），修補需升到 **Next 16**（大型破壞性遷移）→ 待辦；自用單人 + 認證後風險較低。
+  - 後端 pip-audit：`starlette`(多 CVE，FastAPI 綁版)、`langgraph 0.2→1.0`(專案刻意 pin <0.3)、`cryptography 45→46`(超出 range)、`pytest 9`(dev) 皆需大版遷移 → 待辦。`pyjwt` CVE 為 transitive、**認證實際用 python-jose 不受影響**。可安全 in-range 微升者（urllib3/idna/pydantic-settings）風險/效益比低，暫緩。
+  - 安全掃描（shell=True/eval/verify=False/弱加密/pickle/yaml.load）：**全 clean**（僅 rate_limit 的 Redis Lua `eval` 為正常用法）。
+
+### Changed — 自動選股 UI/等級重設計（使用者需求）
+- **步驟 2 改版**：① 拿掉「篩選市場 TW/US」切換，改成固定的「**基本篩選(必備)**」說明列（基本 floor 永遠先套用、非可選）。② 移除「基本」可選選項（因必備）。③ **步驟 1 選股 ↔ 步驟 2 自動選股「雙向互斥」**：選了等級 → 步驟 1 選股框反灰；選了個股 → 步驟 2 反灰 +「清除選擇」鈕;點已選等級可取消(回未選)。④ 等級改絕對檔數:**低級約 600 / 中級約 300 / 高級約 150 檔**(原 2/3·1/2·1/3 比例制)。
+- 後端對應：`screen_level` 僅 `low/mid/high`（移除 basic）;`SCREEN_COUNT_LOW/MID/HIGH`(600/300/150) 取代 `SCREEN_BASE_COUNT`;`SCREEN_POOL_SIZE` 提到 1000;`ScreenLevelChooser`/`StockPicker`(加 disabled) 對應調整。前端加**批次成本警語**(檔數多時成本/時間高、留意月配額)。
+- ⚠️ 待辦（真實行情回填後必做）：低級 600 檔＝一次批次建 600 筆完整分析,成本/時間巨大,屆時需加「實際建立筆數上限」或改為「先產清單再逐檔核准」。dev 只有 8 檔股票、天然受限,故目前無立即風險。
+
+### Fixed — 自動選股 relaxed fallback 的 NULL 流動性排序（深度自審發現）
+- [screening_service.py](backend/app/services/screening_service.py) `_liquid_shortlist`：floor 把候選池清空後的 relaxed 放寬查詢原本 `ORDER BY avg(turnover) DESC`，但 NULL turnover 在 Postgres DESC 會 NULLS FIRST 排最前 → 反而優先選到零流動性、無法交易的股票。改加 `HAVING avg(turnover) > 0`，放寬價格/門檻但仍要求正成交額。
+
+### Added — LLM 暫時性錯誤退避重試（對齊上游 v0.3.1 `llm_max_retries`）
+- [fallback_chain.py](backend/app/llm/fallback_chain.py)：同一 provider 對 429／5xx／timeout 等暫時性錯誤指數退避重試（`is_transient_llm_error` 掃例外鏈比對特徵）。只有 Google 金鑰時 fallback chain 無別家可轉，這層是唯一韌性來源。config 加 `LLM_MAX_RETRIES`(2)／`LLM_RETRY_BASE_DELAY_S`(0.8)。非暫時性錯誤（schema）不重試。
+
+### Fixed — Anthropic provider sampling 參數守衛（配合模型目錄刷新）
+- [anthropic_provider.py](backend/app/llm/anthropic_provider.py)：Opus 4.7+／Sonnet 5／Fable 5 移除 sampling 參數，傳 `temperature` 會 400。`generate()` 改為僅在模型接受時才帶 temperature（`_rejects_sampling_params` 前綴判斷）；Haiku 4.5／Sonnet 4.6 照舊。對齊 Anthropic 遷移指南（adaptive thinking only）。
+
+### Added — 模型目錄刷新（對齊上游 v0.3.1 現役 Claude 5 系列）
+- 前端 [llm-models.ts](frontend/src/lib/llm-models.ts) 加 Claude Sonnet 5（$3/$15）、Claude Opus 4.8（$5/$25）；後端 anthropic pricing 加 `claude-sonnet-5`、`claude-fable-5`（$10/$50）。皆標「需有效金鑰」（本環境僅 Google key 有效）。
+
+### Reviewed — 上游變動評估後「不適用本版」（客觀結論，未改）
+對照上游後判定多數修補因本版架構已避開或處理方式不同而不適用，記錄理由以免日後重工：
+- **v0.3.1 #1088 風險/辯論 router crash**：本版兩個 conditional router 各自獨立、path_map 完整涵蓋所有回傳值，結構上不會踩到。
+- **v0.3.1 #1116 news prompt/tool 不一致**：本版 news analyst 不走 LLM tool-calling（Python 先抓資料塞 prompt），且 langchain 工具描述已正確標 `symbol`。
+- **v0.3.0 look-ahead 安全**：本版無歷史回放模式（永遠跑「當下」），不會抓未來資料；`recursion_limit=50` 已等同 max_recur_limit。
+- **v0.2.5 ticker path-traversal**：本版走 DB + validators，無任何以 symbol 組檔案路徑之處。
+- **v0.2.5 grounded sentiment**：本版已用「新聞情緒聚合」自行重構（無 PTT/Reddit 爬蟲），方向不同。
+- 待辦（真正適用但工程量大，暫緩）：v0.3.0「拒絕過期 OHLCV／標註資料新鮮度」——真實行情回填後再做（見 v1.1 待辦）。
+
+---
+
 ## [1.0.2] — 2026-06-03 — 功能接通 + 認證穩定性 + 前端欄位稽核 + 市場數據
 
 > 以 Opus 4.8 視角延續 v1.0.1：聚焦「把宣稱完成但實際失效的功能真正接通」、修補會導致閒置後被強制登出的認證隱憂、全面對齊前端欄位名與後端 schema，並讓大盤指數真正有值。多項修正已於本機接上真實後端（Docker stack）逐頁視覺驗證。

@@ -67,6 +67,7 @@ export default function ScreenerComparePage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={GitCompareArrows}
         title="多股比較"
         description="並排檢視最多 5 支股票的主要指標"
       />

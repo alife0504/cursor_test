@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Briefcase, Building2, Globe, Layers } from "lucide-react";
+import { Briefcase, Building2, Globe, Layers, PieChart } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -116,6 +116,7 @@ export default function InstitutionalPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={PieChart}
         title="三大法人"
         description={
           <>

@@ -68,7 +68,10 @@ class NewsSupportingArticle(BaseModel):
 
 
 class NewsAnalysisResult(BaseModel):
-    """新聞情緒分析結果（NewsAnalyst 輸出）。"""
+    """新聞/公告 + 總經分析結果（NewsAnalyst 輸出）。
+
+    涵蓋個股新聞、重大公告，以及大盤/總體經濟脈絡（macro_context）。
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -77,11 +80,24 @@ class NewsAnalysisResult(BaseModel):
     key_topics: list[str] = Field(min_length=0, max_length=8)
     supporting_articles: list[NewsSupportingArticle] = Field(default_factory=list, max_length=8)
     impact_assessment: str = Field(min_length=10, max_length=500)
+    macro_context: str = Field(
+        default="",
+        max_length=800,
+        description="總經/大盤脈絡：利率、通膨、外資動向、地緣政治對整體市場的影響（可空）",
+    )
+    macro_bias: Literal["偏多", "中性", "偏空", "未提供"] = Field(
+        default="未提供",
+        description="總經環境對整體市場的方向偏向（資料不足時為『未提供』）",
+    )
     confidence: int = Field(ge=0, le=100)
 
 
-class SentimentAnalysisResult(BaseModel):
-    """籌碼面分析結果（SentimentAnalyst 輸出；TW only）。"""
+class ChipAnalysisResult(BaseModel):
+    """籌碼面分析結果（ChipAnalyst 輸出；TW only）。
+
+    註：v1.0 前身為 `SentimentAnalysisResult`（名稱誤植為情緒面，實為籌碼面）。
+    v1.1 正名為 chip；情緒面另立新 `SentimentAnalysisResult`（新聞情緒聚合）。
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -94,6 +110,45 @@ class SentimentAnalysisResult(BaseModel):
     confidence: int = Field(ge=0, le=100)
 
 
+class SentimentAnalysisResult(BaseModel):
+    """情緒面分析結果（SentimentAnalyst 輸出；TW only）。
+
+    v1.1 新設：以「新聞情緒聚合」重建原版社群情緒分析師（本環境無社群爬蟲資料）。
+    綜合個股新聞語氣 + 大盤新聞語氣 + 情緒分數（news_metadata.sentiment_score）
+    推導市場情緒與討論熱度，明確與籌碼面（chip）、純新聞摘要（news）區隔。
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    summary: str = Field(min_length=100, max_length=2000)
+    market_sentiment: Literal["極度樂觀", "樂觀", "中性", "悲觀", "極度悲觀"]
+    sentiment_score: Decimal = Field(
+        ge=Decimal("-1"), le=Decimal("1"), description="綜合情緒分數（-1 極空 ~ +1 極多）"
+    )
+    buzz_level: Literal["高", "中", "低"] = Field(description="新聞討論熱度（近 7 日聲量）")
+    momentum: Literal["轉強", "持平", "轉弱"] = Field(description="情緒相對前期的變化方向")
+    key_drivers: list[str] = Field(min_length=0, max_length=6, description="推動情緒的關鍵題材")
+    contrarian_flag: bool = Field(
+        default=False, description="是否為極端情緒（過熱/過冷）可能反向的警示"
+    )
+    risk_factors: list[str] = Field(min_length=0, max_length=6, default_factory=list)
+    confidence: int = Field(ge=0, le=100)
+
+    @field_validator("sentiment_score", mode="before")
+    @classmethod
+    def _coerce_score(cls, v: object) -> Decimal:
+        if isinstance(v, Decimal):
+            return v
+        if isinstance(v, int | float):
+            return Decimal(str(v))
+        if isinstance(v, str):
+            try:
+                return Decimal(v.strip())
+            except Exception as e:
+                raise ValueError(f"sentiment_score 無法轉 Decimal：{v!r}") from e
+        raise ValueError(f"sentiment_score 不支援的 type: {type(v).__name__}")
+
+
 # ── Researcher / Manager Schemas ────────────────────────
 
 
@@ -104,9 +159,9 @@ class BullArgument(BaseModel):
 
     points: list[str] = Field(min_length=3, max_length=8)
     confidence: int = Field(ge=0, le=100)
-    evidence_from: list[Literal["market", "fundamental", "news", "sentiment"]] = Field(
+    evidence_from: list[Literal["market", "fundamental", "news", "sentiment", "chip"]] = Field(
         min_length=1,
-        max_length=4,
+        max_length=5,
     )
 
 
@@ -117,9 +172,9 @@ class BearArgument(BaseModel):
 
     points: list[str] = Field(min_length=3, max_length=8)
     confidence: int = Field(ge=0, le=100)
-    evidence_from: list[Literal["market", "fundamental", "news", "sentiment"]] = Field(
+    evidence_from: list[Literal["market", "fundamental", "news", "sentiment", "chip"]] = Field(
         min_length=1,
-        max_length=4,
+        max_length=5,
     )
 
 
@@ -257,6 +312,7 @@ class FinalSignal(BaseModel):
 __all__ = [
     "BearArgument",
     "BullArgument",
+    "ChipAnalysisResult",
     "FinalSignal",
     "FundamentalAnalysisResult",
     "MarketAnalysisResult",

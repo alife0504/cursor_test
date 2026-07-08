@@ -1,6 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import { TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 
@@ -97,6 +98,7 @@ export default function StatisticsAccuracyPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={TrendingUp}
         title="準確率分析"
         description="已完成分析的訊號統計（client-side 計算）"
       />

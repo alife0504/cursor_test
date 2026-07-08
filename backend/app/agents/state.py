@@ -68,7 +68,7 @@ class AgentState(TypedDict, total=False):
     agent_models: dict[str, str]
     """各 agent 的模型覆寫（role → model id）；缺的 role 用 llm_model 預設。
 
-    role 對應：market/fundamental/news/sentiment（analyst）、bull/bear、manager、
+    role 對應：market/fundamental/news/sentiment/chip（analyst）、bull/bear、manager、
     trader、aggressive/conservative/neutral（風險辯論）、risk_manager。
     """
     analyst_types: list[str]

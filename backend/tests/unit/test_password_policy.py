@@ -11,6 +11,7 @@ import pytest
 
 from app.core.errors import ValidationError
 from app.core.password_policy import (
+    MAX_BCRYPT_BYTES,
     MAX_LENGTH,
     MIN_LENGTH,
     validate_password,
@@ -34,6 +35,29 @@ def test_password_too_long() -> None:
     with pytest.raises(ValidationError) as exc:
         validate_password("A" + "a1!" * 50)  # > 128
     assert f"≤ {MAX_LENGTH}" in exc.value.get_message()
+
+
+def test_password_over_bcrypt_byte_limit_ascii() -> None:
+    """73+ bytes 的 ASCII 密碼：bcrypt 會靜默截斷 → 設定時必須擋。"""
+    pwd = "Aa1!" + "x" * 70  # 74 chars = 74 bytes，< MAX_LENGTH 但 > 72 bytes
+    with pytest.raises(ValidationError) as exc:
+        validate_password(pwd)
+    assert f"{MAX_BCRYPT_BYTES} bytes" in exc.value.get_message()
+
+
+def test_password_over_bcrypt_byte_limit_cjk() -> None:
+    """中文字每字 3 bytes：24 字 + 前綴就會爆 72 bytes（字元數看起來卻很短）。"""
+    pwd = "Aa1!" + "密" * 23  # 4 + 69 = 73 bytes
+    assert len(pwd) <= MAX_LENGTH
+    with pytest.raises(ValidationError) as exc:
+        validate_password(pwd)
+    assert f"{MAX_BCRYPT_BYTES} bytes" in exc.value.get_message()
+
+
+def test_password_at_bcrypt_byte_limit_ok() -> None:
+    """剛好 72 bytes 應通過（含 4 類字元）。"""
+    pwd = "Aa1!" + "x" * 68  # 72 bytes
+    validate_password(pwd)  # 不應 raise
 
 
 def test_password_lacks_uppercase() -> None:

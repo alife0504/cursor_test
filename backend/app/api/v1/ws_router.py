@@ -14,12 +14,17 @@
 2. IDOR 防護：驗 user 對 analysis 有讀取權限（admin 可看所有；其他 role 只能看自己的）
 3. accept(subprotocol="tradingagents.v1")
 4. 訂閱 Redis db4 pubsub channel `analysis:{id}` → 把每則訊息轉發給 client
-5. WebSocketDisconnect 時 unsubscribe + close pubsub
+5. 併行監看 `websocket.receive()`：client 斷線立即結束 coroutine 並清理 pubsub
+   （若只顧著 pubsub.listen()，channel 閒置時 coroutine 會永遠掛著 → 慢漏）
+6. 每 30s 送 heartbeat event，避免 nginx / proxy 以 idle 為由切斷長分析的連線
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import time
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -37,7 +42,49 @@ logger = get_logger(__name__)
 WS_SUBPROTOCOL = "tradingagents.v1"
 TICKET_PREFIX = "ticket."
 
+# heartbeat：慢分析（LLM 多輪辯論可達數分鐘）期間讓 proxy/nginx 知道連線還活著
+HEARTBEAT_INTERVAL_S = 30.0
+# pubsub 輪詢喚醒間隔：get_message timeout；兼顧「即時轉發」與「可週期檢查 heartbeat」
+PUBSUB_POLL_TIMEOUT_S = 1.0
+
+HEARTBEAT_PAYLOAD = '{"event": "heartbeat", "data": {}}'
+
 router = APIRouter(prefix="/api/v1/ws", tags=["ws"])
+
+
+async def _forward_pubsub(websocket: WebSocket, pubsub: Any) -> None:
+    """pubsub → websocket 轉發迴圈 + 週期 heartbeat。
+
+    用 `get_message(timeout=...)` 而非 `listen()`：listen() 在 channel 閒置時
+    無限阻塞，coroutine 無法週期喚醒送 heartbeat，也無法被上層乾淨取消。
+    """
+    last_beat = time.monotonic()
+    while True:
+        msg = await pubsub.get_message(
+            ignore_subscribe_messages=True, timeout=PUBSUB_POLL_TIMEOUT_S
+        )
+        if msg is not None and msg.get("type") == "message":
+            data = msg.get("data")
+            if data is not None:
+                text = data.decode("utf-8") if isinstance(data, bytes) else str(data)
+                await websocket.send_text(text)
+        now = time.monotonic()
+        if now - last_beat >= HEARTBEAT_INTERVAL_S:
+            await websocket.send_text(HEARTBEAT_PAYLOAD)
+            last_beat = now
+
+
+async def _watch_disconnect(websocket: WebSocket) -> None:
+    """持續 receive 直到 client 斷線（收到 websocket.disconnect 即 return）。
+
+    為什麼需要：轉發迴圈只 send 不 receive，client 斷線（尤其是沒送 close frame
+    的網路中斷）時 send 端未必立刻察覺；這裡收到 disconnect 訊息就讓上層收尾，
+    避免 coroutine + pubsub 訂閱懸掛（慢漏）。client 主動送來的資料一律忽略。
+    """
+    while True:
+        message = await websocket.receive()
+        if message.get("type") == "websocket.disconnect":
+            return
 
 
 def _extract_ticket(subprotocols: list[str]) -> str | None:
@@ -122,14 +169,28 @@ async def ws_analysis(websocket: WebSocket, analysis_id: str) -> None:
     channel = f"analysis:{analysis_uuid}"
     try:
         await pubsub.subscribe(channel)
-        async for msg in pubsub.listen():
-            if msg.get("type") != "message":
-                continue
-            data = msg.get("data")
-            if data is None:
-                continue
-            text = data.decode("utf-8") if isinstance(data, bytes) else str(data)
-            await websocket.send_text(text)
+        forward = asyncio.create_task(_forward_pubsub(websocket, pubsub))
+        watcher = asyncio.create_task(_watch_disconnect(websocket))
+        try:
+            done, _pending = await asyncio.wait(
+                {forward, watcher}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
+        finally:
+            for task in (forward, watcher):
+                if not task.done():
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await task
+        # watcher 正常 return = client 斷線
+        logger.info(
+            "ws.analysis.disconnected",
+            user_id=str(user_id),
+            analysis_id=str(analysis_uuid),
+        )
     except WebSocketDisconnect:
         logger.info(
             "ws.analysis.disconnected",

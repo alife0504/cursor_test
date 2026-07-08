@@ -37,6 +37,23 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+# 現役模型移除了 sampling 參數（temperature/top_p/top_k），傳入會 400。
+# 對齊 Anthropic 遷移指南：Opus 4.7+/Sonnet 5/Fable 5 只接受 adaptive thinking、不吃 temperature。
+_NO_SAMPLING_PREFIXES: tuple[str, ...] = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+
+def _rejects_sampling_params(model: str) -> bool:
+    """該模型是否會拒絕 temperature/top_p/top_k（傳入 → 400）。"""
+    m = (model or "").lower()
+    return any(m.startswith(p) for p in _NO_SAMPLING_PREFIXES)
+
+
 @register_llm_provider
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic provider（預設 claude-haiku-4-5）。"""
@@ -54,6 +71,10 @@ class AnthropicProvider(BaseLLMProvider):
         "claude-sonnet-4-6": (Decimal("0.003"), Decimal("0.015")),
         # Claude Opus 4.8: $5.00/1M input, $25.00/1M output
         "claude-opus-4-8": (Decimal("0.005"), Decimal("0.025")),
+        # Claude Sonnet 5: $3.00/1M input, $15.00/1M output（v1.1 補現役 Claude 5 系列）
+        "claude-sonnet-5": (Decimal("0.003"), Decimal("0.015")),
+        # Claude Fable 5: $10.00/1M input, $50.00/1M output（最強、最貴，niche）
+        "claude-fable-5": (Decimal("0.010"), Decimal("0.050")),
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -101,14 +122,17 @@ class AnthropicProvider(BaseLLMProvider):
         注意：Anthropic 介面把 system 放 top-level（不在 messages list 內）。
         """
         actual_model = model or self.default_model
+        create_kwargs: dict[str, Any] = {
+            "model": actual_model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+        # Opus 4.7+/Sonnet 5/Fable 5 移除 sampling 參數 → 傳 temperature 會 400；其餘照舊傳。
+        if not _rejects_sampling_params(actual_model):
+            create_kwargs["temperature"] = temperature
         try:
-            resp = await self.client.messages.create(
-                model=actual_model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-            )
+            resp = await self.client.messages.create(**create_kwargs)
         except Exception as exc:
             logger.error(
                 "llm.anthropic.call_failed",
@@ -176,4 +200,4 @@ class AnthropicProvider(BaseLLMProvider):
             return False
 
 
-__all__ = ["AnthropicProvider"]
+__all__ = ["AnthropicProvider", "_rejects_sampling_params"]

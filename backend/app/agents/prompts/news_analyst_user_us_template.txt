@@ -9,6 +9,9 @@
 ## 重大公告（近 30 日，主要為 SEC 8-K / 10-Q / 10-K 等）
 {announcements_table}
 
+## 近 7 日大盤/總經新聞（共 {macro_news_count} 篇；非個股，供總經脈絡判讀）
+{macro_news_table}
+
 ## 美股新聞解讀重點
 - earnings beat/miss、guidance raise/cut 對股價的影響通常即時，且常出現 after-hours 缺口。
 - 法人評級調整（upgrade / downgrade by 主要投行）對短線情緒拉動明顯。
@@ -16,6 +19,8 @@
 - 宏觀層面：Fed 利率決議、CPI、NFP 報告會對「整體美股」影響，個股新聞應與宏觀環境合併判讀。
 
 ## 你的任務
-請依上述資料，產出新聞情緒分析（用美股市場慣用框架）。
+請依上述資料，產出新聞情緒分析（用美股市場慣用框架），並將個股新聞放進總經環境中判讀：
+- 若大盤新聞顯示 Fed 利率、CPI、NFP、地緣政治等總經因素，請在 macro_context 摘要（1~3 句）。
+- 依總經環境對整體市場的方向，設定 macro_bias（偏多 / 中性 / 偏空 / 未提供；無總經新聞時填「未提供」）。
 **最後輸出**：繁體中文綜述 + ```json``` 區塊（符合 NewsAnalysisResult schema）。
 supporting_articles 僅可從上述新聞清單中挑選。

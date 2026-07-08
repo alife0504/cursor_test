@@ -174,3 +174,63 @@ async def test_generate_compatibility_interface() -> None:
     resp = await chain.generate("s", "u")
     assert isinstance(resp, LLMResponse)
     assert chain.last_used_provider == "google"
+
+
+# ── 暫時性錯誤退避重試（v1.1；上游 v0.3.1 llm_max_retries）────────
+
+
+class _FlakyProvider(_FakeProvider):
+    """前 fail_times 次拋暫時性錯誤，之後成功。"""
+
+    def __init__(self, name: str, *, fail_times: int, exc: BaseException) -> None:
+        super().__init__(name)
+        self._fail_times = fail_times
+        self._exc = exc
+
+    async def generate(self, *args: Any, **kwargs: Any) -> LLMResponse:
+        self.call_count += 1
+        if self.call_count <= self._fail_times:
+            raise self._exc
+        return LLMResponse(
+            content=f"reply from {self.name}",
+            tool_calls=[],
+            usage=TokenUsage(
+                input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=Decimal("0.001")
+            ),
+            model=self.default_model,
+            finish_reason="stop",
+        )
+
+
+@pytest.mark.asyncio
+async def test_transient_error_retries_same_provider_then_succeeds() -> None:
+    """429 暫時性錯誤 → 同 provider 退避重試後成功（單一 provider 也能撐住）。"""
+    g = _FlakyProvider("google", fail_times=2, exc=RuntimeError("429 rate limit exceeded"))
+    chain = LLMFallbackChain({"google": g}, primary="google", max_retries=2, retry_base_delay=0.0)
+    resp, used = await chain.generate_with_chain("google", "s", "u")
+    assert used == "google"
+    assert resp.content == "reply from google"
+    assert g.call_count == 3  # 2 次失敗 + 第 3 次成功
+
+
+@pytest.mark.asyncio
+async def test_transient_error_exhausts_retries_and_raises() -> None:
+    """單一 provider 持續 429 → 用盡重試（call_count == max_retries+1）後 raise。"""
+    g = _FakeProvider("google", raise_exc=RuntimeError("503 service unavailable"))
+    chain = LLMFallbackChain({"google": g}, primary="google", max_retries=2, retry_base_delay=0.0)
+    with pytest.raises(ExternalServiceError):
+        await chain.generate_with_chain("google", "s", "u")
+    assert g.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_non_transient_error_not_retried() -> None:
+    """非暫時性錯誤（schema/程式錯）→ 不重試，直接算失敗（call_count == 1）。"""
+    g = _FakeProvider("google", raise_exc=ValueError("bad schema"))
+    o = _FakeProvider("openai")
+    chain = LLMFallbackChain(
+        {"google": g, "openai": o}, primary="google", max_retries=2, retry_base_delay=0.0
+    )
+    _resp, used = await chain.generate_with_chain("google", "s", "u")
+    assert used == "openai"
+    assert g.call_count == 1  # 不重試

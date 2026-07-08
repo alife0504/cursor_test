@@ -170,6 +170,11 @@ const config: Config = {
           "0%, 100%": { boxShadow: "0 0 0 0 hsl(var(--state-running) / 0.4)" },
           "50%": { boxShadow: "0 0 0 6px hsl(var(--state-running) / 0)" },
         },
+        // 插畫元素的緩慢上下漂浮（Illustration.tsx 用）
+        "float-y": {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-5px)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -177,6 +182,7 @@ const config: Config = {
         "fade-in": "fade-in 0.2s ease-out",
         shimmer: "shimmer 2s linear infinite",
         "pulse-glow": "pulse-glow 1.6s ease-in-out infinite",
+        "float-y": "float-y 3.6s ease-in-out infinite",
       },
     },
   },

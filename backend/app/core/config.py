@@ -71,6 +71,31 @@ class Settings(BaseSettings):
     STARTUP_PROBE_DELAY_S: float = 2.0
     """啟動探測每次重試的基礎退避秒數（實際 = min(delay×attempt, 10)）。"""
 
+    # ── 自動選股預篩選（v1.1；未指定個股時依等級批次選股）────────
+    # 全部是「條件」，刻意設成可調（screening_service 依這些算候選數 / floor）。
+    # 「基本」是必備 floor（剔除停牌/低流動性/雞蛋水餃股），永遠先套用；
+    # 低/中/高是使用者可選等級，各自保留約 N 檔（絕對數，非比例）。
+    SCREEN_COUNT_LOW: int = 600
+    """低級等級保留檔數（約 600）。"""
+    SCREEN_COUNT_MID: int = 300
+    """中級等級保留檔數（約 300）。"""
+    SCREEN_COUNT_HIGH: int = 150
+    """高級等級保留檔數（約 150）。"""
+    SCREEN_POOL_SIZE: int = 1000
+    """流動性候選池大小：先取近期日均成交額前 N 檔算指標評分，再取各等級 top。
+    需 ≥ SCREEN_COUNT_LOW 才能產出低級的量。"""
+    SCREEN_MAX_ANALYSES: int = 30
+    """⚠️ 批次實際建立分析的硬上限（保護月配額 / 時間）。
+    自動選股雖可篩出低級約 600 檔，但一次對 600 檔各跑完整多 Agent 分析成本/時間巨大、
+    可能瞬間爆掉月配額，故只實際建立「篩選排序後前 N 檔」的分析，其餘為候選未分析。
+    自用級預設保守；要一次跑更多再調高。"""
+    SCREEN_LOOKBACK_DAYS: int = 90
+    """算指標往回抓幾天日 K（相對資料最新交易日，非今天）。"""
+    SCREEN_MIN_PRICE: float = 5.0
+    """價格 floor：低於此收盤價視為雞蛋水餃股剔除（floor 全濾空時自動放寬）。"""
+    SCREEN_MIN_AVG_TURNOVER: float = 5_000_000.0
+    """流動性 floor：近期日均成交額（元）低於此剔除（floor 全濾空時自動放寬）。"""
+
     # ── DB（連線池參數依第 14.1 章） ────────────────────────
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -119,6 +144,12 @@ class Settings(BaseSettings):
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
     LLM_MONTHLY_BUDGET_USD_DEFAULT: Decimal = Decimal("50.00")
     """用戶預設月預算（每用戶可個別覆寫）。"""
+    LLM_MAX_RETRIES: int = 2
+    """單一 provider 對「暫時性錯誤」（429 / 5xx / timeout）的退避重試次數。
+    對齊上游 v0.3.1 llm_max_retries：只有 Google 金鑰時，一次 429 突發不再直接炸掉整輪分析
+    （fallback chain 沒別家可轉時尤其重要）。0＝不重試（回舊行為）。"""
+    LLM_RETRY_BASE_DELAY_S: float = 0.8
+    """暫時性錯誤重試的基礎退避秒數（實際 = base × 2^attempt，指數退避）。"""
 
     # ── 通知（P18） ──────────────────────────────────────────
     DISCORD_WEBHOOK_URL: SecretStr | None = None

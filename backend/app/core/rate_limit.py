@@ -134,14 +134,21 @@ class RateRule:
 L1_GLOBAL = RateRule(layer="L1", key_prefix="rate:ip:", limit=300, window_sec=60)
 L2_LOGIN = RateRule(layer="L2", key_prefix="rate:login:", limit=5, window_sec=60)
 L3_PWDRESET = RateRule(layer="L3", key_prefix="rate:pwdreset:", limit=3, window_sec=3600)
+# L3b：reset confirm 端點（token 暴力嘗試面）；比 L3 寬鬆——合法使用者可能
+# 因密碼策略不過而重試幾次，3/hr 會誤傷
+L3B_PWDRESET_CONFIRM = RateRule(
+    layer="L3", key_prefix="rate:pwdreset_confirm:", limit=10, window_sec=3600
+)
 L4_USER = RateRule(layer="L4", key_prefix="rate:user:", limit=60, window_sec=60)
+# L5 由 analysis_router.create_analysis 於 endpoint 層執行（需 user_id，middleware
+# 階段 JWT 尚未解碼；且要放在 idempotent replay 之後才不會 replay 也扣次數）
 L5_ANALYSIS = RateRule(layer="L5", key_prefix="rate:analysis:", limit=10, window_sec=3600)
 
 
-# 對應的 path matchers
+# 對應的 path matchers（exact match）
 LOGIN_PATHS = {"/api/v1/auth/login"}
 PWDRESET_PATHS = {"/api/v1/auth/password-reset"}
-ANALYSIS_PATHS = {"/api/v1/analysis/start"}  # 預留 P10/11
+PWDRESET_CONFIRM_PATHS = {"/api/v1/auth/password-reset/confirm"}
 
 # 不做任何 rate limit 的路徑（health / docs / 內部測試）
 EXEMPT_PATHS_PREFIXES = (
@@ -234,8 +241,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if not r.allowed:
                 return self._rate_limited_response(request, L3_PWDRESET, r)
 
-        # L4 / L5：依賴 user_id；middleware 還沒解 JWT，留給 endpoint 層或 P11 重排
-        # 不在此預先做（避免重複解 JWT）
+        # L3b: /auth/password-reset/confirm（reset token 暴力嘗試防護）
+        if request.url.path in PWDRESET_CONFIRM_PATHS and request.method == "POST":
+            r = await limiter.check(
+                f"{L3B_PWDRESET_CONFIRM.key_prefix}{ip}",
+                limit=L3B_PWDRESET_CONFIRM.limit,
+                window_sec=L3B_PWDRESET_CONFIRM.window_sec,
+            )
+            if not r.allowed:
+                return self._rate_limited_response(request, L3B_PWDRESET_CONFIRM, r)
+
+        # L4 / L5：依賴 user_id；middleware 還沒解 JWT，不在此預先做（避免重複解 JWT）。
+        # L5 已接在 analysis_router.create_analysis endpoint 層；
+        # L4 未強制（單人自用平台 + dashboard 一頁 ~9 請求，60/min 誤傷風險 > 效益）。
 
         return await call_next(request)
 
@@ -305,6 +323,7 @@ __all__ = [
     "EXEMPT_PATHS_PREFIXES",
     "L1_GLOBAL",
     "L2_LOGIN",
+    "L3B_PWDRESET_CONFIRM",
     "L3_PWDRESET",
     "L4_USER",
     "L5_ANALYSIS",

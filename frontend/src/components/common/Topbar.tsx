@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
+import { Breadcrumbs } from "@/components/common/Breadcrumbs";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { StockPicker } from "@/components/common/StockPicker";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -54,7 +55,7 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-4">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         {/* Mobile 漢堡 */}
         <Button
           variant="ghost"
@@ -74,6 +75,8 @@ export function Topbar() {
             TradingAgents
           </span>
         </div>
+        {/* 桌機：麵包屑填左側（原本渲染在內容區第一行，上移後內容區省一行） */}
+        <Breadcrumbs alwaysShow className="hidden min-w-0 md:flex" />
       </div>
 
       <div className="flex items-center gap-1.5 md:gap-2">

@@ -73,6 +73,7 @@ export default function StatisticsModelsPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Cpu}
         title="模型比較"
         description="各 LLM 模型使用次數與平均成本（client-side 聚合）"
       />

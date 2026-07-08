@@ -3,6 +3,7 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Illustration } from "@/components/common/Illustration";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -97,9 +98,7 @@ export function ErrorState({
         className,
       )}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-        <AlertCircle className="h-6 w-6" />
-      </div>
+      <Illustration name="error" className="h-24" />
       <div className="space-y-1">
         <p className="font-semibold">{title}</p>
         {description ? (

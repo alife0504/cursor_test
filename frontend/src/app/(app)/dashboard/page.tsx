@@ -2,11 +2,12 @@ import {
   Activity,
   AlertCircle,
   ListChecks,
+  Sparkles,
   Star,
   TrendingUp,
 } from "lucide-react";
 
-import { PageHeader } from "@/components/common/PageHeader";
+import { Illustration } from "@/components/common/Illustration";
 import { KpiRow } from "@/components/dashboard/KpiRow";
 import { MarketIndexMiniChart } from "@/components/dashboard/MarketIndexMiniChart";
 import { PendingOrders } from "@/components/dashboard/PendingOrders";
@@ -32,19 +33,38 @@ function TodayString() {
   });
 }
 
+function Greeting() {
+  const h = new Date().getHours();
+  if (h < 5) return "夜深了";
+  if (h < 11) return "早安";
+  if (h < 14) return "午安";
+  if (h < 18) return "午後好";
+  return "晚安";
+}
+
 // Dashboard：4-col KPI 牆 + 大盤趨勢 + 今日預警 + 最近分析 + 自選股 + 快速行動
 export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="儀表板"
-        description={
-          <span>
-            今日 <span className="text-foreground">{TodayString()}</span>
-            ：訊號、市場概況、待辦
+      {/* 品牌 hero 橫幅：時段問候 + 多 Agent 網絡插畫（純顯示，資訊與原頁首等價） */}
+      <section className="relative overflow-hidden rounded-2xl bg-brand-gradient px-6 py-6 text-primary-foreground shadow-lift sm:px-8">
+        <div className="pointer-events-none absolute -right-12 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+        <Illustration
+          name="agents"
+          className="pointer-events-none absolute inset-y-3 right-4 hidden opacity-90 md:block"
+        />
+        <div className="relative z-10 md:pr-72">
+          <span className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-primary-foreground/85 ring-1 ring-inset ring-white/15">
+            <Sparkles className="h-3 w-3" /> 多 Agent AI 投資分析
           </span>
-        }
-      />
+          <h1 className="text-2xl font-bold tracking-tight md:text-[26px]">
+            {Greeting()}，歡迎回來
+          </h1>
+          <p className="mt-1 text-sm text-primary-foreground/70">
+            今日 {TodayString()}：訊號、市場概況、待辦一次掌握
+          </p>
+        </div>
+      </section>
 
       {/* 1. 頂部 KPI 牆 */}
       <KpiRow />

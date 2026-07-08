@@ -62,6 +62,7 @@ export default function AdminPipelinePage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
+        icon={Database}
         title="資料管線管理"
         description="Celery Dead Letter Queue 與資料來源同步狀態"
         actions={
