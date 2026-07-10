@@ -52,15 +52,19 @@ export function useUpdateNotificationSettings() {
 export interface SendTestNotificationVars {
   channel: "discord" | "telegram";
   message: string;
+  /** 是否僅寫測試紀錄不真正外送；預設 false＝實際發送（測試鈕本意就是驗證 webhook 可用） */
+  dry_run?: boolean;
 }
 
 export function useSendTestNotification() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: SendTestNotificationVars) => {
+      // 後端 dry_run 預設 True（只寫 log 不外送）→ 測試永遠驗不到 webhook。
+      // 明確帶 dry_run:false 讓「測試」真的送出到 Discord/Telegram。
       const res = await api.post<ApiEnvelope<NotificationLog>>(
         "/notifications/test",
-        vars,
+        { dry_run: false, ...vars },
       );
       return res.data.data;
     },

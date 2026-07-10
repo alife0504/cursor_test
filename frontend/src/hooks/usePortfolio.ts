@@ -1,14 +1,16 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { useOrders } from "@/hooks/useOrders";
+import { api, type ApiEnvelope } from "@/lib/api";
 import type { OrderSummary } from "@/lib/api-types";
 
 // Phase 17 § J / § K:Portfolio
-//   - 後端 P17 未補 portfolio/positions / portfolio/history 專屬 endpoint(v7.0 不擴大後端)
-//   - 客戶端聚合:從 orders 篩 APPROVED 算 positions、用全部 orders 當 trade history
-//   - v1.1 若後端加 endpoint,把這個 hook 換掉即可
+//   - positions 改讀後端權威 GET /portfolio/positions（核准時已淨額合併的 portfolio_positions）。
+//     原「最新 100 筆 APPROVED 訂單客戶端重算」對 >100 單帳號會截斷最舊開倉單→幻影空單、均價失真。
+//   - trade history 仍用 orders（歷史流水，非淨額）。
 
 export interface PortfolioPosition {
   symbol: string;
@@ -16,58 +18,23 @@ export interface PortfolioPosition {
   qty: number;
   avg_cost: string;
   total_cost: string;
+  realized_pnl?: string;
 }
 
-// 從 orders 計算每個 symbol 的 net position
-export function computePositions(orders: OrderSummary[]): PortfolioPosition[] {
-  const map = new Map<string, PortfolioPosition>();
-  for (const o of orders) {
-    if (o.status !== "APPROVED") continue;
-    const key = `${o.symbol}|${o.market}`;
-    const sign = o.side === "BUY" ? 1 : -1;
-    const qty = sign * o.qty;
-    const price = Number(o.target_price ?? 0);
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, {
-        symbol: o.symbol,
-        market: o.market,
-        qty,
-        avg_cost: price.toString(),
-        total_cost: (price * qty).toString(),
-      });
-    } else {
-      const newQty = existing.qty + qty;
-      // BUY 累計成本;SELL 不增加 total_cost
-      const newTotalCost =
-        sign > 0
-          ? Number(existing.total_cost) + price * qty
-          : Number(existing.total_cost);
-      const newAvg = newQty !== 0 ? newTotalCost / newQty : 0;
-      map.set(key, {
-        symbol: o.symbol,
-        market: o.market,
-        qty: newQty,
-        avg_cost: newAvg.toString(),
-        total_cost: newTotalCost.toString(),
-      });
-    }
-  }
-  // 過濾 qty=0(已平倉)
-  return Array.from(map.values()).filter((p) => p.qty !== 0);
-}
-
-// hook:positions = 聚合 APPROVED orders
+// hook:positions = 讀後端權威 portfolio_positions（per-user、核准時已淨額合併）
 export function usePositions() {
-  const orders = useOrders({ status: "APPROVED", limit: 100 });
-  const items = orders.data?.items;
-  const positions = useMemo(() => {
-    if (!items) return [];
-    return computePositions(items);
-  }, [items]);
+  const query = useQuery({
+    queryKey: ["portfolio", "positions"],
+    staleTime: 30_000,
+    queryFn: async () => {
+      const res =
+        await api.get<ApiEnvelope<PortfolioPosition[]>>("/portfolio/positions");
+      return res.data.data ?? [];
+    },
+  });
   return {
-    ...orders,
-    positions,
+    ...query,
+    positions: query.data ?? [],
   };
 }
 

@@ -4,6 +4,7 @@ import { TrendingUp } from "lucide-react";
 import { useState } from "react";
 
 import { ChartContainer } from "@/components/common/ChartContainer";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { PieChart } from "@/components/common/PieChart";
@@ -18,7 +19,7 @@ import { useMarketOverview } from "@/hooks/useMarket";
 //   - 漲幅 / 跌幅 / 成交量榜
 export default function MarketOverviewPage() {
   const [market, setMarket] = useState<"TW" | "US">("TW");
-  const { data, isLoading } = useMarketOverview(market);
+  const { data, isLoading, error, refetch } = useMarketOverview(market);
 
   // 後端 indices 是 IndexQuote[]（已依 market 回對應指數）；直接 map，欄位名以後端為準。
   const indexes = (data?.indices ?? []).map((q) => ({
@@ -46,6 +47,18 @@ export default function MarketOverviewPage() {
         actions={<MarketSwitcher value={market} onChange={setMarket} />}
       />
 
+      {error && !data ? (
+        // 載入失敗時給明確錯誤 + 重試，而非靜默顯示 0 家數/空 pie（誤導成「今日零波動」）
+        <ErrorState
+          title="市場總覽載入失敗"
+          description="請稍後再試，或確認後端服務是否正常。"
+          error={error}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      ) : (
+        <>
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {isLoading ? (
           <LoadingSkeleton rows={3} />
@@ -102,6 +115,8 @@ export default function MarketOverviewPage() {
           <MoversTable type="volume" market={market} />
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }

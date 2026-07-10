@@ -40,6 +40,7 @@ export default function NotificationsPage() {
 
   const [discordWebhook, setDiscordWebhook] = useState<string>("");
   const [chatId, setChatId] = useState<string>("");
+  const [botToken, setBotToken] = useState<string>("");
   const [events, setEvents] = useState<string[]>([]);
   const [emailEnabled, setEmailEnabled] = useState<boolean>(false);
   const [qhStart, setQhStart] = useState<string>("");
@@ -67,12 +68,15 @@ export default function NotificationsPage() {
         // 空字串 = 不更新(避免 PUT 把使用者已存的 webhook 清掉)
         discord_webhook: discordWebhook === "" ? null : discordWebhook,
         telegram_chat_id: chatId === "" ? null : chatId,
+        // 空字串＝不更新（保留已存 token，比照 discord webhook 語意）
+        telegram_bot_token: botToken === "" ? null : botToken,
         email_enabled: emailEnabled,
         enabled_events: events,
         quiet_hours_start: qhStart || null,
         quiet_hours_end: qhEnd || null,
       });
       setDiscordWebhook("");
+      setBotToken("");
       toast.success("通知設定已儲存");
     } catch (e) {
       toast.error(`儲存失敗:${(e as Error).message}`);
@@ -138,6 +142,23 @@ export default function NotificationsPage() {
             </Button>
           </div>
 
+          {/* Telegram bot token */}
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="tg-bot-token" className="text-xs">
+              Telegram bot token
+              {settings.data?.telegram_bot_token_set ? (
+                <span className="ml-1 text-muted-foreground">（已設定，留空不變）</span>
+              ) : null}
+            </Label>
+            <Input
+              id="tg-bot-token"
+              type="password"
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder="例:123456:AA...（BotFather 取得）"
+            />
+          </div>
+
           {/* Telegram chat id */}
           <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
             <div className="flex flex-col gap-1">
@@ -152,7 +173,11 @@ export default function NotificationsPage() {
             <Button
               variant="outline"
               onClick={() => handleTest("telegram")}
-              disabled={testMut.isPending || !chatId}
+              disabled={
+                testMut.isPending ||
+                !chatId ||
+                !(settings.data?.telegram_bot_token_set || botToken)
+              }
             >
               測試 Telegram
             </Button>

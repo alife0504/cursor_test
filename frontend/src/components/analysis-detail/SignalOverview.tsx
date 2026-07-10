@@ -109,6 +109,14 @@ function RiskRewardLine({
   const stopX = toX(stopPct);
   const takeX = toX(takePct);
   const isBuy = signal === "BUY";
+  // 漸層端點綁定 stop/take 實際位置：停損端永遠 bear 色、停利端永遠 bull 色。
+  // BUY 時 stop 在左（bear→bull）、SELL 時 stop 在右（bull→bear），避免 SELL 色帶與 marker 顛倒。
+  const stopOnLeft = stopX <= takeX;
+  const zoneGradient = `linear-gradient(to right, ${
+    stopOnLeft ? "hsl(var(--bear) / 0.4)" : "hsl(var(--bull) / 0.4)"
+  }, hsl(var(--warning) / 0.4), ${
+    stopOnLeft ? "hsl(var(--bull) / 0.4)" : "hsl(var(--bear) / 0.4)"
+  })`;
 
   return (
     <div className="relative h-12 w-full">
@@ -119,8 +127,7 @@ function RiskRewardLine({
         style={{
           left: `${Math.min(stopX, takeX)}%`,
           right: `${100 - Math.max(stopX, takeX)}%`,
-          background:
-            "linear-gradient(to right, hsl(var(--bear) / 0.4), hsl(var(--warning) / 0.4), hsl(var(--bull) / 0.4))",
+          background: zoneGradient,
         }}
       />
 
@@ -270,12 +277,26 @@ export function SignalOverview({ analysis }: SignalOverviewProps) {
               signal={analysis.signal ?? null}
             />
             <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
-                <TrendingDown className="h-3 w-3 text-bear" /> 風險區
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <TrendingUp className="h-3 w-3 text-bull" /> 報酬區
-              </span>
+              {/* SELL（做空）時停損在右、停利在左 → 圖例左右對調，與色帶一致 */}
+              {analysis.signal === "SELL" ? (
+                <>
+                  <span className="inline-flex items-center gap-1">
+                    <TrendingUp className="h-3 w-3 text-bull" /> 報酬區
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <TrendingDown className="h-3 w-3 text-bear" /> 風險區
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="inline-flex items-center gap-1">
+                    <TrendingDown className="h-3 w-3 text-bear" /> 風險區
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <TrendingUp className="h-3 w-3 text-bull" /> 報酬區
+                  </span>
+                </>
+              )}
             </div>
           </div>
         ) : null}

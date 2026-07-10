@@ -26,12 +26,14 @@ const LABELS: Record<(typeof ORDER)[number], string> = {
   very_negative: "極負面",
 };
 
+// 台股慣例：紅=正面(利多/bull)、綠=負面(利空/bear)，與右側情緒表格 SENTIMENT_LABEL_MAP 一致。
+// 用設計 token（hsl var）而非硬編碼 hex，才會隨深色模式調整、且不與全站「紅漲綠跌」相矛盾。
 const COLORS: Record<(typeof ORDER)[number], string> = {
-  very_positive: "#16a34a",
-  positive: "#84cc16",
-  neutral: "#a3a3a3",
-  negative: "#f97316",
-  very_negative: "#dc2626",
+  very_positive: "hsl(var(--bull))",
+  positive: "hsl(var(--bull) / 0.6)",
+  neutral: "hsl(var(--flat))",
+  negative: "hsl(var(--bear) / 0.6)",
+  very_negative: "hsl(var(--bear))",
 };
 
 export function SentimentBar({ items }: { items: NewsItem[] }) {

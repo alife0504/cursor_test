@@ -39,8 +39,14 @@ interface UseAnalysisWSResult<T> {
 function resolveWsBase(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window !== "undefined") {
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    return `${proto}://${window.location.hostname}:8000`;
+    const isHttps = window.location.protocol === "https:";
+    const proto = isHttps ? "wss" : "ws";
+    // https（prod，通常在 nginx 後、以 path 反代 /api/v1/ws）→ 同源、不帶 :8000（否則連
+    // wss://host:8000，該 port 對外未開 → 連線被拒、即時進度凍住）。
+    // http（dev，後端直接發佈 8000）→ 帶 :8000。
+    return isHttps
+      ? `${proto}://${window.location.host}`
+      : `${proto}://${window.location.hostname}:8000`;
   }
   return "ws://localhost:8000";
 }

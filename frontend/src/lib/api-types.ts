@@ -374,6 +374,7 @@ export interface NotificationSettings {
   discord_webhook_masked?: string | null;
   discord_webhook_set?: boolean;
   telegram_chat_id?: string | null;
+  telegram_bot_token_set?: boolean;
   email_enabled: boolean;
   enabled_channels?: string[] | null;
   enabled_events?: string[] | null;
@@ -385,6 +386,7 @@ export interface NotificationSettings {
 export interface NotificationSettingsUpdate {
   discord_webhook?: string | null;
   telegram_chat_id?: string | null;
+  telegram_bot_token?: string | null;
   email_enabled?: boolean | null;
   enabled_channels?: string[] | null;
   enabled_events?: string[] | null;

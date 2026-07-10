@@ -10,7 +10,7 @@ import { KpiCard } from "@/components/common/KpiCard";
 import { NumberFormat } from "@/components/common/NumberFormat";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
-import { PercentFormat } from "@/components/common/PercentFormat";
+import { PriceDelta } from "@/components/common/PriceDelta";
 import {
   loadLastFilters,
   ScreenerForm,
@@ -81,15 +81,16 @@ export default function ScreenerFilterPage() {
       {
         accessorKey: "dividend_yield",
         header: "殖利率",
+        // 後端契約為「百分比數字」(5 表 5%)；用 raw 模式（不再 ×100），避免顯示 500%
         cell: ({ row }) => (
-          <PercentFormat value={row.original.dividend_yield ?? null} colored />
+          <PriceDelta value={row.original.dividend_yield ?? null} mode="raw" />
         ),
       },
       {
         accessorKey: "eps_growth",
         header: "EPS 成長",
         cell: ({ row }) => (
-          <PercentFormat value={row.original.eps_growth ?? null} colored />
+          <PriceDelta value={row.original.eps_growth ?? null} mode="raw" />
         ),
       },
       {

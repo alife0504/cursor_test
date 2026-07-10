@@ -8,7 +8,7 @@ import { DateFormat } from "@/components/common/DateFormat";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { SignalBadge } from "@/components/common/SignalBadge";
 import { Button } from "@/components/ui/button";
-import { API_BASE_URL } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { AnalysisDetail } from "@/lib/api-types";
 
 interface AnalysisHeaderProps {
@@ -24,27 +24,43 @@ export function AnalysisHeader({
   wsStatus,
   onRefresh,
 }: AnalysisHeaderProps) {
-  const exportBase = `${API_BASE_URL}/exports/${analysis.id}`;
   const canExport = analysis.status === "completed";
   const [downloading, setDownloading] = useState<Fmt | null>(null);
 
-  const openExport = (fmt: Fmt) => {
+  const openExport = async (fmt: Fmt) => {
     if (!canExport) {
       toast.error("分析尚未完成，暫時無法匯出");
       return;
     }
     if (typeof window === "undefined") return;
     setDownloading(fmt);
-    // 用 anchor click 觸發下載；500ms 後重置 loading state（不阻塞）
-    const url = `${exportBase}?format=${fmt}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => setDownloading((cur) => (cur === fmt ? null : cur)), 800);
+    // 用帶 access token 的 axios 取檔再本地下載。原本 <a> 原生導航走不到 axios interceptor、
+    // 不帶 Authorization header，後端 get_current_user 收不到 token → 永遠 401（三種格式全失效）。
+    try {
+      const res = await api.get(`/exports/${analysis.id}`, {
+        params: { format: fmt },
+        responseType: "blob",
+      });
+      const blob = res.data as Blob;
+      // 檔名優先取後端 Content-Disposition，否則以標的組出
+      const disp = String(res.headers?.["content-disposition"] || "");
+      const match = disp.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+      const filename = match
+        ? decodeURIComponent(match[1])
+        : `${analysis.symbol}_analysis.${fmt}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("匯出失敗，請稍後再試");
+    } finally {
+      setDownloading((cur) => (cur === fmt ? null : cur));
+    }
   };
 
   const copyShareLink = async () => {
