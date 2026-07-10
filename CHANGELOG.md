@@ -12,6 +12,71 @@ Breaking changes within the 0.x line are called out explicitly.
 > 驗證：後端 513 unit 全綠、ruff 乾淨；前端 tsc 0 錯。screening 對真實 dev DB 選股正確（basic/low/mid/high = 6/4/3/2）、批次端點端到端測過（screen_level=high → count=2）。
 > 註：本版建立在 v1.0.2 之後一系列尚未提交的工作（Discord 遷移／完整風險架構／per-agent 模型／5 分析師重構）之上。
 
+### 深度審計修補（2026-07-10，Opus 4.8）— 11 維度對抗式審計，41 項存活發現逐一修補
+
+> 以多 Agent 對抗式審計（11 維度並行找碴 + 每項發現派懷疑者查證，駁回 9 項假陽性）全面檢視安全／相依性／連貫性／流暢性／台股交易正確性。共修補 30+ 處。
+> 驗證：後端 513 unit + 41 integration（含稽核鏈/持倉/refresh/串流）全綠、ruff 乾淨、bandit 0 MEDIUM+；前端 tsc 0、vitest 213、ESLint 乾淨；migration 0019/0020 對真實 TimescaleDB 套用成功並驗證效果。
+
+#### Security
+- **日誌洩密（HIGH）**：httpx/httpcore 在 INFO 會印含密鑰的完整請求 URL（Telegram/Discord/資料源 API key 嵌在 path/query），繞過 structlog 遮蔽明文寫進 stdout。`configure_logging()` 強制把 httpx/httpcore/openai/anthropic/google/qdrant 等 client logger 拉到 WARNING。⚠️ 已外洩者需輪替金鑰。
+- **稽核鏈永久保存 + 尾端偵測（HIGH）**：`audit_logs` 原 1 年 retention 會靜默 drop 舊 chunk 破壞「不可竄改鏈」且每日誤報 CRITICAL。migration **0019** 移除該 retention（永久保存）、新增 append-only `audit_checkpoints`（對 ta_service_rw REVOKE UPDATE/DELETE/TRUNCATE）；`verify_chain` 改 LAG 順序驗證（抓中段竄改）＋ `detect_tail_truncation()` 以 checkpoint 錨定偵測「刪最新數筆」；`verify_audit` 驗證通過才寫新 checkpoint。
+- **免信箱帳號接管原語**：`/auth/password-reset` 在非 prod 直接回傳明文 reset token。新增 `EXPOSE_RESET_TOKEN_IN_RESPONSE`（預設 False、prod 恆不回傳），僅測試/本機手測明確 opt-in。
+- **密碼重置任務重投防護 + 批次去重**：見下 Reliability。
+- **prod 反代真實 IP**：`.env.prod.example` 補 `TRUST_PROXY_HEADERS=true`/`TRUSTED_PROXY_HOPS=1`（否則 nginx 後 per-IP 限流與稽核 IP 全塌成單一 IP）。
+- **CI bandit 恢復把關**：`security.yml` 移除 `bandit ... || true`（原本掃出 HIGH 也永遠 exit 0）；4 個 B104 誤報（IP 字面值非 socket bind）加 `# nosec B104`。
+- **強制改密守衛**：middleware 只看 cookie、後端不擋 → 可輸網址繞過首次強制改密。AuthBootstrap 取得 /me 後依 `must_change_password`/`onboarding_completed` 強制導向。
+
+#### Fixed — 台股交易正確性
+- **下單張數四捨五入超預算**：`calculate_qty` 用 `to_integral_value()`（ROUND_HALF_EVEN）→ price=50.008 時買 2 張而非 1 張、金額 100% 超預算。改明示 `ROUND_DOWN` 無條件捨去；加跨整張邊界回歸測試。
+- **`position_size_pct` 落地**：風險經理的加/減碼強弱原本完全不影響下單股數。改為以其縮放名目金額（缺值＝滿倉、向後相容）。
+- **模擬持倉淨額合併**：`add_portfolio_from_order` 原本每次核准都 INSERT 新列、SELL 憑空造負股數、realized_pnl/closed_at 永不算。改為同向加權平均、反向沖銷計 realized_pnl、歸零設 closed_at、翻倉換基礎。前端 `usePortfolio` 同步修（依成交時間排序 + 部分賣出沿用原均價，修「均價算爆」）。
+- **漲跌榜 NULL 排序**：`get_movers` losers 用 `nullsfirst` 把停牌股（change_pct=NULL）排到跌幅榜首 → 改 `nullslast` 與 gainers 對稱。
+- **自動選股評分**（保留）/**行情新鮮度守衛**：市場分析師新增「最新 OHLCV 距今 > 7 日視為過期」守衛，於 prompt 前置強警告要求標註 as-of 並下修信心（過期價不再當最新價貫穿到目標價/停損）。
+
+#### Fixed — 連貫性（前後端契約）
+- **報告匯出永遠 401**：`<a>` 原生導航不帶 Bearer token → 改用帶 token 的 axios 取 blob 再本地下載（PDF/MD/XLSX）。
+- **辯論訊息從未寫入 DB**：Debate 分頁永遠空白。`run_analysis` 完成後把 `debate_history` 逐筆寫入 `debate_history` 表 + 補一則 manager 訊息（供 StatusStepper/Agent Flow）。
+- **測試通知永遠 dry_run**：前端 `/notifications/test` 未帶 `dry_run` → 後端預設 True 只寫 log 不外送卻回報成功。改帶 `dry_run:false`。
+- **Telegram bot token 無法設定**：api-types 補 `telegram_bot_token`/`telegram_bot_token_set`，設定頁加 bot token 輸入欄。
+- **選股殖利率/EPS 成長雙重×100（潛在）**：改用 `PriceDelta mode="raw"`（值已是百分比數字）。
+- **串流契約**：trader/風險辯論/verifier 事件補 role/round/preview（原只讀 bull/bear 的 debate_history）。
+- **決策記憶跨標的污染**：Qdrant 檢索加 symbol/region payload 過濾，只撈同標的過往決策。
+
+#### Fixed — 流暢性 / 可靠性
+- **任務重投整段重跑（雙倍成本+重複下單）**：全域 `acks_late+reject_on_worker_lost` 下 worker 被殺會重跑 `run_analysis`。加原子狀態守衛（queued→running claim）＋建單前查重。
+- **queued 殭屍**：`cleanup_orphans` 只復原 running → 加「queued > 15 分自動 failed」，堵住前端無限輪詢。
+- **worker 活性偵測**：新增 `/health/workers`（celery inspect ping）供監控；beat healthcheck 由恆真改為 schedule 檔 mtime 新鮮度檢查。
+- **Redis 逐出**：`allkeys-lru`→`volatile-lru`，保護無 TTL 的 broker 任務不被逐出（避免任務靜默遺失）。
+- **並發 refresh 誤觸全域登出**：refresh 加 `pg_advisory_xact_lock`（比照 login），後到分頁改撞良性 401 而非災難性撤銷所有 session。
+- **Agent Flow 缺風險層**：`buildFlowNodes` 加 trader/風險辯論/RiskManager/Verifier 節點、manager 依 `node==='manager'` 精準點亮（不再被 risk_manager/verifier 的 synthesis 事件過早標完成）。
+- **市場總覽缺 error 態**、**新聞情緒紅綠自相矛盾**（改設計 token 紅漲綠跌）、**風報數線 SELL 方向顛倒**（漸層/圖例綁 stop/take 實際位置）。
+- **prod WebSocket 位址烤死**：Dockerfile 加 `NEXT_PUBLIC_*` build args、compose 改用 `build.args`；`useWebSocket` fallback 改 https 走同源（不帶 :8000，由 nginx 反代）。
+
+#### Changed — 其他
+- **無界成長清理**：`cleanup_orphans` 加 news_metadata/announcements > 365 日清理。
+- **stock_prices retention 1 年→5 年**（migration **0020**，對齊長區間 K 線/指標查詢窗，避免靜默截斷）。
+- **記憶結算預留**：決策記憶 payload 存 analysis_id/進場價/outcome 欄（供日後回填實際報酬做反思；完整結算排程列 v1.1）。
+- **版本號對齊 1.1.0**（pyproject / config.APP_VERSION / package.json / .env*.example 原本 0.3.0/0.1.0/1.0.0 各自為政）。
+
+#### 第二輪審計回歸修補（2026-07-10）— 對抗式審查第一輪修補，抓到並修好自己引入的回歸
+> 第二輪（8 維度）專門審查第一輪 30+ 處修補是否引入回歸。抓到並修好 6 項（含 1 HIGH）：
+- **[HIGH 回歸] 自動選股批次靜默掉單**：第一輪的 claim 狀態守衛 + cleanup「queued>15min→failed」交互——批次序列消化時，後段仍排隊的分析被每小時 cleanup 標 failed，worker 輪到時 claim 撲空即跳過→LLM 工作靜默丟棄。修：① `_claim_report_for_run` 可 re-claim「被 cleanup 標 failed 的 stuck-in-queued」項（worker 一定救得回、清掉誤導訊息）；② cleanup queued 門檻 15→120min（超過批次排空時間）。
+- **[MEDIUM 回歸] 測試通知仍假成功**：第一輪把測試改 `dry_run:false`，但 dispatcher `_user_subscribed` 對 `event_type="test"` 做訂閱過濾→使用者只勾特定事件時「測試」被靜默丟棄。修：dispatcher 對 "test" 繞過訂閱過濾。
+- **[回歸] 稽核鏈 LAG 誤報**：第一輪把 verify_chain 改 LAG 順序驗證，但 trigger 的 `NOW()`＝交易開始時間，可能與 advisory-lock 鏈結順序相反→並發稽核寫入下誤報 CRITICAL（原作者刻意用 EXISTS 避開）。修：還原 EXISTS（順序無關；時間戳竄改仍由 hash_ok 抓、刪除由 prev_found 抓），保留新加的尾端 checkpoint 偵測。
+- **[回歸] `/health/workers` 阻塞事件迴圈**：同步 `celery control.ping` 在 async 端點裡最長卡 event loop 2 秒。修：`asyncio.to_thread`。
+- **[回歸] 強制改密守衛死鎖**：AuthBootstrap 用登入時的陳舊 in-memory user 旗標→改密後被彈回改密頁。修：每次 mount 重新抓 /me，守衛只依最新旗標動作。
+- **[LOW 回歸] 辯論分頁幻影空輪**：manager 訊息 round_num=max+1 在 DebateTimeline 造出 bull/bear 皆「尚無」的空輪。修：manager 掛在最後一個真實辯論輪（max_round）。
+- **[改善] position_size_pct 的 0% 與缺值混淆**：明確 0% 原被當滿倉。修：None→滿倉、明確 0→不加碼；並註記台股 min-1-lot floor 對 sub-lot 減碼的限制。
+- migration **0021**：audit_logs.entry_hash 索引（配合永久保存，避免 verify_chain 全表 O(N²)）。
+- 驗證：後端 513 unit + 稽核鏈4/通知19/分析·下單·串流21 integration 全綠、ruff 乾淨；前端 tsc 0/vitest 213。
+- **未修（誠實記錄，留後續）**：風險層 reload 視覺化（risk_debate/trader 未落 DB，MEDIUM 視覺完整性）；前端 usePositions limit=100 對 >100 單帳號重算失真（應改讀後端 portfolio_positions）；空單成本顯示負值；基本面分析師 typed 財報欄未填；DataSourceFallback 把確定性錯誤當來源故障；screener market_cap cursor 分頁鍵。第二輪有 14 項因 session token 上限未經懷疑者查證，已人工判讀並修掉明確高價值者，其餘列此待後續。
+
+#### Reviewed — 評估後刻意延後（記錄理由）
+- **verifier base_rates 第三重接地查核**：屬選用功能且對 None 優雅略過（info 級不進報告），非會出錯的 bug；啟用需歷史前向機率資料，列 v1.1。
+- **idempotency 持久層 per-user PK**：需改主鍵的資料遷移，單人自用實際碰撞率近零，列 v1.1。
+- **L4 per-user 限流未掛端點**：單人自用刻意（誤傷 > 效益），文件化。
+- **memory 完整反思結算排程**：本輪先做 payload 預留，完整「N 交易日後實際報酬 + 相對台股大盤 alpha」回填排程列 v1.1。
+
 ### Added — 自動選股預篩選（未指定個股時的 fallback）
 - 新 [screening_service.py](backend/app/services/screening_service.py)：`ScreeningService.select_symbols(region, level)` — 取近期日均成交額前 N 檔流動性候選池 → 撈近 90 日 K 算價量指標（MA20/60、RSI14、20 日報酬、波動、量比）→ 純函式 `select_candidates()` 依等級加權評分（百分位排名）取前 N（**保證比例**）。門檻/權重全集中檔案頂部常數，方便微調。
 - config 加 `SCREEN_BASE_COUNT`(6)／`SCREEN_POOL_SIZE`(60)／`SCREEN_LOOKBACK_DAYS`(90)／`SCREEN_MIN_PRICE`／`SCREEN_MIN_AVG_TURNOVER`（floor 全濾空時自動放寬）。

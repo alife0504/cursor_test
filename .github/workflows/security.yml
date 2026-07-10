@@ -67,9 +67,9 @@ jobs:
       - name: Install bandit
         run: pip install 'bandit[toml]>=1.7.10'
       - name: Run bandit
-        # P1 階段 backend/app 還沒程式碼，加 || true 避免空目錄報錯
-        # P3+ 之後此 || true 移除
-        run: bandit -r backend/app -ll -ii || true
+        # backend/app 已有完整程式碼，移除原本的 `|| true`（否則掃出 HIGH 也永遠 exit 0＝形同裝飾）。
+        # -ll -ii：只在 MEDIUM+ 嚴重度且 MEDIUM+ 信心時失敗，避免雜訊誤擋。
+        run: bandit -r backend/app -ll -ii
 
   codeql:
     name: CodeQL Analysis

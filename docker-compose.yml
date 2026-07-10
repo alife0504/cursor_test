@@ -47,11 +47,14 @@ services:
     container_name: ta-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
+    # maxmemory-policy=volatile-lru：只逐出「有設 TTL」的 key（快取）。Celery broker(db1) 的
+    # 任務清單無 TTL → 永不被逐出，避免記憶體壓力下靜默丟失任務(run_analysis 卡 queued)。
+    # 原 allkeys-lru 會連 broker 訊息一起逐出。
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD}
       --maxmemory 1gb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --appendonly yes
       --appendfsync everysec
     volumes:
@@ -204,15 +207,16 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-    # Beat 沒 HTTP / 沒 ping endpoint；只能驗 process 還活著（celerybeat-schedule 會 mtime 更新）
+    # Beat 沒 HTTP / 沒 ping endpoint；驗 schedule 檔存在「且」近 10 分鐘內有更新（beat sync 會寫）。
+    # 原 `|| exit 0` 恆 healthy → beat 停止排程也偵測不到。
     healthcheck:
       test:
         - CMD-SHELL
-        - "test -f /app/celerybeat-schedule || test -f /tmp/celerybeat-schedule || exit 0"
+        - "find /app /tmp -maxdepth 1 -name 'celerybeat-schedule*' -mmin -10 2>/dev/null | grep -q . || exit 1"
       interval: 60s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 180s
     stop_grace_period: 30s
     restart: unless-stopped
 
