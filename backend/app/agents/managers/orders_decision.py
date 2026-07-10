@@ -5,8 +5,9 @@
 設計：
 - HOLD → 不建單（回 None）。
 - BUY / SELL → 建 PendingOrder(status="PENDING") 等 admin 核准。
-- qty 計算：v1.0 暫用「固定預算 / target_price」（PLAN 14 已知陷阱 — 沒有真實
-  portfolio balance，避免拖累 P14 完成）。`position_size_pct` 純記在 audit。
+- qty 計算：v1.0 用「名目預算 / target_price」（PLAN 14 已知陷阱 — 沒有真實
+  portfolio balance，避免拖累 P14 完成）。名目預算再依 `position_size_pct`（風險經理
+  加減碼強弱 0~100）縮放，讓部位建議真正影響下單股數（缺值＝滿倉、向後相容）。
 - entry_price / stop_loss / take_profit 從 signal 取（FinalSignal schema 已定義）。
 
 進 DB 由 caller 控制（注 session.add(order) 後 commit）。
@@ -14,7 +15,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -51,7 +52,35 @@ def _decimal_or_none(v: Any) -> Decimal | None:
         return None
 
 
-def calculate_qty(target_price: Decimal | None, *, market: str | None = None) -> int:
+def _position_scale(position_size_pct: Any) -> Decimal:
+    """把 FinalSignal.position_size_pct（0~100 的加減碼強弱）轉成名目金額縮放係數。
+
+    - 缺值(None)/不合法 → 1.0（＝滿倉預設，向後相容）。
+    - 明確的 0% → 0.0（不加碼；qty 交由下游最小交易單位決定骨架單）——不可與「缺值」混為
+      一談把低信心 0% 反而放成滿倉。
+    - 其餘夾在 (0, 1]。
+    ⚠️ 注意：台股 min_unit=1000 股、floor 後至少一張，故縮放後名目若小於「一張成本」仍會被
+    墊回一張——sub-lot 減碼在台股中價股上受此限制（v1.0 無真實 portfolio 的已知取捨）。
+    """
+    if position_size_pct is None:
+        return Decimal("1")
+    try:
+        pct = Decimal(str(position_size_pct))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("1")
+    if pct <= 0:
+        return Decimal("0")
+    if pct > 100:
+        pct = Decimal("100")
+    return pct / Decimal("100")
+
+
+def calculate_qty(
+    target_price: Decimal | None,
+    *,
+    market: str | None = None,
+    position_size_pct: Any = None,
+) -> int:
     """估算下單股數。
 
     台股（TWSE/TPEX）以「整張」為交易單位（1 張 = 1000 股），故無條件捨去到整張、
@@ -60,6 +89,8 @@ def calculate_qty(target_price: Decimal | None, *, market: str | None = None) ->
     Args:
         target_price: 進場參考價（FinalSignal.target_price_low）。
         market: 市場代碼；決定計價幣別預算與最小交易單位。
+        position_size_pct: 風險經理的加碼/減碼強弱（0~100）。用來縮放名目金額——高信心
+            重倉（如 80）投入較多、輕倉（如 20）投入較少；缺值＝滿倉（向後相容）。
 
     Returns:
         正整數股數；target_price ≤ 0 或缺資料 → 回最小交易單位（台股 1000、美股 1），
@@ -69,8 +100,11 @@ def calculate_qty(target_price: Decimal | None, *, market: str | None = None) ->
     min_unit = TW_LOT_SIZE if is_tw else 1
     if target_price is None or target_price <= 0:
         return min_unit
-    notional = DEFAULT_NOTIONAL_TWD if is_tw else DEFAULT_NOTIONAL_USD
-    raw = int((notional / target_price).to_integral_value())
+    base_notional = DEFAULT_NOTIONAL_TWD if is_tw else DEFAULT_NOTIONAL_USD
+    notional = base_notional * _position_scale(position_size_pct)
+    # 明示無條件捨去（ROUND_DOWN）：Decimal 預設 context 為 ROUND_HALF_EVEN，可買股數小數 ≥.5 時
+    # 會進位，跨越整張邊界會多買一整張、下單金額超出預算（違反本函式「無條件捨去到整張」契約）。
+    raw = int((notional / target_price).to_integral_value(rounding=ROUND_DOWN))
     if is_tw:
         lots = raw // TW_LOT_SIZE  # 無條件捨去到整張
         return max(lots, 1) * TW_LOT_SIZE
@@ -120,7 +154,10 @@ def signal_to_pending_order(
     target_high = _decimal_or_none(signal.get("target_price_high"))
     stop_loss = _decimal_or_none(signal.get("stop_loss"))
 
-    qty = calculate_qty(target_price, market=market)
+    # position_size_pct（風險經理加減碼強弱）縮放名目金額 → 真正影響下單股數
+    qty = calculate_qty(
+        target_price, market=market, position_size_pct=signal.get("position_size_pct")
+    )
 
     order = PendingOrder(
         id=uuid4(),

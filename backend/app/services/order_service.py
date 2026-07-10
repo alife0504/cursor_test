@@ -28,7 +28,7 @@ from app.repos.order_repo import OrderRepository
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.models.order import PendingOrder
+    from app.models.order import PendingOrder, PortfolioPosition
     from app.models.user import User
 
 logger = get_logger(__name__)
@@ -56,6 +56,10 @@ class OrderService:
             limit=limit,
             before_created_at=before_created_at,
         )
+
+    async def list_positions(self, user: User) -> list[PortfolioPosition]:
+        """使用者自己的未平倉持倉（權威來源，per-user 隔離）。"""
+        return await self.repo.list_open_positions(user.id)
 
     async def get_for_user(self, user: User, order_id: UUID) -> PendingOrder:
         order = await self.repo.get_by_id(order_id)

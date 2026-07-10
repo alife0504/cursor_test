@@ -303,6 +303,18 @@ class AuthService:
         if not jti or not sub:
             raise AuthError(message_zh="Token 內容不完整")
 
+        # 並發 refresh 序列化（比照 login 的 advisory lock，key=user_id）。
+        # 多分頁/多裝置共用同一 refresh cookie 時會同時送同一 jti；若不序列化，後到者可能在
+        # 「已被前者 rotation 撤銷」與「尚未進 blacklist」之間的窗讀到 revoked=True → 誤觸重用偵測
+        # 的 family-revoke（撤銷該 user 全部 session＝無故全域登出）。序列化後，後到者必然先撞到
+        # blacklist 檢查（前者已把舊 jti 加入黑名單）→ 得到良性 401，而非災難性全域撤銷。
+        from sqlalchemy import text as _sql_text
+
+        await self.session.execute(
+            _sql_text("SELECT pg_advisory_xact_lock(hashtext(:s))"),
+            {"s": f"refresh:{sub}"},
+        )
+
         if await self.blacklist.is_blacklisted(jti):
             raise AuthError(message_zh="Token 已被撤銷")
 

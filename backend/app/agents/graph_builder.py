@@ -106,14 +106,30 @@ def _stream_wrap(node_func: Any, *, event: str, node_name: str) -> Any:
                 data["result_length"] = len(content) if isinstance(content, str) else 0
                 data["preview"] = content[:200] if isinstance(content, str) else ""
             elif event == EVENT_DEBATE_ARGUMENT:
-                # round 數從 result 嘗試取
+                # 依節點類型補齊 role/round/preview——bull/bear 回 debate_history(role)、
+                # 風險辯論員回 risk_debate_history(stance)、trader 回 trader_proposal，
+                # 原本只讀 debate_history 導致 trader 與整個風險層事件缺欄位。
                 history = result.get("debate_history") or []
+                risk_history = result.get("risk_debate_history") or []
+                proposal = result.get("trader_proposal")
                 if history:
                     last = history[-1]
                     data["role"] = last.get("role")
                     data["round"] = last.get("round")
                     content = last.get("content") or ""
                     data["preview"] = content[:200] if isinstance(content, str) else ""
+                elif risk_history:
+                    last = risk_history[-1]
+                    # 風險辯論員的角色鍵是 'stance'（積極/保守/中立）
+                    data["role"] = last.get("stance")
+                    data["round"] = last.get("round")
+                    content = last.get("content") or ""
+                    data["preview"] = content[:200] if isinstance(content, str) else ""
+                elif isinstance(proposal, dict):
+                    data["role"] = "trader"
+                    data["preview"] = str(
+                        proposal.get("rationale_zh") or proposal.get("action") or ""
+                    )[:200]
             elif event == EVENT_SYNTHESIS_COMPLETED:
                 signal = result.get("signal") or {}
                 data["action"] = signal.get("action")

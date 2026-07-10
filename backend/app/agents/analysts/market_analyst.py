@@ -10,6 +10,7 @@ P13 完整版：
 from __future__ import annotations
 
 import time
+from datetime import UTC, date, datetime
 from typing import Any, ClassVar
 
 from app.agents.base_analyst import BaseAnalyst, register_analyst
@@ -24,6 +25,26 @@ from app.core.logging_config import get_logger
 from app.data_sources.base import DataKind, MarketRegion
 
 logger = get_logger(__name__)
+
+# 行情資料新鮮度門檻（日曆日）：最新一筆 OHLCV 距今超過此天數視為過期。台股正常連假上限約 9 天，
+# 取 7 兼顧「長假不誤報」與「管線停擺要示警」；門檻粗到 UTC/台北時區數小時差不影響判定。
+_STALE_DAYS = 7
+
+
+def _staleness_days(latest_date_iso: Any) -> int | None:
+    """回傳最新一筆 OHLCV 日期距今的日曆日數；無法解析回 None。"""
+    if not latest_date_iso:
+        return None
+    try:
+        if isinstance(latest_date_iso, datetime):
+            latest = latest_date_iso.date()
+        elif isinstance(latest_date_iso, date):
+            latest = latest_date_iso
+        else:
+            latest = date.fromisoformat(str(latest_date_iso)[:10])
+    except (ValueError, TypeError):
+        return None
+    return (datetime.now(UTC).date() - latest).days
 
 
 @register_analyst
@@ -61,6 +82,25 @@ class MarketAnalyst(BaseAnalyst):
                 analyst="market",
                 symbol=symbol,
                 region=region,
+            )
+
+        # 1b. 資料新鮮度守衛：最新一筆 OHLCV 距今過久 → 過期價不可當「最新價」貫穿到目標價/停損。
+        # 台股正常連假上限約 9 天；> STALE_DAYS 個日曆日視為過期，於 prompt 前置強警告要求
+        # LLM 明確標註 as-of 日期並下修信心（不硬給高信心），避免使用者誤把過期訊號當即時。
+        stale_days = _staleness_days(ohlcv[-1].get("date"))
+        stale_warning = ""
+        if stale_days is not None and stale_days > _STALE_DAYS:
+            logger.warning(
+                "analyst.market.stale_data",
+                symbol=symbol,
+                latest_date=ohlcv[-1].get("date"),
+                stale_days=stale_days,
+            )
+            stale_warning = (
+                f"⚠️ 資料新鮮度警告：本標的最新行情僅到 {ohlcv[-1].get('date')}，距今已 "
+                f"{stale_days} 個日曆日（可能因資料管線停擺或長假）。以下價格/指標並非即時，"
+                "請在報告中明確標註此 as-of 日期、將其視為過期資料，並據此「下修信心」、"
+                "不得將過期收盤價當作可交易的最新價。\n\n"
             )
 
         # 2. 後端算技術指標（純 numpy）
@@ -104,6 +144,9 @@ class MarketAnalyst(BaseAnalyst):
             divergence_note=_divergence_note(indicators),
             ohlcv_table=_format_ohlcv_table(ohlcv[-10:]),
         )
+        # 過期資料 → 前置強警告（放在 user prompt 最前，確保 LLM 先看到 as-of 脈絡）
+        if stale_warning:
+            user_prompt = stale_warning + user_prompt
         system_prompt = load_prompt("market_analyst_system")
 
         # 4. LLM call + schema validation

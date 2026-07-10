@@ -96,6 +96,24 @@ def configure_logging() -> None:
         logging.getLogger(noisy).handlers.clear()
         logging.getLogger(noisy).propagate = True
 
+    # 安全：靜音會洩漏「完整請求 URL」的第三方 HTTP client logger。
+    # httpx/httpcore 在 INFO 會輸出 `HTTP Request: <method> <完整URL>`，而 Telegram bot token、
+    # Discord webhook 秘密、FinMind/AlphaVantage/Finnhub 的 apikey/token 都嵌在 URL 的 path/query，
+    # 這條 stdlib record 不經過 structlog 的 _mask_sensitive_processor → 明文寫進 stdout/容器日誌，
+    # 同時擊破 Fernet 靜態加密與日誌遮蔽兩道控制。強制拉到 WARNING 以上，避免密鑰外洩。
+    for leaky in (
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "openai",
+        "anthropic",
+        "google_genai",
+        "google.generativeai",
+        "google.api_core",
+        "qdrant_client",
+    ):
+        logging.getLogger(leaky).setLevel(logging.WARNING)
+
     # 注意：不用 stdlib.add_logger_name（PrintLoggerFactory 沒 .name 屬性）
     # 改用：呼叫 get_logger("...") 時用 .bind(logger="...") 自帶
     shared_processors: list[Processor] = [

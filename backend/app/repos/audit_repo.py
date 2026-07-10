@@ -115,14 +115,14 @@ class AuditRepository:
         #            || '|' || timestamp::text
         # 全部 NULL 補 ''；details NULL 補 '{}'。
         # 驗證策略（依 PLAN 19.6）：
-        # 1. 對每一筆 row：重算 entry_hash 應與 DB 存的相同（hash_ok）
-        # 2. 對每一筆 row：prev_hash 必須是 64 個 0 (chain head) 或 = 某筆 row 的 entry_hash
-        #    （chain_ok via JOIN）
-        #
-        # 不用 LAG (timestamp, id) 順序檢查，原因：並發插入時 trigger 用
-        # ORDER BY timestamp DESC, id DESC 找上一筆，但 LAG 用 (timestamp ASC, id ASC)
-        # 可能不一致（concurrent 時 timestamp 不嚴格單調）。
-        # chain-link 檢查只在乎「每筆 prev_hash 都能在 chain 裡找到」就 OK。
+        # 1. hash_ok：每一筆重算 entry_hash 應與 DB 存的相同（timestamp 亦在雜湊 payload 內，
+        #    故任何 timestamp 竄改/對調都會使 hash_ok=False 被抓到）。
+        # 2. chain_ok：prev_hash 為 64 個 0（鏈首）或能在全表任一列找到對應 entry_hash（prev_found）。
+        #    **刻意用「順序無關」的 EXISTS 而非 LAG**：trigger 的 NEW.timestamp=NOW() 是「交易開始
+        #    時間」，可能與 advisory-lock 決定的實際鏈結順序相反；用 LAG(ORDER BY timestamp,id) 會在
+        #    並發稽核寫入下把自洽的鏈誤報成斷裂（每日誤報 CRITICAL）。EXISTS 對「中段刪除」仍能抓到
+        #    （被刪列的後繼者其 prev_hash 找不到對應），對「竄改」由 hash_ok 抓到；「尾端截斷」則由
+        #    detect_tail_truncation() + checkpoint 錨定偵測。
         zero_prev = "0" * 64
         sql = """
         SELECT
@@ -157,7 +157,6 @@ class AuditRepository:
         broken: list[int] = []
         for row in rows:
             hash_ok = row.entry_hash == row.recomputed_hash
-            # chain_ok: prev 是 64 個 0（鏈首）或 prev 能在表內找到對應 entry_hash
             chain_ok = (row.prev_hash == zero_prev) or bool(row.prev_found)
             if not (chain_ok and hash_ok):
                 logger.warning(
@@ -169,6 +168,83 @@ class AuditRepository:
                 broken.append(int(row.id))
 
         return (len(broken) == 0, broken)
+
+    async def get_chain_tip(self) -> tuple[int, int | None, str | None]:
+        """回傳目前鏈尾狀態 (row_count, last_id, last_entry_hash)。空表回 (0, None, None)。"""
+        # 純量子查詢：即使空表也一定回一列（COUNT=0、其餘 NULL）
+        sql = """
+        SELECT
+            (SELECT COUNT(*) FROM audit_logs) AS row_count,
+            (SELECT id FROM audit_logs ORDER BY timestamp DESC, id DESC LIMIT 1) AS last_id,
+            (SELECT entry_hash FROM audit_logs
+              ORDER BY timestamp DESC, id DESC LIMIT 1) AS last_entry_hash
+        """
+        row = (await self.session.execute(text(sql))).first()
+        if row is None:
+            return (0, None, None)
+        return (
+            int(row.row_count or 0),
+            int(row.last_id) if row.last_id is not None else None,
+            row.last_entry_hash,
+        )
+
+    async def get_latest_checkpoint(self) -> tuple[int, int | None, str | None] | None:
+        """取最近一次 checkpoint (row_count, last_id, last_entry_hash)；無則 None。"""
+        sql = (
+            "SELECT row_count, last_id, last_entry_hash "
+            "FROM audit_checkpoints ORDER BY id DESC LIMIT 1"
+        )
+        row = (await self.session.execute(text(sql))).first()
+        if row is None:
+            return None
+        return (
+            int(row.row_count or 0),
+            int(row.last_id) if row.last_id is not None else None,
+            row.last_entry_hash,
+        )
+
+    async def detect_tail_truncation(self) -> tuple[bool, str | None]:
+        """以最近 checkpoint 錨定，偵測「鏈尾最新數筆被刪除/竄改」。
+
+        鏈結驗證抓不到尾端截斷（刪最後幾筆後殘存鏈仍自洽），故用外部 checkpoint 比對：
+        - 目前列數 < checkpoint 列數 → 列數回退＝尾端被刪。
+        - checkpoint 錨定的 last_entry_hash 已不存在於表 → 錨定列被刪/改。
+        回 (ok, reason)。無 checkpoint（首次）視為 ok。
+        """
+        cp = await self.get_latest_checkpoint()
+        if cp is None:
+            return (True, None)
+        cp_count, _cp_last_id, cp_last_hash = cp
+        cur_count, _cur_last_id, _cur_last_hash = await self.get_chain_tip()
+        if cur_count < cp_count:
+            return (False, f"row_count regressed: {cur_count} < checkpoint {cp_count}")
+        if cp_last_hash:
+            exists = (
+                await self.session.execute(
+                    text("SELECT EXISTS(SELECT 1 FROM audit_logs WHERE entry_hash = :h) AS e"),
+                    {"h": cp_last_hash},
+                )
+            ).scalar()
+            if not exists:
+                return (False, "checkpointed tip entry_hash missing (tail deleted/modified)")
+        return (True, None)
+
+    async def record_checkpoint(self) -> tuple[int, int | None, str | None]:
+        """把目前鏈尾寫入 audit_checkpoints（append-only）。回寫入的 (row_count, last_id, last_hash)。
+
+        僅應在 verify_chain + detect_tail_truncation 均通過後呼叫，避免把已損壞的鏈固化成基準。
+        需 rw session（ta_service_rw 對 audit_checkpoints 有 INSERT，UPDATE/DELETE 已於 0019 撤銷）。
+        """
+        row_count, last_id, last_hash = await self.get_chain_tip()
+        await self.session.execute(
+            text(
+                "INSERT INTO audit_checkpoints (row_count, last_id, last_entry_hash) "
+                "VALUES (:c, :i, :h)"
+            ),
+            {"c": row_count, "i": last_id, "h": last_hash},
+        )
+        await self.session.commit()
+        return (row_count, last_id, last_hash)
 
     async def list_recent(
         self,

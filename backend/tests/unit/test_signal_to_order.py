@@ -106,6 +106,20 @@ def test_qty_tw_rounds_to_whole_lots() -> None:
     assert calculate_qty(Decimal("123"), market="TWSE") % 1000 == 0
 
 
+def test_qty_tw_floor_not_round_at_lot_boundary() -> None:
+    """回歸：可買股數落在整張邊界下方 0.5 股內時，必須無條件捨去、不得四捨五入進位。
+
+    Decimal 預設 ROUND_HALF_EVEN 會讓 1999.68→2000、2999.58→3000，跨過整張邊界多買
+    一整張、下單金額超出預算。calculate_qty 契約明訂「無條件捨去到整張」，故應為 1/2 張。
+    """
+    # 100000 / 50.008 = 1999.68 股 → 無條件捨去 1999 → 1 張(1000 股)，而非誤進位成 2 張
+    assert calculate_qty(Decimal("50.008"), market="TWSE") == 1000
+    # 100000 / 33.338 = 2999.58 股 → 2999 → 2 張(2000 股)，而非誤進位成 3 張
+    assert calculate_qty(Decimal("33.338"), market="TWSE") == 2000
+    # 美股同理（預算 10000 USD）：小數股數應捨去而非四捨五入（10000/6.667=1499.9→1499，不得進位成 1500）
+    assert calculate_qty(Decimal("6.667"), market="NASDAQ") == 1499
+
+
 def test_qty_us_per_share_unchanged() -> None:
     """美股仍以「股」為單位、至少 1 股（行為不變）。"""
     assert calculate_qty(Decimal("100"), market="NASDAQ") == 100  # 10000 / 100

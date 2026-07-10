@@ -24,7 +24,7 @@ def get_client_ip(request: Request) -> str:
     peer = request.client.host if request.client else None
 
     if not settings.TRUST_PROXY_HEADERS:
-        return peer or "0.0.0.0"  # noqa: S104
+        return peer or "0.0.0.0"  # noqa: S104  # nosec B104 — fallback IP 字面值，非 socket bind
 
     xff = request.headers.get("x-forwarded-for")
     if xff:
@@ -42,7 +42,7 @@ def get_client_ip(request: Request) -> str:
     if real and real.strip():
         return real.strip()
 
-    return peer or "0.0.0.0"  # noqa: S104
+    return peer or "0.0.0.0"  # noqa: S104  # nosec B104 — fallback IP 字面值，非 socket bind
 
 
 __all__ = ["get_client_ip"]

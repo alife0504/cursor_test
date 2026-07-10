@@ -33,6 +33,20 @@ class OrderSummary(BaseSchema):
     expires_at: datetime | None = None
 
 
+class PortfolioPositionOut(BaseSchema):
+    """GET /api/v1/portfolio/positions 元素（權威持倉，來自 portfolio_positions）。"""
+
+    symbol: str
+    market: str
+    qty: int
+    """淨額股數；>0 為多、<0 為空。"""
+    avg_cost: Decimal
+    total_cost: Decimal
+    """成本基礎＝avg_cost × |qty|（絕對值，空單不顯示負數）。"""
+    realized_pnl: Decimal
+    opened_at: datetime
+
+
 class OrderApproveRequest(BaseSchema):
     """POST /orders/{id}/approve body（可選 notes + expected version）。"""
 
@@ -51,4 +65,5 @@ __all__ = [
     "OrderApproveRequest",
     "OrderRejectRequest",
     "OrderSummary",
+    "PortfolioPositionOut",
 ]

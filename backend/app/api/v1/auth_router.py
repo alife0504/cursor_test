@@ -291,16 +291,17 @@ async def password_reset_request(
     request: Request,
     service: AuthService = Depends(get_auth_service),
 ):
-    ip = _client_ip(request) or "0.0.0.0"  # noqa: S104 — fallback IP，僅供 audit log + rate limit key
+    ip = _client_ip(request) or "0.0.0.0"  # noqa: S104  # nosec B104 — fallback IP 字面值（非 socket bind），僅供 audit log + rate limit key
     token = await service.password_reset_request(
         email=str(payload.email),
         ip=ip,
         user_agent=_user_agent(request),
         request_id=_request_id(request),
     )
-    # dev / test 環境直接回 token 方便手測；prod 由 P18 寄信
+    # 安全：僅在明確 opt-in（EXPOSE_RESET_TOKEN_IN_RESPONSE=True）且非 prod 時才回傳明文
+    # token，否則回應含 token＝免信箱帳號接管原語。預設不外露；真實寄信由 P18 通知管道負責。
     body: dict = PasswordResetRequestResponse().model_dump(mode="json")
-    if settings.APP_ENV != "prod" and token is not None:
+    if settings.APP_ENV != "prod" and settings.EXPOSE_RESET_TOKEN_IN_RESPONSE and token is not None:
         body["dev_token"] = token
     return envelope_success(body, trace_id=request.state.trace_id)
 

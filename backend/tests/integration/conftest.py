@@ -101,6 +101,8 @@ def qdrant_port(env_vars: dict[str, str]) -> int:
 
 # 確保 lifespan probe 跳過（與既有 test_health_endpoints.py 一致）
 os.environ.setdefault("PYTEST_RUNNING", "true")
+# 測試需要 /auth/password-reset 回傳 dev_token（正式預設 False，不外露 → 見 auth_router）
+os.environ.setdefault("EXPOSE_RESET_TOKEN_IN_RESPONSE", "true")
 
 
 @pytest.fixture(scope="session")

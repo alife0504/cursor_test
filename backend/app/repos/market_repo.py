@@ -240,7 +240,9 @@ class MarketRepository(BaseRepository):
         if mt == "gainers":
             stmt = stmt.order_by(change_pct_expr.desc().nullslast())
         elif mt == "losers":
-            stmt = stmt.order_by(change_pct_expr.asc().nullsfirst())
+            # 跌幅榜語意＝最負在前、未定義(NULL，如 open=0 停牌股) 沉底；
+            # 與 gainers 的 nullslast 對稱。原用 nullsfirst 會把 NULL 排到榜首擠掉真正大跌股。
+            stmt = stmt.order_by(change_pct_expr.asc().nullslast())
         elif mt == "volume":
             stmt = stmt.order_by(StockPrice.volume.desc())
         else:

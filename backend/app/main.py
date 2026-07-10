@@ -37,6 +37,7 @@ from app.api.v1.market_router import router as market_router
 from app.api.v1.metrics_router import router as metrics_router
 from app.api.v1.notifications_router import router as notifications_router
 from app.api.v1.orders_router import router as orders_router
+from app.api.v1.portfolio_router import router as portfolio_router
 from app.api.v1.reports_router import router as reports_router
 from app.api.v1.screener_router import router as screener_router
 from app.api.v1.stocks_router import router as stocks_router
@@ -306,6 +307,7 @@ app.include_router(users_router)
 # Phase 11: 業務 API 第二批 + admin + ws + /metrics
 app.include_router(analysis_router)
 app.include_router(orders_router)
+app.include_router(portfolio_router)
 app.include_router(reports_router)
 app.include_router(exports_router)
 app.include_router(notifications_router)
@@ -372,6 +374,38 @@ async def health_ready(request: Request) -> JSONResponse:
         trace_id=request.state.trace_id,
     )
     return JSONResponse(status_code=200 if all_ok else 503, content=body)
+
+
+@app.get("/health/workers", tags=["health"])
+async def health_workers(request: Request) -> JSONResponse:
+    """Celery worker/broker 活性探針（供監控告警用；不影響 /health/ready）。
+
+    深度審計發現：/health/ready 只驗 DB/Redis/Qdrant，worker 全掛時 API 仍回 200 →
+    分析請求全部堆在 queued 卻無人處理、無自動偵測面。此端點以 celery inspect ping
+    （短 timeout）回報線上 worker 數；worker 皆離線時回 503，供監控告警。
+    """
+    import asyncio
+
+    workers: dict[str, Any] = {}
+    ok = True
+    try:
+        from app.workers.celery_app import celery_app as _celery
+
+        # celery control.ping 是同步阻塞呼叫（最長 timeout 秒）；用 to_thread 丟到執行緒，
+        # 避免在 async 端點裡卡住整個 event loop（否則探針期間全 API 停擺）。
+        replies = await asyncio.to_thread(lambda: _celery.control.ping(timeout=2.0) or [])
+        online = [next(iter(r.keys())) for r in replies if isinstance(r, dict) and r]
+        workers = {"online_count": len(online), "workers": online}
+        ok = len(online) > 0
+    except Exception as e:  # pragma: no cover - 探針本身失敗
+        workers = {"error": f"{type(e).__name__}: {e}"}
+        ok = False
+
+    body = envelope_success(
+        {"status": "ok" if ok else "no_workers", "celery": workers},
+        trace_id=request.state.trace_id,
+    )
+    return JSONResponse(status_code=200 if ok else 503, content=body)
 
 
 @app.get("/health/seeded", tags=["health"])

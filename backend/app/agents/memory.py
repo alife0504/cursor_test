@@ -73,12 +73,20 @@ class AgentMemory:
             vec = await self._embed(situation)
             if vec is None:
                 return ""
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
             from app.core.qdrant_client import get_qdrant_client
 
             client = get_qdrant_client()
+            # 只撈「同標的」過往決策：原本全 collection 向量搜尋會把別檔股票的 BUY/SELL 當
+            # 「類似情勢」注入 RiskManager 造成跨標的污染。以 payload symbol 過濾根除之。
+            must = [FieldCondition(key="symbol", match=MatchValue(value=symbol))]
+            if region:
+                must.append(FieldCondition(key="region", match=MatchValue(value=region)))
             hits = await client.search(
                 collection_name=self.collection,
                 query_vector=vec,
+                query_filter=Filter(must=must),
                 limit=max(1, k),
                 with_payload=True,
             )
@@ -100,9 +108,20 @@ class AgentMemory:
 
     # ── store ──────────────────────────────────────────
     async def store(
-        self, *, symbol: str, region: str, situation: str, decision: dict[str, Any]
+        self,
+        *,
+        symbol: str,
+        region: str,
+        situation: str,
+        decision: dict[str, Any],
+        analysis_id: str | None = None,
     ) -> None:
-        """把當下情勢 + 決策嵌入並 upsert。失敗一律 no-op（不阻塞）。"""
+        """把當下情勢 + 決策嵌入並 upsert。失敗一律 no-op（不阻塞）。
+
+        payload 額外存 analysis_id / 進場參考價 / 預留 outcome 欄位，讓日後可用「N 交易日後
+        實際報酬 + 相對台股大盤 alpha」回填結算、做真正的反思（reflection）。目前僅記錄不結算，
+        結算排程列 v1.1 待辦（見審計 #41）。
+        """
         try:
             if not await self._ensure():
                 return
@@ -123,6 +142,11 @@ class AgentMemory:
                 "situation": situation[:2000],
                 "created_at": datetime.now(tz=UTC).isoformat(),
                 "ts": time.time(),
+                # 反思用：關聯分析與進場參考價；outcome 待日後排程回填
+                "analysis_id": analysis_id,
+                "entry_ref_price": decision.get("target_price_low"),
+                "realized_return": None,
+                "resolved_at": None,
             }
             await client.upsert(
                 collection_name=self.collection,

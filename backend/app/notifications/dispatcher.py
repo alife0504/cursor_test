@@ -168,6 +168,10 @@ class NotificationDispatcher:
         return resolved
 
     def _user_subscribed(self, row: NotificationSetting, event: NotifyEvent) -> bool:
+        # 測試通知是使用者主動驗證通道憑證的動作，必須繞過訂閱過濾——否則使用者一旦只勾選
+        # 特定事件（enabled_events 非空且不含 "test"），「測試」會被靜默丟棄、前端假成功真沒送。
+        if event.event_type == "test":
+            return True
         events = row.enabled_events
         if events is None or len(events) == 0:
             # 預設全訂閱

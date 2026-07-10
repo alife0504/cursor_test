@@ -155,7 +155,7 @@ _SSRF_BLOCKED_HOSTS = frozenset(
         "localhost",
         "127.0.0.1",
         "::1",
-        "0.0.0.0",  # noqa: S104 — 這是 blocklist，故意列上 0.0.0.0 避開 SSRF
+        "0.0.0.0",  # noqa: S104  # nosec B104 — SSRF blocklist 字串，故意列上 0.0.0.0（非 socket bind）
         # 雲端 metadata service
         "169.254.169.254",
         "metadata.google.internal",

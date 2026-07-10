@@ -12,13 +12,14 @@ P14 升級：
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from celery.utils.log import get_task_logger
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.agents.analyst_outputs import build_analyst_outputs
 from app.agents.graph_builder import build_graph, build_initial_state
@@ -34,7 +35,7 @@ from app.core.config import settings
 from app.core.database import sync_rw_session
 from app.llm import get_llm_chain
 from app.llm.fallback_chain import LLMFallbackChain
-from app.models.analysis import AnalysisReport
+from app.models.analysis import AnalysisReport, DebateMessage
 from app.models.order import PendingOrder
 from app.models.quota import LLMUsage
 from app.workers.celery_app import celery_app
@@ -124,7 +125,16 @@ async def _async_pipeline(
     if report_data is None:
         raise RuntimeError(f"analysis_reports id={analysis_id} 不存在")
 
-    _update_status(analysis_id, status="running", started_at=started_at)
+    # 狀態守衛（原子 queued→running）：celery 全域 acks_late+reject_on_worker_lost 下，
+    # worker 被殺/OOM/redeploy 會把未 ack 的訊息重投 → 整段重跑（雙倍 LLM 成本＋重複下單）。
+    # 僅當目前為 queued 才認領；已被先前執行認領/完成則直接跳過，換取「至多一次」語意。
+    if not _claim_report_for_run(analysis_id, started_at):
+        logger.warning(
+            "run_analysis.skip_already_claimed analysis_id=%s status=%s",
+            analysis_id,
+            report_data.get("status"),
+        )
+        return {"skipped": True, "analysis_id": analysis_id, "reason": "already_claimed"}
 
     # P14：publish "started" event（fire-and-forget；失敗不擋）
     publish_event_sync(
@@ -219,6 +229,22 @@ async def _async_pipeline(
             analyses=final_state.get("analyses") or {},
         )
 
+        # 4b. 把多空辯論歷程寫入 debate_history 表（前端「辯論詳情」分頁 + StatusStepper
+        # 多空辯論階段 + Agent Flow reload 退路皆依賴此資料）。失敗不擋整次分析。
+        try:
+            _persist_debate_history(
+                analysis_id,
+                final_state.get("debate_history") or [],
+                signal_dict=signal_dict,
+                debate_rounds=int(debate_rounds),
+            )
+        except Exception as exc:  # pragma: no cover - 防禦性
+            logger.warning(
+                "run_analysis.persist_debate.failed analysis_id=%s error=%s",
+                analysis_id,
+                exc,
+            )
+
         # 完整架構：把本次決策寫進記憶（供未來 past_context）；僅風險層、失敗不阻塞
         if int(risk_rounds) > 0 and signal_dict:
             try:
@@ -231,6 +257,7 @@ async def _async_pipeline(
                         report_data["symbol"], final_state.get("analyses") or {}
                     ),
                     decision=signal_dict,
+                    analysis_id=analysis_id,
                 )
             except Exception as exc:
                 logger.warning("run_analysis.memory.store_failed error=%s", exc)
@@ -351,11 +378,126 @@ def _fetch_pending_report(analysis_id: str) -> dict[str, Any] | None:
         }
 
 
-def _persist_pending_order(order: PendingOrder) -> None:
-    """寫入 pending_orders（sync session）。"""
+def _claim_report_for_run(analysis_id: str, started_at: datetime) -> bool:
+    """原子地把 analysis_reports 認領為 running（狀態守衛）。
+
+    可認領的來源狀態：
+    - 'queued'（正常首次執行）。
+    - 'failed' 且 error_msg 帶 cleanup 的「stuck in queued」sentinel——批次忙碌時 worker 尚未輪到、
+      卻被每小時 orphan cleanup 依 queued 逾時「暫時」標 failed 的項目。worker 一旦輪到就把它救回、
+      清掉誤導的 error_msg（避免第一輪 claim 守衛 + queued cleanup 交互造成的靜默掉單）。
+    回傳 False 代表已被其他執行認領/完成（或真正失敗且非上述 sentinel），呼叫端應跳過本次執行。
+    """
     with sync_rw_session() as s:
+        result = s.execute(
+            text(
+                """
+                UPDATE analysis_reports
+                   SET status = 'running',
+                       started_at = :started_at,
+                       error_msg = NULL,
+                       updated_at = NOW()
+                 WHERE id = :id
+                   AND (status = 'queued'
+                        OR (status = 'failed'
+                            AND error_msg LIKE '%cleanup_orphans: stuck in queued%'))
+                """
+            ),
+            {"id": UUID(analysis_id), "started_at": started_at},
+        )
+        s.commit()
+        return (result.rowcount or 0) > 0
+
+
+def _persist_pending_order(order: PendingOrder) -> None:
+    """寫入 pending_orders（sync session）。
+
+    重複下單防護：若同一 analysis_id 已存在 PENDING 委託則跳過（配合狀態守衛，
+    避免任務重投時對同一分析建立第二筆待核准下單）。
+    """
+    with sync_rw_session() as s:
+        existing = s.execute(
+            select(func.count())
+            .select_from(PendingOrder)
+            .where(
+                PendingOrder.analysis_id == order.analysis_id,
+                PendingOrder.status == "PENDING",
+            )
+        ).scalar()
+        if existing and int(existing) > 0:
+            logger.warning(
+                "run_analysis.pending_order.duplicate_skipped analysis_id=%s",
+                str(order.analysis_id),
+            )
+            return
         s.add(order)
         s.commit()
+
+
+def _persist_debate_history(
+    analysis_id: str,
+    debate_history: list[dict[str, Any]],
+    *,
+    signal_dict: dict[str, Any] | None = None,
+    debate_rounds: int = 0,
+) -> None:
+    """把 LangGraph 產出的 debate_history 逐筆寫入 debate_history 表。
+
+    debate_history 每筆為 {role, round, content(JSON字串或 dict), tokens?}。content 欄位是
+    JSONB（DebateMessageOut 契約要求 dict/list），故 JSON 字串會被 parse；parse 失敗則以
+    {"text": ...} 包裝。額外補一則 role='manager' 訊息（研究經理的最終 signal），供前端辯論
+    分頁與 StatusStepper「多空辯論→經理」階段偵測。
+    """
+    rows: list[DebateMessage] = []
+    max_round = 0
+    for entry in debate_history:
+        role = str(entry.get("role") or "unknown")
+        round_num = int(entry.get("round") or 0)
+        max_round = max(max_round, round_num)
+        rows.append(
+            DebateMessage(
+                analysis_id=UUID(analysis_id),
+                round_num=round_num,
+                role=role,
+                content=_coerce_debate_content(entry.get("content")),
+                tokens_used=(int(entry["tokens"]) if entry.get("tokens") is not None else None),
+            )
+        )
+
+    # 研究經理最終決策（signal）作為 manager 訊息，掛在「最後一個真實辯論輪」（max_round），
+    # 讓前端 DebateTimeline 以該輪的結論卡呈現、與 bull/bear 同組——而非放到 max+1 造出一個
+    # bull/bear 皆「（尚無）」的幻影空輪。debate_rounds=0（無多空辯論）時退回第 1 輪。
+    if signal_dict:
+        rows.append(
+            DebateMessage(
+                analysis_id=UUID(analysis_id),
+                round_num=max_round if max_round > 0 else 1,
+                role="manager",
+                content=dict(signal_dict),
+                tokens_used=None,
+            )
+        )
+
+    if not rows:
+        return
+    with sync_rw_session() as s:
+        s.add_all(rows)
+        s.commit()
+
+
+def _coerce_debate_content(content: Any) -> dict[str, Any] | list[Any]:
+    """把 debate content 正規化成 JSONB 可存、DebateMessageOut 可回的 dict/list。"""
+    if isinstance(content, (dict, list)):
+        return content
+    if isinstance(content, str):
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except (ValueError, TypeError):
+            pass
+        return {"text": content}
+    return {"text": str(content) if content is not None else ""}
 
 
 def _update_status(

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # ── 應用層 ────────────────────────────────────────────────
     APP_ENV: Literal["dev", "test", "staging", "prod"] = "dev"
-    APP_VERSION: str = "0.3.0"
+    APP_VERSION: str = "1.1.0"
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     LOG_FORMAT: Literal["json", "console"] = "json"
     ADMIN_EMAIL: EmailStr = "admin@example.com"  # type: ignore[assignment]
@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     取真實 client IP；預設 False（直連）以免任何人偽造標頭繞過限流 / 稽核。"""
     TRUSTED_PROXY_HOPS: int = 1
     """信任的反向代理層數（從應用連線端往回數），用於從 X-Forwarded-For 取對真實 client IP。"""
+    EXPOSE_RESET_TOKEN_IN_RESPONSE: bool = False
+    """是否在 /auth/password-reset 回應直接回傳明文 reset token（dev_token）。
+
+    預設 False：即使 dev 也不外露——回應含明文 token 等於「免信箱帳號接管原語」，只要能對
+    後端發請求並讀回應即可重設任意帳號密碼。僅供自動化測試 / 本機手測時明確 opt-in（設 True），
+    且 prod 一律強制不回傳（見 auth_router）。真實寄信由 P18 通知管道負責。"""
 
     # ── 啟動韌性（避免依賴短暫不可用就把整個 process 殺掉）────────
     STARTUP_PROBE_RETRIES: int = 10

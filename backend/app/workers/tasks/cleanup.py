@@ -62,6 +62,29 @@ def cleanup_orphans() -> dict[str, Any]:
         )
         counts["analysis_reports_failed"] = result.rowcount or 0
 
+        # 1b. analysis_reports queued 過久 → failed（enqueue 失敗/worker 長期不在的兜底）。
+        # ⚠️ 門檻必須 > 最壞批次排空時間：自動選股一次可 enqueue SCREEN_MAX_ANALYSES(30) 筆，每筆
+        # soft_time_limit=900s、prefetch=1，忙碌時後段可能合法排隊 1~2 小時。門檻太短會把「仍在
+        # 健康佇列等待」的項目誤標 failed，且與 _claim_report_for_run 的狀態守衛交互造成靜默掉單。
+        # 故取 120min（遠超批次排空），另有 _claim_report_for_run 對此 sentinel 的 re-claim 作雙保險。
+        queued_threshold = now - timedelta(minutes=120)
+        result = session.execute(
+            text(
+                """
+                UPDATE analysis_reports
+                   SET status = 'failed',
+                       error_msg = COALESCE(error_msg, '')
+                                 || ' [auto-failed by cleanup_orphans: stuck in queued > 120min '
+                                 || '(enqueue failed or worker unavailable)]',
+                       updated_at = NOW()
+                 WHERE status = 'queued'
+                   AND created_at < :threshold
+                """
+            ),
+            {"threshold": queued_threshold},
+        )
+        counts["analysis_reports_queued_failed"] = result.rowcount or 0
+
         # 2. pending_orders PENDING > 7 day → EXPIRED
         order_threshold = now - timedelta(days=7)
         result = session.execute(
@@ -105,6 +128,21 @@ def cleanup_orphans() -> dict[str, Any]:
             {"threshold": notif_threshold},
         )
         counts["notification_log_deleted"] = result.rowcount or 0
+
+        # 6. news_metadata / announcements 無 hypertable 也無 retention（0005 只留「可手動」）→
+        # 只增不減會讓 DB 與 GIN 索引無界膨脹。保守清理 > 1 年的舊資料（分析只看近期，
+        # 1 年前新聞/公告對台股當下決策無價值）。
+        news_threshold = now - timedelta(days=365)
+        result = session.execute(
+            text("DELETE FROM news_metadata WHERE published_at < :threshold"),
+            {"threshold": news_threshold},
+        )
+        counts["news_metadata_deleted"] = result.rowcount or 0
+        result = session.execute(
+            text("DELETE FROM announcements WHERE published_at < :threshold"),
+            {"threshold": news_threshold},
+        )
+        counts["announcements_deleted"] = result.rowcount or 0
 
         session.commit()
 
