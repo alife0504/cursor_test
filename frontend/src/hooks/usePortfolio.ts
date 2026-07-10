@@ -5,7 +5,6 @@ import { useMemo } from "react";
 
 import { useOrders } from "@/hooks/useOrders";
 import { api, type ApiEnvelope } from "@/lib/api";
-import type { OrderSummary } from "@/lib/api-types";
 
 // Phase 17 § J / § K:Portfolio
 //   - positions 改讀後端權威 GET /portfolio/positions（核准時已淨額合併的 portfolio_positions）。
