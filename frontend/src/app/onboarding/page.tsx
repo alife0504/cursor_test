@@ -1,6 +1,5 @@
 "use client";
 
-import { isAxiosError } from "axios";
 import { Loader2, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -17,20 +16,21 @@ import {
 } from "@/components/ui/card";
 import { t } from "@/i18n/messages";
 import { api } from "@/lib/api";
+import { useAuthStore } from "@/store/auth";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
 
   const onContinue = async () => {
     setSubmitting(true);
     try {
-      // 後端應提供 POST /users/me/onboarding-complete,若 endpoint 尚未實作,
-      // 退回直接導 dashboard,不阻斷流程
-      await api.post("/users/me/onboarding-complete").catch((err) => {
-        if (isAxiosError(err) && err.response?.status === 404) return;
-        throw err;
-      });
+      // 後端持久化 onboarding_completed=true（此端點必須存在，否則 AuthBootstrap 守衛會把
+      // 使用者無限彈回 /onboarding）。成功後樂觀更新 store，避免導頁時守衛用陳舊 false 誤判。
+      await api.post("/users/me/onboarding-complete");
+      if (user) setUser({ ...user, onboarding_completed: true });
       router.replace("/dashboard");
     } catch {
       toast.error(t("common.error"));

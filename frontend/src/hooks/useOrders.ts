@@ -65,6 +65,9 @@ export function useApproveOrder() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders"] });
+      // 核准會寫入 portfolio_positions（淨額合併）→ 讓持倉頁重新抓權威資料，
+      // 否則 usePositions 的 ["portfolio","positions"] 在 staleTime 內顯示核准前舊持倉。
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
     },
   });
 }
