@@ -123,6 +123,11 @@ class UserService:
         await self.session.commit()
         return updated
 
+    async def mark_onboarded(self, user_id: UUID) -> None:
+        """把使用者 onboarding_completed 設為 true（首次導覽完成）。"""
+        await self.users.mark_onboarded(user_id)
+        await self.session.commit()
+
     async def soft_delete_user(self, user_id: UUID) -> None:
         ok = await self.users.soft_delete(user_id)
         if not ok:

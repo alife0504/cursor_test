@@ -116,13 +116,21 @@ class NotificationDispatcher:
         )
 
     def dispatch_sync(self, event: NotifyEvent) -> list[NotifyResult]:
-        """sync 入口（celery worker / signal handler 用）。"""
+        """sync 入口（signal handler 等純 sync context 用）。
+
+        ⚠️ 若當前執行緒已有 running loop（如 celery worker 的 async task 內），asyncio.run 會丟
+        RuntimeError。此時改在獨立執行緒跑，避免通知被靜默吞掉（async context 應直接 await dispatch）。
+        """
         try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # 無 running loop → 安全直接 asyncio.run
             return asyncio.run(self.dispatch(event))
-        except RuntimeError as exc:
-            # 已在 event loop 中？不可能在 celery worker 發生，但 defensive
-            logger.warning("NotificationDispatcher.dispatch_sync.loop_conflict error=%s", exc)
-            return []
+        # 已在 running loop 內 → 用獨立執行緒各自的 loop 跑，避免 asyncio.run 衝突
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(lambda: asyncio.run(self.dispatch(event))).result()
 
     def dispatch_in_background(self, event: NotifyEvent) -> asyncio.Task | None:
         """FastAPI 端用 — fire-and-forget。
@@ -160,8 +168,13 @@ class NotificationDispatcher:
         for row in rows:
             if not self._user_subscribed(row, event):
                 continue
-            if self._in_quiet_hours_now(row) and event.level != NotifyLevel.CRITICAL:
-                # 靜音時段內，跳過非 CRITICAL
+            # 靜音時段內跳過非 CRITICAL；但「測試」是使用者主動驗證通道的動作，不受靜音時段抑制
+            # （否則夜間測試會被靜默丟棄、前端仍假成功，與 _user_subscribed 的 test 例外不對稱）。
+            if (
+                event.event_type != "test"
+                and self._in_quiet_hours_now(row)
+                and event.level != NotifyLevel.CRITICAL
+            ):
                 continue
             for target in self._build_targets_for_row(row):
                 resolved.append(target)

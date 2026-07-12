@@ -78,6 +78,22 @@ async def my_quota(
     )
 
 
+@router.post("/me/onboarding-complete", summary="標記首次導覽完成（onboarding_completed=true）")
+async def complete_onboarding(
+    request: Request,
+    actor: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """前端 onboarding 頁按「繼續」時呼叫，把 onboarding_completed 落 true。
+
+    ⚠️ 此端點必須存在：AuthBootstrap 的 onboarding 守衛依賴此旗標；若無此端點，旗標永遠是
+    false → 使用者改密後被無限彈回 /onboarding、整個 App 進不去（深度審計 CRITICAL 回歸）。
+    """
+    service = UserService(session)
+    await service.mark_onboarded(actor.id)
+    return envelope_success({"onboarding_completed": True}, trace_id=_trace_id(request))
+
+
 @router.get("", summary="列出使用者（admin only，cursor 分頁）")
 async def list_users(
     request: Request,

@@ -106,7 +106,7 @@ async def step_3_create_initial_admin() -> str:
                 ) VALUES (
                     :email, :password_hash, :full_name, 'ADMIN',
                     :tz, :lang,
-                    false, true,
+                    true, true,
                     true
                 )
                 """

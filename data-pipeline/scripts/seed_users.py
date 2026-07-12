@@ -71,7 +71,7 @@ async def seed_admin() -> str:
                     ) VALUES (
                         :email, :password_hash, :full_name, 'ADMIN',
                         :tz, :lang,
-                        false, true,
+                        true, true,
                         true
                     )
                     """

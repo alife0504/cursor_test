@@ -315,7 +315,9 @@ async def _async_pipeline(
                 ]
                 if pending_order_id:
                     body_lines.append(f"已建立待核准訂單：{pending_order_id}")
-                get_dispatcher().dispatch_sync(
+                # 直接 await async dispatch：本函式已在 worker 的 running event loop 內，
+                # 用 dispatch_sync（內部 asyncio.run）會丟 RuntimeError 被吞掉→通知永遠沒送出。
+                await get_dispatcher().dispatch(
                     NotifyEvent(
                         event_type="analysis.completed",
                         user_id=user_uuid,
