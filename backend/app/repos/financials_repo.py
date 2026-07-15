@@ -24,6 +24,22 @@ from app.repos.base import BaseRepository
 
 logger = get_logger(__name__)
 
+# financial_statements 的 11 個金額 typed 欄位（IS/BS/CF 合計）——
+# upsert 時一律填齊（缺值 None）以保 pg_insert 多列 VALUES 欄位一致。
+_STATEMENT_MONEY_COLS: tuple[str, ...] = (
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "net_income",
+    "eps",
+    "total_assets",
+    "total_liabilities",
+    "total_equity",
+    "operating_cashflow",
+    "investing_cashflow",
+    "financing_cashflow",
+)
+
 
 class FinancialsRepository(BaseRepository):
     # ── financial_statements ──────────────────────────────
@@ -75,21 +91,11 @@ class FinancialsRepository(BaseRepository):
                 "announced_at": r.get("announced_at"),
                 "source": r.get("source"),
             }
-            for col in (
-                "revenue",
-                "gross_profit",
-                "operating_income",
-                "net_income",
-                "eps",
-                "total_assets",
-                "total_liabilities",
-                "total_equity",
-                "operating_cashflow",
-                "investing_cashflow",
-                "financing_cashflow",
-            ):
-                if col in r:
-                    entry[col] = _ensure_decimal(r[col])
+            # 一律填齊所有 typed 欄位（缺值填 None）——pg_insert().values(list) 要求每列
+            # 欄位集合一致；IS/BS/CF 各自只有部分欄位，若條件式加 key 會導致 VALUES 異質而
+            # 觸發 CompileError（explicitly rendered as boundparameter）。
+            for col in _STATEMENT_MONEY_COLS:
+                entry[col] = _ensure_decimal(r.get(col))
             clean.append(entry)
 
         if not clean:
@@ -101,19 +107,7 @@ class FinancialsRepository(BaseRepository):
             "announced_at": stmt.excluded.announced_at,
             "source": stmt.excluded.source,
         }
-        for col in (
-            "revenue",
-            "gross_profit",
-            "operating_income",
-            "net_income",
-            "eps",
-            "total_assets",
-            "total_liabilities",
-            "total_equity",
-            "operating_cashflow",
-            "investing_cashflow",
-            "financing_cashflow",
-        ):
+        for col in _STATEMENT_MONEY_COLS:
             update_set[col] = getattr(stmt.excluded, col)
 
         stmt = stmt.on_conflict_do_update(

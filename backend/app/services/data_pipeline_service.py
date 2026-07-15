@@ -147,9 +147,10 @@ class DataPipelineService:
         items = await fb.fetch_monthly_revenue(symbol, year=year)
         if not items:
             return 0
+        used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)
         for it in items:
             it.setdefault("symbol", symbol)
-            it.setdefault("source", sources[0].name)
+            it.setdefault("source", used)
         n = await self.financials_repo.upsert_monthly_revenue(items, commit=True)
         logger.info(
             "data_pipeline.sync_monthly_revenue.done",
@@ -173,7 +174,8 @@ class DataPipelineService:
             raise ValueError("DataPipelineService: 無 FINANCIAL source 註冊")
         fb = DataSourceFallback(sources)
         items = await fb.fetch_financial(symbol, year=year, quarter=quarter)
-        rows = self._normalize_financial_rows(symbol, items, source=sources[0].name)
+        used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)
+        rows = self._normalize_financial_rows(symbol, items, source=used)
         if quarter is not None:
             rows = [r for r in rows if r["fiscal_quarter"] == quarter]
         if not rows:
@@ -301,32 +303,106 @@ class DataPipelineService:
                 for it in items
             ]
 
-        # FinMind 風格：groupby (year, quarter)
-        groups: dict[tuple[int, int], dict[str, Any]] = {}
+        # FinMind 風格：groupby (year, quarter, statement_type) 後把科目 pivot 進 typed 欄位。
+        # statement_type 由 source 標（本地庫拆 IS/BS/CF）；未標者（如 API 損益源）預設 IS。
+        groups: dict[tuple[int, int, str], dict[str, Any]] = {}
         for it in items:
             d = it.get("date_parsed") or _try_parse_date(it.get("date"))
             if d is None:
                 continue
             yr = d.year
             q = _quarter_from_month(d.month)
-            key = (yr, q)
-            if key not in groups:
-                groups[key] = {
+            st = str(it.get("statement_type") or "IS")
+            key = (yr, q, st)
+            g = groups.get(key)
+            if g is None:
+                g = {
                     "symbol": symbol,
                     "fiscal_year": yr,
                     "fiscal_quarter": q,
-                    "statement_type": "IS",
+                    "statement_type": st,
                     "payload": {"items": []},
+                    "_by_type": {},
                     "source": source,
                 }
-            groups[key]["payload"]["items"].append(
+                groups[key] = g
+            t = it.get("type")
+            v = it.get("value")
+            g["payload"]["items"].append(
                 {
-                    "type": it.get("type"),
+                    "type": t,
                     "origin_name": it.get("origin_name"),
-                    "value": str(it.get("value")) if it.get("value") is not None else None,
+                    "value": str(v) if v is not None else None,
                 }
             )
-        return list(groups.values())
+            # 同 (季, statement, type) 取第一個非空值（避免重複列覆蓋）
+            if t is not None and v is not None and t not in g["_by_type"]:
+                g["_by_type"][t] = v
+
+        out: list[dict[str, Any]] = []
+        for g in groups.values():
+            by_type: dict[str, Any] = g.pop("_by_type")
+            for candidates, col in _FINMIND_FIELD_MAP.get(g["statement_type"], ()):
+                for c in candidates:
+                    if c in by_type:
+                        g[col] = by_type[c]
+                        break
+            out.append(g)
+        return out
+
+
+# FinMind type → financial_statements typed 欄位對映（依 statement_type 分組）。
+# 每個目標欄位給一組候選 FinMind type（依優先序），pivot 時挑第一個存在的；
+# 候選含跨股/跨年常見同義字（如 Liabilities vs TotalLiabilities）以提升覆蓋率。
+# 數值已用 2330 Q1 會計恒等式驗證：TotalAssets = Liabilities + Equity。
+_FINMIND_FIELD_MAP: dict[str, tuple[tuple[tuple[str, ...], str], ...]] = {
+    "IS": (
+        (("Revenue",), "revenue"),
+        (("GrossProfit",), "gross_profit"),
+        (("OperatingIncome",), "operating_income"),
+        (
+            (
+                "IncomeAfterTaxes",
+                "IncomeAfterTax",
+                "NetIncome",
+                "TotalConsolidatedProfitForThePeriod",
+            ),
+            "net_income",
+        ),
+        (("EPS",), "eps"),
+    ),
+    "BS": (
+        (("TotalAssets",), "total_assets"),
+        (("Liabilities", "TotalLiabilities"), "total_liabilities"),
+        (("Equity", "TotalEquity"), "total_equity"),
+    ),
+    "CF": (
+        (
+            (
+                "CashFlowsFromOperatingActivities",
+                "NetCashFlowsFromOperatingActivities",
+                "CashProvidedByOperatingActivities",
+            ),
+            "operating_cashflow",
+        ),
+        (
+            (
+                "CashProvidedByInvestingActivities",
+                "CashFlowsProvidedFromInvestingActivities",
+                "CashFlowsFromInvestingActivities",
+            ),
+            "investing_cashflow",
+        ),
+        (
+            (
+                "CashFlowsProvidedFromFinancingActivities",
+                "CashProvidedByFinancingActivities",
+                "CashFlowsFromFinancingActivities",
+            ),
+            "financing_cashflow",
+        ),
+    ),
+}
 
 
 def _try_parse_date(v: Any) -> date | None:

@@ -27,6 +27,28 @@ from app.data_sources.base import BaseDataSource, DataKind, MarketRegion, regist
 
 logger = get_logger(__name__)
 
+# 資產負債表 / 現金流量表要拉的 FinMind type（含跨股常見同義字，取超集；
+# 實際 pivot 時 _normalize_financial_rows 會依優先序挑第一個存在者）。
+_BS_TYPES: tuple[str, ...] = (
+    "TotalAssets",
+    "Liabilities",
+    "TotalLiabilities",
+    "Equity",
+    "TotalEquity",
+    "EquityAttributableToOwnersOfParent",
+)
+_CF_TYPES: tuple[str, ...] = (
+    "CashFlowsFromOperatingActivities",
+    "NetCashFlowsFromOperatingActivities",
+    "CashProvidedByOperatingActivities",
+    "CashProvidedByInvestingActivities",
+    "CashFlowsProvidedFromInvestingActivities",
+    "CashFlowsFromInvestingActivities",
+    "CashFlowsProvidedFromFinancingActivities",
+    "CashProvidedByFinancingActivities",
+    "CashFlowsFromFinancingActivities",
+)
+
 
 def _to_decimal_or_none(v: Any) -> Decimal | None:
     if v is None:
@@ -119,32 +141,44 @@ class FinMindLocalSource(BaseDataSource):
     async def fetch_financial(
         self, symbol: str, *, year: int | None = None, quarter: int | None = None
     ) -> list[dict[str, Any]]:
-        """財報（本地庫）。每列一個科目(type/value)，重用 API 源的單筆正規化。"""
+        """財報（本地庫）。三張表合併回傳，各筆帶 statement_type 標籤：
+
+        - 損益表  taiwan_stock_financial_statements   → statement_type="IS"（全科目）
+        - 資產負債 taiwan_stock_balance_sheet          → statement_type="BS"（僅取需對映欄位）
+        - 現金流量 taiwan_stock_cash_flows_statement   → statement_type="CF"（僅取需對映欄位）
+
+        每列一個科目(type/value)，重用 API 源的單筆正規化；下游 _normalize_financial_rows
+        依 statement_type 分組並把科目 pivot 進 typed 欄位（revenue/total_assets/... ）。
+        BS/CF 表科目上百，僅拉會用到的 type 以免 payload 膨脹、查詢變慢。
+        """
         from app.data_sources.tw.finmind_source import FinMindSource
 
-        if year is not None:
-            data = await self._query(
-                """
-                SELECT stock_id, date, type, value, origin_name
-                FROM bronze.taiwan_stock_financial_statements
-                WHERE stock_id = $1 AND date >= $2 AND date <= $3
-                ORDER BY date
-                """,
-                symbol,
-                date(year, 1, 1),
-                date(year, 12, 31),
-            )
-        else:
-            data = await self._query(
-                """
-                SELECT stock_id, date, type, value, origin_name
-                FROM bronze.taiwan_stock_financial_statements
-                WHERE stock_id = $1
-                ORDER BY date
-                """,
-                symbol,
-            )
-        return [FinMindSource._normalize_financial(row) for row in data]
+        lo = date(year, 1, 1) if year is not None else None
+        hi = date(year, 12, 31) if year is not None else None
+
+        async def _pull(table: str, types: tuple[str, ...] | None) -> list[dict[str, Any]]:
+            params: list[Any] = [symbol]
+            sql = f"SELECT stock_id, date, type, value, origin_name FROM bronze.{table} WHERE stock_id = $1"  # noqa: S608 — table 為固定常數，非使用者輸入
+            if lo is not None:
+                params += [lo, hi]
+                sql += f" AND date >= ${len(params) - 1} AND date <= ${len(params)}"
+            if types is not None:
+                params.append(list(types))
+                sql += f" AND type = ANY(${len(params)})"
+            sql += " ORDER BY date"
+            return await self._query(sql, *params)
+
+        out: list[dict[str, Any]] = []
+        for table, types, st in (
+            ("taiwan_stock_financial_statements", None, "IS"),
+            ("taiwan_stock_balance_sheet", _BS_TYPES, "BS"),
+            ("taiwan_stock_cash_flows_statement", _CF_TYPES, "CF"),
+        ):
+            for row in await _pull(table, types):
+                d = FinMindSource._normalize_financial(row)
+                d["statement_type"] = st
+                out.append(d)
+        return out
 
     async def fetch_monthly_revenue(
         self, symbol: str, *, year: int | None = None
