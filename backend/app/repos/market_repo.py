@@ -29,6 +29,7 @@ from sqlalchemy import (
     literal,
     select,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.price import StockPrice
 from app.models.stock import StockList
@@ -185,6 +186,48 @@ class MarketRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    _INST_COLS = (
+        "foreign_buy",
+        "foreign_sell",
+        "foreign_net",
+        "trust_buy",
+        "trust_sell",
+        "trust_net",
+        "dealer_buy",
+        "dealer_sell",
+        "dealer_net",
+    )
+
+    async def upsert_institutional(
+        self, rows: list[dict[str, Any]], *, source: str | None = None, commit: bool = False
+    ) -> int:
+        """把三大法人（已 pivot 的每日一列）upsert 進 institutional_trading。
+
+        rows 為 _normalize_institutional 的 pivot 輸出 + symbol（date / foreign_* / trust_* /
+        dealer_*）。PK=(symbol, date)，重複 ON CONFLICT 更新。
+        """
+        if not rows:
+            return 0
+        clean: list[dict[str, Any]] = []
+        for r in rows:
+            if not r.get("symbol") or r.get("date") is None:
+                continue
+            entry = {"symbol": r["symbol"], "date": r["date"], "source": source}
+            for c in self._INST_COLS:
+                entry[c] = int(r.get(c) or 0)
+            clean.append(entry)
+        if not clean:
+            return 0
+        stmt = pg_insert(InstitutionalTrading).values(clean)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["symbol", "date"],
+            set_={c: getattr(stmt.excluded, c) for c in (*self._INST_COLS, "source")},
+        )
+        await self.session.execute(stmt)
+        if commit:
+            await self.session.commit()
+        return len(clean)
 
     # ── 漲跌幅 / 成交量排行 ────────────────────────────────
     async def get_movers(

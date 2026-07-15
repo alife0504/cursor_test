@@ -46,7 +46,12 @@ class FinMindLocalSource(BaseDataSource):
     name = "finmind_local"
     priority = 5  # 比 finmind API(10) 更優先：盤後一律走本地庫
     supported_regions = (MarketRegion.TW,)
-    supported_kinds = (DataKind.OHLCV,)
+    supported_kinds = (
+        DataKind.OHLCV,
+        DataKind.INSTITUTIONAL,
+        DataKind.FINANCIAL,
+        DataKind.MONTHLY_REVENUE,
+    )
 
     async def _connect(self):
         import asyncpg
@@ -61,29 +66,31 @@ class FinMindLocalSource(BaseDataSource):
             timeout=8,
         )
 
-    async def fetch_ohlcv(self, symbol: str, start: date, end: date) -> pd.DataFrame:
-        cols = ["date", "open", "high", "low", "close", "volume", "turnover"]
+    async def _query(self, sql: str, *params: Any) -> list[dict[str, Any]]:
         conn = await self._connect()
         try:
-            rows = await conn.fetch(
-                """
-                SELECT date, open, max AS high, min AS low, close,
-                       "Trading_Volume" AS volume, "Trading_money" AS turnover
-                FROM bronze.taiwan_stock_price
-                WHERE stock_id = $1 AND date >= $2 AND date <= $3
-                ORDER BY date
-                """,
-                symbol,
-                start,
-                end,
-            )
+            rows = await conn.fetch(sql, *params)
         finally:
             await conn.close()
+        return [dict(r) for r in rows]
 
-        if not rows:
+    async def fetch_ohlcv(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        cols = ["date", "open", "high", "low", "close", "volume", "turnover"]
+        data = await self._query(
+            """
+            SELECT date, open, max AS high, min AS low, close,
+                   "Trading_Volume" AS volume, "Trading_money" AS turnover
+            FROM bronze.taiwan_stock_price
+            WHERE stock_id = $1 AND date >= $2 AND date <= $3
+            ORDER BY date
+            """,
+            symbol,
+            start,
+            end,
+        )
+        if not data:
             return pd.DataFrame(columns=cols)
-
-        df = pd.DataFrame([dict(r) for r in rows])
+        df = pd.DataFrame(data)
         df["date"] = pd.to_datetime(df["date"]).dt.date
         for c in ("open", "high", "low", "close", "turnover"):
             if c in df.columns:
@@ -91,6 +98,82 @@ class FinMindLocalSource(BaseDataSource):
         if "volume" in df.columns:
             df["volume"] = df["volume"].fillna(0).astype("int64")
         return df[[c for c in cols if c in df.columns]].copy()
+
+    async def fetch_institutional(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        """三大法人買賣超（本地庫）。raw 欄位與 FinMind API 一致 → 重用 API 源的 pivot 正規化。"""
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        data = await self._query(
+            """
+            SELECT date, stock_id, name, buy, sell
+            FROM bronze.taiwan_stock_institutional_investors_buy_sell
+            WHERE stock_id = $1 AND date >= $2 AND date <= $3
+            ORDER BY date
+            """,
+            symbol,
+            start,
+            end,
+        )
+        return FinMindSource._normalize_institutional(data)
+
+    async def fetch_financial(
+        self, symbol: str, *, year: int | None = None, quarter: int | None = None
+    ) -> list[dict[str, Any]]:
+        """財報（本地庫）。每列一個科目(type/value)，重用 API 源的單筆正規化。"""
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        if year is not None:
+            data = await self._query(
+                """
+                SELECT stock_id, date, type, value, origin_name
+                FROM bronze.taiwan_stock_financial_statements
+                WHERE stock_id = $1 AND date >= $2 AND date <= $3
+                ORDER BY date
+                """,
+                symbol,
+                date(year, 1, 1),
+                date(year, 12, 31),
+            )
+        else:
+            data = await self._query(
+                """
+                SELECT stock_id, date, type, value, origin_name
+                FROM bronze.taiwan_stock_financial_statements
+                WHERE stock_id = $1
+                ORDER BY date
+                """,
+                symbol,
+            )
+        return [FinMindSource._normalize_financial(row) for row in data]
+
+    async def fetch_monthly_revenue(
+        self, symbol: str, *, year: int | None = None
+    ) -> list[dict[str, Any]]:
+        """月營收（本地庫），重用 API 源的單筆正規化。"""
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        if year is not None:
+            data = await self._query(
+                """
+                SELECT stock_id, date, country, revenue, revenue_month, revenue_year
+                FROM bronze.taiwan_stock_month_revenue
+                WHERE stock_id = $1 AND revenue_year = $2
+                ORDER BY date
+                """,
+                symbol,
+                year,
+            )
+        else:
+            data = await self._query(
+                """
+                SELECT stock_id, date, country, revenue, revenue_month, revenue_year
+                FROM bronze.taiwan_stock_month_revenue
+                WHERE stock_id = $1
+                ORDER BY date
+                """,
+                symbol,
+            )
+        return [FinMindSource._normalize_monthly_revenue(row) for row in data]
 
 
 __all__ = ["FinMindLocalSource"]

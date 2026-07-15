@@ -29,6 +29,7 @@ from app.core.market_dispatcher import (
 from app.data_sources.base import BaseDataSource, DataKind, MarketRegion
 from app.data_sources.fallback import DataSourceFallback
 from app.repos.financials_repo import FinancialsRepository
+from app.repos.market_repo import MarketRepository
 from app.repos.news_repo import NewsRepository
 from app.repos.ohlcv_repo import OHLCVRepository
 from app.repos.stock_repo import StockRepository
@@ -66,6 +67,7 @@ class DataPipelineService:
         self.ohlcv_repo = OHLCVRepository(session)
         self.news_repo = NewsRepository(session)
         self.financials_repo = FinancialsRepository(session)
+        self.market_repo = MarketRepository(session)
 
     @classmethod
     def with_dispatcher(
@@ -214,13 +216,19 @@ class DataPipelineService:
             raise ValueError("DataPipelineService: 無 INSTITUTIONAL source 註冊")
         fb = DataSourceFallback(sources)
         df = await fb.fetch_institutional(symbol, start, end)
+        if df is None or df.empty:
+            return 0
+        rows = df.to_dict(orient="records")
+        for r in rows:
+            r["symbol"] = symbol
+        used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)
+        n = await self.market_repo.upsert_institutional(rows, source=used, commit=True)
         logger.info(
             "data_pipeline.sync_institutional.done",
             symbol=symbol,
-            rows=0 if df is None else len(df),
+            written=n,
         )
-        # P7 才有對應 repo upsert；P6 暫回 row 數
-        return 0 if df is None else len(df)
+        return n
 
     # ── 內部 helpers ─────────────────────────────────────
 
