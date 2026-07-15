@@ -348,6 +348,8 @@ class DataPipelineService:
                         g[col] = by_type[c]
                         break
             out.append(g)
+
+        _decumulate_cashflow_rows(out)
         return out
 
 
@@ -380,6 +382,7 @@ _FINMIND_FIELD_MAP: dict[str, tuple[tuple[tuple[str, ...], str], ...]] = {
         (
             (
                 "CashFlowsFromOperatingActivities",
+                "NetCashInflowFromOperatingActivities",  # 舊年度用此名（本地庫 35,706 列）
                 "NetCashFlowsFromOperatingActivities",
                 "CashProvidedByOperatingActivities",
             ),
@@ -403,6 +406,50 @@ _FINMIND_FIELD_MAP: dict[str, tuple[tuple[tuple[str, ...], str], ...]] = {
         ),
     ),
 }
+
+
+# 現金流量表三欄為「年度累計(YTD)」基準，需還原成單季
+_CF_CUMULATIVE_COLS: tuple[str, ...] = (
+    "operating_cashflow",
+    "investing_cashflow",
+    "financing_cashflow",
+)
+
+
+def _decumulate_cashflow_rows(rows: list[dict[str, Any]]) -> None:
+    """把 CF 列的年度累計(YTD)金額就地還原成「單季」，與 IS 的單季基準一致。
+
+    背景（實測 fm-postgres 本地庫）：
+    - 損益表是單季：2330 FY2024 Revenue 四季加總 = 2.894兆 = 台積電公告全年營收。
+    - 現金流量表是年度累計：2330 FY2024 營業現金流 4363億→8140億→1.206兆→1.826兆，
+      單調遞增且 Q4 = 公告全年數。全市場亦然（Q4/Q1 中位數 CF=3.64 vs IS=1.11）。
+      這是台灣現金流量表的申報慣例（一律累計期初至期末）。
+
+    不還原的話，Q2~Q4（75% 的列）的現金流會含前幾季，卻與同一 fiscal_quarter 上「只有那一季」
+    的營收並列，下游算出的 OCF/營收等比率全錯。
+
+    還原：單季_q = YTD_q − YTD_(q−1)，Q1 本身即單季。
+    由大到小處理，確保相減時讀到的前一季仍是未被改寫的原始 YTD 值。
+    缺前一季（資料有缺口）時填 None——寧可標示不知道，也不留下錯誤數字。
+    """
+    by_year: dict[tuple[str, int], dict[int, dict[str, Any]]] = {}
+    for r in rows:
+        if r.get("statement_type") != "CF":
+            continue
+        key = (str(r.get("symbol")), int(r["fiscal_year"]))
+        by_year.setdefault(key, {})[int(r["fiscal_quarter"])] = r
+
+    for quarters in by_year.values():
+        for q in sorted(quarters, reverse=True):
+            if q <= 1:
+                continue  # Q1 的 YTD 就是單季
+            cur = quarters[q]
+            prev = quarters.get(q - 1)
+            for col in _CF_CUMULATIVE_COLS:
+                if cur.get(col) is None:
+                    continue
+                prev_val = prev.get(col) if prev is not None else None
+                cur[col] = (cur[col] - prev_val) if prev_val is not None else None
 
 
 def _try_parse_date(v: Any) -> date | None:

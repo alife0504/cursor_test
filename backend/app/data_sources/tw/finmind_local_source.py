@@ -39,6 +39,7 @@ _BS_TYPES: tuple[str, ...] = (
 )
 _CF_TYPES: tuple[str, ...] = (
     "CashFlowsFromOperatingActivities",
+    "NetCashInflowFromOperatingActivities",  # 舊年度用此名（本地庫 35,706 列）
     "NetCashFlowsFromOperatingActivities",
     "CashProvidedByOperatingActivities",
     "CashProvidedByInvestingActivities",

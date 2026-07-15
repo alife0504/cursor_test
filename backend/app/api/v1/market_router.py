@@ -12,8 +12,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
+from app.core.config import settings
 from app.core.database import get_rw_session
 from app.core.response_envelope import envelope_success
+from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
 from app.schemas.market import InstitutionalRow, MoverRow
 from app.services.market_service import MarketService
 
@@ -123,11 +125,14 @@ async def get_realtime_stock(
     request: Request,
     symbols: str = Query(..., max_length=500, description="逗號分隔股票代號，如 2330,2317"),
     _user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_rw_session),
 ):
-    """即時 snapshot；未開通 Sponsor 等級時回 available=false + reason（優雅降級）。"""
-    service = MarketService(session)
-    payload = await service.get_realtime_stock(_split_ids(symbols))
+    """即時 snapshot；未開通 Sponsor 等級時回 available=false + reason（優雅降級）。
+
+    刻意不依賴 DB session：本端點不讀 DB，卻要打外部 API，多掛一個 rw session 只會在
+    等待上游時多佔用連線池。
+    """
+    client = FinMindRealtimeClient(settings)
+    payload = await client.fetch_stock_snapshot(_split_ids(symbols))
     return envelope_success(payload, trace_id=_trace_id(request))
 
 
@@ -136,10 +141,9 @@ async def get_realtime_futures(
     request: Request,
     ids: str = Query(default="TX", max_length=200, description="逗號分隔期貨代號，如 TX,MTX"),
     _user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_rw_session),
 ):
-    service = MarketService(session)
-    payload = await service.get_realtime_futures(_split_ids(ids))
+    client = FinMindRealtimeClient(settings)
+    payload = await client.fetch_futures_snapshot(_split_ids(ids))
     return envelope_success(payload, trace_id=_trace_id(request))
 
 

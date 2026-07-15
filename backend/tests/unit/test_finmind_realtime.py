@@ -172,6 +172,70 @@ async def test_connection_error_degrades(mock_transport) -> None:
     assert res["reason"] == Reason.UPSTREAM_ERROR
 
 
+# ── 上游回「合法 JSON 但形狀不對」時仍不可拋（never-raise 契約）──
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [[], None, [{"error": "blocked"}], "plain-string"])
+async def test_non_dict_json_body_degrades(mock_transport, body) -> None:
+    """proxy/WAF 可能回 200 + 合法 JSON 但不是 dict（[] / null / list）→ 不可 AttributeError。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(body)
+    res = await _client().fetch_stock_snapshot(["2330"])
+    assert res["available"] is False
+    assert res["reason"] == Reason.UPSTREAM_ERROR
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_status", ["error", None, "", {"x": 1}])
+async def test_non_numeric_status_degrades(mock_transport, bad_status) -> None:
+    """status 非數字（int() 會 ValueError/TypeError）→ 不可穿過 except 變成 500。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {"status": bad_status, "msg": "weird"}
+    )
+    res = await _client().fetch_stock_snapshot(["2330"])
+    assert res["available"] is False
+    assert res["reason"] == Reason.UPSTREAM_ERROR
+
+
+@pytest.mark.asyncio
+async def test_non_list_data_degrades(mock_transport) -> None:
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {"status": 200, "msg": "ok", "data": {"not": "a list"}}
+    )
+    res = await _client().fetch_stock_snapshot(["2330"])
+    assert res["reason"] == Reason.UPSTREAM_ERROR
+
+
+@pytest.mark.asyncio
+async def test_non_dict_records_are_filtered_out(mock_transport) -> None:
+    """data 內混入非 dict 元素不可讓 _normalize 的 .get 爆掉。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {"status": 200, "msg": "ok", "data": ["junk", None, {"stock_id": "2330", "close": 1150}]}
+    )
+    res = await _client().fetch_stock_snapshot(["2330"])
+    assert res["available"] is True
+    assert len(res["quotes"]) == 1
+    assert res["quotes"][0]["symbol"] == "2330"
+
+
+def test_nan_and_infinity_values_do_not_raise() -> None:
+    """JSON 可能回 bare NaN/Infinity；Decimal('NaN') 合法但 int() 會爆 → 應視為缺值。"""
+    q = FinMindRealtimeClient._normalize_stock(
+        {
+            "stock_id": "2330",
+            "close": float("nan"),
+            "volume": float("nan"),
+            "high": float("inf"),
+            "low": float("-inf"),
+        }
+    )
+    assert q["symbol"] == "2330"
+    assert q["price"] is None
+    assert q["volume"] is None
+    assert q["high"] is None
+    assert q["low"] is None
+
+
 # ── 正規化（Sponsor 開通後的 happy path，以 mock 驗證）────
 
 

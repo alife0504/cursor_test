@@ -206,18 +206,26 @@ def _compute_ratios(
     if is_rows:
         latest = is_rows[0]
         rev = _d(latest.get("revenue"))
+        # 毛利率優先用 gross_profit（TW/FinMind 直接提供）；cogs 是部分 US 源才有的欄位
+        gross_profit = _d(latest.get("gross_profit"))
         cogs = _d(latest.get("cogs"))
         op_income = _d(latest.get("operating_income"))
         if rev and rev != 0:
-            if cogs is not None:
+            if gross_profit is not None:
+                out["gross_margin_pct"] = gross_profit / rev * Decimal("100")
+            elif cogs is not None:
                 out["gross_margin_pct"] = (rev - cogs) / rev * Decimal("100")
             if op_income is not None:
                 out["op_margin_pct"] = op_income / rev * Decimal("100")
 
+    # 註：CF 已在 data_pipeline 還原成「單季」基準，故四季相加才是正確的 TTM
     fcf_sum = Decimal("0")
     fcf_has = False
     for r in cf_rows[:4]:
-        ocf = _d(r.get("operating_cash_flow"))
+        # 模型欄位是 operating_cashflow；operating_cash_flow 為其他源的別名
+        ocf = _d(r.get("operating_cashflow"))
+        if ocf is None:
+            ocf = _d(r.get("operating_cash_flow"))
         cx = _d(r.get("capex"))
         if ocf is not None:
             fcf_has = True

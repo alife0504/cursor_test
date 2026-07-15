@@ -56,11 +56,13 @@ def _to_decimal(v: Any) -> Decimal | None:
     if v is None or v == "":
         return None
     if isinstance(v, Decimal):
-        return v
+        return v if v.is_finite() else None
     try:
-        return Decimal(str(v))
+        d = Decimal(str(v))
     except (InvalidOperation, TypeError, ValueError):
         return None
+    # NaN / Infinity 是合法 Decimal（JSON 可能回 bare NaN），但後續 int() 會爆 → 一律當缺值
+    return d if d.is_finite() else None
 
 
 def _to_int(v: Any) -> int | None:
@@ -122,7 +124,13 @@ class FinMindRealtimeClient:
             # FinMind snapshot 端點以逗號分隔多代號
             params["data_id"] = ",".join(data_ids)
 
-        client = get_async_client(name=self.name)
+        # 即時報價要短 timeout：預設(connect 10s/read 30s)×3 retries 最壞會拖到 ~2 分鐘，
+        # 而本呼叫期間 request 仍握著 rw DB 連線（get_current_user 依賴），會拖垮連線池。
+        # 何況等 30 秒才拿到的「即時」報價也沒有意義。
+        client = get_async_client(
+            name=self.name,
+            timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=5.0),
+        )
         try:
             async with client as c:
                 resp = await request_with_retry(
@@ -151,7 +159,20 @@ class FinMindRealtimeClient:
                 Reason.UPSTREAM_ERROR, detail=f"non-json (status={resp.status_code})"
             )
 
-        status = int(body.get("status", resp.status_code))
+        # 上游/中介（proxy、WAF）可能回合法 JSON 但不是 dict（如 [] / null）→ .get 會 AttributeError
+        if not isinstance(body, dict):
+            return _unavailable(
+                Reason.UPSTREAM_ERROR, detail=f"unexpected json body: {type(body).__name__}"
+            )
+
+        # status 可能是非數字（如 "error"）或 None → int() 會 ValueError/TypeError
+        try:
+            status = int(body.get("status", resp.status_code))
+        except (TypeError, ValueError):
+            return _unavailable(
+                Reason.UPSTREAM_ERROR, detail=f"non-numeric status: {body.get('status')!r}"
+            )
+
         msg = str(body.get("msg", "") or "")
         if status != 200:
             reason = _map_status_to_reason(status, msg)
@@ -159,7 +180,12 @@ class FinMindRealtimeClient:
             return _unavailable(reason, detail=msg or None)
 
         data = body.get("data") or []
-        return {"ok": True, "data": data}
+        if not isinstance(data, list):
+            return _unavailable(
+                Reason.UPSTREAM_ERROR, detail=f"unexpected data type: {type(data).__name__}"
+            )
+        # 只留 dict 記錄；非 dict 元素會讓後續 _normalize_* 的 .get 爆掉
+        return {"ok": True, "data": [r for r in data if isinstance(r, dict)]}
 
     @staticmethod
     def _normalize_stock(rec: dict[str, Any]) -> dict[str, Any]:
