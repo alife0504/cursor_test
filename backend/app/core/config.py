@@ -148,6 +148,12 @@ class Settings(BaseSettings):
     FINMIND_LOCAL_USER: str = "postgres"
     FINMIND_LOCAL_PASSWORD: SecretStr | None = None
 
+    # ── FinMind 即時盤 snapshot（盤中即時報價；需 FinMind 付費 Sponsor 等級 token）──
+    # taiwan_stock_tick_snapshot / taiwan_futures_snapshot 這兩個端點免費(register)等級無權，
+    # 會回 status=400「Your level is register」。預設關閉：開啟前請確認 token 為 Sponsor 等級，
+    # 否則每次呼叫都吃配額卻拿不到資料。開啟後 /api/v1/market/realtime/* 才會實際打 API。
+    FINMIND_REALTIME_ENABLED: bool = False
+
     # ── LLM Provider（P12/P14） ──────────────────────────────
     GOOGLE_API_KEY: SecretStr | None = None
     OPENAI_API_KEY: SecretStr | None = None

@@ -112,4 +112,35 @@ async def get_calendar(
     return envelope_success(items, trace_id=_trace_id(request))
 
 
+def _split_ids(raw: str, *, limit: int = 50) -> list[str]:
+    """把逗號分隔的代號字串切成 list（去空白 / 去空項 / 上限保護）。"""
+    ids = [s.strip() for s in raw.split(",") if s.strip()]
+    return ids[:limit]
+
+
+@router.get("/realtime/stock", summary="台股個股即時報價（需 FinMind Sponsor 等級）")
+async def get_realtime_stock(
+    request: Request,
+    symbols: str = Query(..., max_length=500, description="逗號分隔股票代號，如 2330,2317"),
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """即時 snapshot；未開通 Sponsor 等級時回 available=false + reason（優雅降級）。"""
+    service = MarketService(session)
+    payload = await service.get_realtime_stock(_split_ids(symbols))
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
+@router.get("/realtime/futures", summary="台股期貨即時報價（需 FinMind Sponsor 等級）")
+async def get_realtime_futures(
+    request: Request,
+    ids: str = Query(default="TX", max_length=200, description="逗號分隔期貨代號，如 TX,MTX"),
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    service = MarketService(session)
+    payload = await service.get_realtime_futures(_split_ids(ids))
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
 __all__ = ["router"]

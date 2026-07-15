@@ -210,6 +210,27 @@ class MarketService:
             cur = _next_day(cur)
         return out
 
+    # ── 即時盤 snapshot（FinMind Sponsor 等級；未開通則優雅降級）──────────
+    async def get_realtime_stock(self, symbols: list[str]) -> dict[str, Any]:
+        """台股個股即時報價。回 {available, reason, message, as_of, quotes}。
+
+        需 settings.FINMIND_REALTIME_ENABLED 且 token 為 Sponsor 等級；未達則回
+        available=False + reason（tier_insufficient / quota_exceeded / disabled …）。
+        """
+        from app.core.config import settings
+        from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
+
+        client = FinMindRealtimeClient(settings)
+        return await client.fetch_stock_snapshot(symbols)
+
+    async def get_realtime_futures(self, contract_ids: list[str]) -> dict[str, Any]:
+        """台指期 / 期貨即時報價。回 {available, reason, message, as_of, quotes}。"""
+        from app.core.config import settings
+        from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
+
+        client = FinMindRealtimeClient(settings)
+        return await client.fetch_futures_snapshot(contract_ids)
+
 
 def _next_day(d: date_type) -> date_type:
     from datetime import timedelta
