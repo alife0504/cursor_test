@@ -56,6 +56,8 @@ class DataSourceFallback:
         # 依 priority 升序排（priority 越小越優先）
         self.sources: list[BaseDataSource] = sorted(sources, key=lambda s: s.priority)
         self.stale_cache_loader = stale_cache_loader
+        # 記錄最近一次成功取得資料的 source name（供 caller 標正確 source 欄位）
+        self.last_used_source: str | None = None
 
     # ── 對應 BaseDataSource 每個 fetch_* 方法 ─────────────
 
@@ -181,6 +183,7 @@ class DataSourceFallback:
             try:
                 result = await method(*args, **kwargs)
                 await source.cb.record_success()
+                self.last_used_source = source.name  # 供 caller 標正確 source 欄位
                 if tried[0] != source.name or skipped_open:
                     logger.info(
                         "fallback.recovered_via_secondary",

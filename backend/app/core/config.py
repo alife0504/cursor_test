@@ -139,6 +139,15 @@ class Settings(BaseSettings):
     FINNHUB_API_KEY: SecretStr | None = None
     # SEC EDGAR / TWSE / TPEX / MOPS / cnyes 無需 API key
 
+    # ── FinMind 本地資料庫（盤後 EOD 主源；自架 finmind-platform 的 fm-postgres）──
+    # 啟用後 TW OHLCV 盤後資料直接查本地庫（priority=5 最優先），FinMind API 只當即時/備援。
+    FINMIND_LOCAL_ENABLED: bool = False
+    FINMIND_LOCAL_HOST: str = "host.docker.internal"
+    FINMIND_LOCAL_PORT: int = 15432
+    FINMIND_LOCAL_DB: str = "finmind"
+    FINMIND_LOCAL_USER: str = "postgres"
+    FINMIND_LOCAL_PASSWORD: SecretStr | None = None
+
     # ── LLM Provider（P12/P14） ──────────────────────────────
     GOOGLE_API_KEY: SecretStr | None = None
     OPENAI_API_KEY: SecretStr | None = None

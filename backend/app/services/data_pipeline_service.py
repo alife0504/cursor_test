@@ -95,9 +95,10 @@ class DataPipelineService:
         rows = df.to_dict(orient="records")
         for r in rows:
             r["symbol"] = symbol
-        n = await self.ohlcv_repo.upsert_many(
-            rows, source=sources[0].name if sources else None, commit=True
-        )
+        # 標「實際取得資料的 source」（fb.last_used_source），而非優先序第一個——否則 fallback
+        # 生效時 source 欄位會誤標成主源（如明明來自 finmind_local 卻標 finmind）。
+        used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)
+        n = await self.ohlcv_repo.upsert_many(rows, source=used, commit=True)
         logger.info(
             "data_pipeline.sync_ohlcv.done",
             symbol=symbol,

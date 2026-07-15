@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.core.config import Settings
 from app.data_sources.base import BaseDataSource, DataKind, MarketRegion
 from app.data_sources.tw.cnyes_rss_source import CnyesRSSSource
+from app.data_sources.tw.finmind_local_source import FinMindLocalSource
 from app.data_sources.tw.finmind_source import FinMindSource
 from app.data_sources.tw.mops_source import MOPSSource
 from app.data_sources.tw.tpex_source import TPEXSource
@@ -26,6 +27,9 @@ def get_tw_sources(settings: Settings) -> dict[DataKind, list[BaseDataSource]]:
         MOPSSource(settings),
         CnyesRSSSource(settings),
     ]
+    # 本地 FinMind DB（盤後 EOD 主源）：啟用時插進鏈（priority=5 最優先）。
+    if getattr(settings, "FINMIND_LOCAL_ENABLED", False):
+        sources.insert(0, FinMindLocalSource(settings))
     grouped: dict[DataKind, list[BaseDataSource]] = {}
     for src in sources:
         if MarketRegion.TW not in src.supported_regions:
@@ -40,6 +44,7 @@ def get_tw_sources(settings: Settings) -> dict[DataKind, list[BaseDataSource]]:
 
 __all__ = [
     "CnyesRSSSource",
+    "FinMindLocalSource",
     "FinMindSource",
     "MOPSSource",
     "TPEXSource",
