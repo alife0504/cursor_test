@@ -181,6 +181,44 @@ class FinMindLocalSource(BaseDataSource):
                 out.append(d)
         return out
 
+    async def fetch_dividend_events(self, start: date, end: date) -> list[dict[str, Any]]:
+        """除權息事件（本地庫）— 給財報日曆用。
+
+        bronze.taiwan_stock_dividend 一列 = 一檔一次配息決議，其中：
+        - CashExDividendTradingDate  現金股利除息交易日
+        - StockExDividendTradingDate 股票股利除權交易日
+        兩者可能其一為空字串（只配息或只配股），且格式為 'YYYY-MM-DD' 文字，故先以 regex
+        濾掉空值/異常值再轉 date，避免 cast 失敗。
+        回傳每個「除權息交易日」一筆事件。
+        """
+        rows = await self._query(
+            """
+            SELECT stock_id, ex_date, kind, cash, stock_div
+            FROM (
+                SELECT stock_id,
+                       nullif("CashExDividendTradingDate", '')::date AS ex_date,
+                       'cash'::text AS kind,
+                       "CashEarningsDistribution"::numeric AS cash,
+                       NULL::numeric AS stock_div
+                FROM bronze.taiwan_stock_dividend
+                WHERE "CashExDividendTradingDate" ~ '^\\d{4}-\\d{2}-\\d{2}$'
+                UNION ALL
+                SELECT stock_id,
+                       nullif("StockExDividendTradingDate", '')::date,
+                       'stock'::text,
+                       NULL::numeric,
+                       "StockEarningsDistribution"::numeric
+                FROM bronze.taiwan_stock_dividend
+                WHERE "StockExDividendTradingDate" ~ '^\\d{4}-\\d{2}-\\d{2}$'
+            ) t
+            WHERE ex_date >= $1 AND ex_date <= $2
+            ORDER BY ex_date, stock_id
+            """,
+            start,
+            end,
+        )
+        return [dict(r) for r in rows]
+
     async def fetch_monthly_revenue(
         self, symbol: str, *, year: int | None = None
     ) -> list[dict[str, Any]]:

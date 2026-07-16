@@ -136,6 +136,17 @@ async def get_realtime_stock(
     return envelope_success(payload, trace_id=_trace_id(request))
 
 
+@router.get("/realtime/index", summary="大盤指數即時報價（加權 / 櫃買）")
+async def get_realtime_index(
+    request: Request,
+    _user: User = Depends(get_current_user),
+):
+    """即時大盤。與個股共用同一份全市場快照快取 → 不額外消耗 FinMind 額度。"""
+    client = FinMindRealtimeClient(settings)
+    payload = await client.fetch_index_snapshot()
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
 @router.get("/realtime/futures", summary="台股期貨即時報價（需 FinMind Sponsor 等級）")
 async def get_realtime_futures(
     request: Request,

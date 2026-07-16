@@ -1,72 +1,36 @@
 "use client";
 
-import { Banknote, CalendarDays, FileText, Users } from "lucide-react";
+import { Banknote, CalendarDays, FileText } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { KpiCard } from "@/components/common/KpiCard";
-import { MockBanner } from "@/components/common/MockBanner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
+import { useMarketCalendar } from "@/hooks/useMarket";
+import type { CalendarEvent } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
-// Phase 17 § D:財報日曆(mock,v1.1)
-//   - 月曆 view
-//   - mock:未來 30 天 fake events
-//   - 標示 "Mock - v1.1"
+// 財報日曆（真實資料）
+//   - GET /api/v1/market/calendar?from&to
+//   - 兩類真實事件：法定申報期限（依證交法 §36 推算）+ 除權息（FinMind 本地庫）
+//   - 刻意不做「股東會 / 法說會」：FinMind 無此 dataset，不顯示勝過顯示假資料
 
-interface MockEvent {
-  date: string; // yyyy-mm-dd
-  symbol: string;
-  name: string;
-  type: "earnings" | "ex_dividend" | "shareholder_meeting";
-  title: string;
-}
+type EventType = "filing_deadline" | "ex_dividend";
 
-const MOCK_SYMBOLS: Array<[string, string]> = [
-  ["2330", "台積電"],
-  ["2317", "鴻海"],
-  ["2454", "聯發科"],
-  ["2412", "中華電"],
-  ["1303", "南亞"],
-  ["AAPL", "Apple"],
-  ["MSFT", "Microsoft"],
-  ["NVDA", "NVIDIA"],
-];
-
-const TYPE_LABEL: Record<MockEvent["type"], string> = {
-  earnings: "法說 / 財報",
+const TYPE_LABEL: Record<EventType, string> = {
+  filing_deadline: "法定申報期限",
   ex_dividend: "除權息",
-  shareholder_meeting: "股東會",
 };
-const TYPE_COLOR: Record<MockEvent["type"], string> = {
-  earnings: "bg-info/15 text-info",
+const TYPE_COLOR: Record<EventType, string> = {
+  filing_deadline: "bg-info/15 text-info",
   ex_dividend: "bg-bull-muted text-bull",
-  shareholder_meeting: "bg-warning/15 text-warning",
 };
 
-function buildMockEvents(year: number, month: number): MockEvent[] {
-  // deterministic mock,基於 year-month seed
-  const events: MockEvent[] = [];
-  const types: MockEvent["type"][] = [
-    "earnings",
-    "ex_dividend",
-    "shareholder_meeting",
-  ];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  for (let i = 0; i < 12; i++) {
-    const day = ((i * 7 + (year + month)) % daysInMonth) + 1;
-    const [sym, name] = MOCK_SYMBOLS[i % MOCK_SYMBOLS.length];
-    const type = types[i % 3];
-    events.push({
-      date: `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-      symbol: sym,
-      name,
-      type,
-      title: `${name} ${TYPE_LABEL[type]}`,
-    });
-  }
-  return events;
+function monthRange(year: number, month: number): { from: string; to: string } {
+  const last = new Date(year, month + 1, 0).getDate();
+  const mm = String(month + 1).padStart(2, "0");
+  return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${String(last).padStart(2, "0")}` };
 }
 
 export default function MarketCalendarPage() {
@@ -76,30 +40,31 @@ export default function MarketCalendarPage() {
     month: today.getMonth(),
   });
 
-  const events = useMemo(
-    () => buildMockEvents(cursor.year, cursor.month),
+  const { from, to } = useMemo(
+    () => monthRange(cursor.year, cursor.month),
     [cursor.year, cursor.month],
   );
+  const query = useMarketCalendar(from, to);
+  const events = useMemo(() => query.data ?? [], [query.data]);
 
   const counts = useMemo(
     () => ({
       total: events.length,
-      earnings: events.filter((e) => e.type === "earnings").length,
-      exDiv: events.filter((e) => e.type === "ex_dividend").length,
-      meeting: events.filter((e) => e.type === "shareholder_meeting").length,
+      filing: events.filter((e) => e.event_type === "filing_deadline").length,
+      exDiv: events.filter((e) => e.event_type === "ex_dividend").length,
     }),
     [events],
   );
 
   const daysInMonth = new Date(cursor.year, cursor.month + 1, 0).getDate();
   const firstDay = new Date(cursor.year, cursor.month, 1).getDay();
-  const cells: Array<{ day?: number; events: MockEvent[] }> = [];
+  const cells: Array<{ day?: number; events: CalendarEvent[] }> = [];
   for (let i = 0; i < firstDay; i++) cells.push({ events: [] });
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${cursor.year}-${String(cursor.month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     cells.push({
       day: d,
-      events: events.filter((e) => e.date === dateStr),
+      events: events.filter((e) => e.event_date === dateStr),
     });
   }
 
@@ -117,13 +82,11 @@ export default function MarketCalendarPage() {
       <PageHeader
         icon={CalendarDays}
         title="財報日曆"
-        description="法說會、除權息、股東會時程"
+        description="法定申報期限與除權息時程（真實資料）"
       />
 
-      <MockBanner trackingRef="v1.1 接 GET /api/v1/market/calendar 真實資料" />
-
       {/* 本月事件摘要 KPI 帶 */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <KpiCard
           title="本月事件"
           value={counts.total}
@@ -132,9 +95,9 @@ export default function MarketCalendarPage() {
           accent="primary"
         />
         <KpiCard
-          title="法說 / 財報"
-          value={counts.earnings}
-          subtitle="業績發表"
+          title="法定申報期限"
+          value={counts.filing}
+          subtitle="依證交法 §36"
           icon={FileText}
           accent="info"
         />
@@ -144,13 +107,6 @@ export default function MarketCalendarPage() {
           subtitle="配息配股"
           icon={Banknote}
           accent="bull"
-        />
-        <KpiCard
-          title="股東會"
-          value={counts.meeting}
-          subtitle="股東大會"
-          icon={Users}
-          accent="warning"
         />
       </section>
 
@@ -199,11 +155,12 @@ export default function MarketCalendarPage() {
                         key={i}
                         className={cn(
                           "truncate rounded px-1 py-0.5 text-[10px]",
-                          TYPE_COLOR[e.type],
+                          TYPE_COLOR[e.event_type],
                         )}
-                        title={e.title}
+                        title={`${e.title}（${TYPE_LABEL[e.event_type]}）`}
                       >
-                        {e.symbol} {e.name}
+                        {/* 法定申報期限是全市場事件、無個股代號 → 直接顯示標題 */}
+                        {e.symbol ? `${e.symbol} ${e.name ?? ""}` : e.title}
                       </div>
                     ))}
                   </div>

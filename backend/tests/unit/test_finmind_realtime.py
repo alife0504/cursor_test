@@ -1,11 +1,15 @@
 """FinMind 即時 snapshot 客戶端單元測試（mock httpx，不打網路）。
 
-⚠️ 背景：taiwan_stock_tick_snapshot / taiwan_futures_snapshot 需 FinMind 付費 Sponsor
-等級；本專案目前的 token 是免費(register)等級，實打會回 status=400「Your level is
-register」。因此 happy path 無法對真實 API 驗證，改以 mock 驗證三件事：
-1. 正規化欄位（含 snake_case / PascalCase 兩種命名都吃得下）
-2. FinMind status → unavailable reason 的對映
+背景：taiwan_stock_tick_snapshot / taiwan_futures_snapshot 需 FinMind 付費 Sponsor 等級。
+本專案帳號已為 SponsorYear（2026-07-16 實打驗證通過），故欄位名與代號皆以官方文件
+（https://finmind.github.io/llms-full.txt）與實際回傳為準，不再是臆測值。
+
+驗證重點：
+1. 正規化欄位——以官方欄位名為準（buy_price/sell_price/change_price，非 bid/ask/change）
+2. FinMind status → unavailable reason 的對映（tier/quota/auth…）
 3. 未啟用 / 無 token / 無代號的短路降級（不打 API、不吃配額）
+4. never-raise 契約：上游回怪東西（非 dict body、非數字 status、NaN）也不得拋給上層
+5. 「抓全部 + 快取」——上游用量與查詢檔數/頁面數脫鉤（額度安全的關鍵）
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import pytest
 from pydantic import SecretStr
 
 from app.data_sources.tw.finmind_realtime import (
+    SNAPSHOT_CACHE_TTL_S,
     STOCK_SNAPSHOT_URL,
     FinMindRealtimeClient,
     Reason,
@@ -44,6 +49,35 @@ class _FakeSettings:
 
 def _client(**kw: Any) -> FinMindRealtimeClient:
     return FinMindRealtimeClient(_FakeSettings(**kw))  # type: ignore[arg-type]
+
+
+class _FakeRedis:
+    """最小 Redis 替身（只實作 client 用到的 get/set）。"""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+        self.set_calls: list[tuple[str, int | None]] = []
+
+    async def get(self, k: str):  # type: ignore[no-untyped-def]
+        return self.store.get(k)
+
+    async def set(self, k: str, v: str, ex: int | None = None):  # type: ignore[no-untyped-def]
+        self.store[k] = v
+        self.set_calls.append((k, ex))
+
+
+@pytest.fixture(autouse=True)
+def _no_cache(monkeypatch):  # type: ignore[no-untyped-def]
+    """預設停用快取，讓每個 test 都確實打到 mock_transport（避免跨 test 互相污染）。
+
+    client 對 Redis 失敗是容錯的（只會退化成每次打上游），故這裡直接讓 get_redis 拋錯。
+    需要驗快取行為的 test 再自行覆寫（見 test_snapshot_is_cached_*）。
+    """
+
+    async def _boom(*_a, **_kw):  # type: ignore[no-untyped-def]
+        raise ConnectionError("redis disabled in unit test")
+
+    monkeypatch.setattr("app.data_sources.tw.finmind_realtime.get_redis", _boom)
 
 
 @pytest.fixture
@@ -384,21 +418,12 @@ def test_normalize_handles_missing_and_bad_values() -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_symbol_uses_data_id(mock_transport) -> None:
-    """單一代號直接帶 data_id。"""
-    mock_transport["response_factory"] = lambda m, u, k: _resp(
-        {"msg": "ok", "status": 200, "data": [{"stock_id": "2330", "close": 1150}]}
-    )
-    await _client().fetch_stock_snapshot(["2330"])
-    assert len(mock_transport["calls"]) == 1
-    assert mock_transport["calls"][0]["kwargs"]["params"]["data_id"] == "2330"
+async def test_always_fetch_all_and_filter(mock_transport) -> None:
+    """一律不帶 data_id 抓全部再本地過濾（單檔多檔皆然）。
 
-
-@pytest.mark.asyncio
-async def test_multiple_symbols_fetch_all_then_filter(mock_transport) -> None:
-    """多代號不可用逗號合併：實測 FinMind 對 `data_id=2330,2317` 會靜默回 data:[]。
-
-    改為一次抓全部（不帶 data_id，官方語意=全部）再本地過濾：1 次請求即可。
+    兩個理由：
+    1. FinMind 不支援逗號合併多代號——`data_id=2330,2317` 會靜默回 data:[]（實測）。
+    2. 抓全部 + 快取後，上游用量與查詢檔數/頁面數脫鉤（見 SNAPSHOT_CACHE_TTL_S）。
     """
     mock_transport["response_factory"] = lambda m, u, k: _resp(
         {
@@ -416,6 +441,85 @@ async def test_multiple_symbols_fetch_all_then_filter(mock_transport) -> None:
     # 關鍵迴歸：不得帶 data_id（帶逗號合併值會回空）
     assert "data_id" not in mock_transport["calls"][0]["kwargs"]["params"]
     assert {q["symbol"] for q in res["quotes"]} == {"2330", "2317"}
+
+
+@pytest.mark.asyncio
+async def test_single_symbol_also_fetches_all_and_filters(mock_transport) -> None:
+    """單檔查詢同樣走「抓全部再過濾」，才能共用快取、不額外吃額度。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {
+            "msg": "ok",
+            "status": 200,
+            "data": [
+                {"stock_id": "2330", "close": 1150},
+                {"stock_id": "2317", "close": 240},
+            ],
+        }
+    )
+    res = await _client().fetch_stock_snapshot(["2330"])
+    assert "data_id" not in mock_transport["calls"][0]["kwargs"]["params"]
+    assert [q["symbol"] for q in res["quotes"]] == ["2330"]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_is_cached_so_quota_is_independent_of_usage(
+    mock_transport, monkeypatch
+) -> None:
+    """核心設計：多次查詢（不同股票）只打上游 1 次，其餘走快取。
+
+    這是額度安全的關鍵——輪詢時上游用量固定為 3600/TTL 次/小時，與開幾個頁面、
+    查幾檔股票無關。
+    """
+    fake = _FakeRedis()
+
+    async def _fake_get_redis(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return fake
+
+    monkeypatch.setattr("app.data_sources.tw.finmind_realtime.get_redis", _fake_get_redis)
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {
+            "msg": "ok",
+            "status": 200,
+            "data": [
+                {"stock_id": "2330", "close": 1150},
+                {"stock_id": "2317", "close": 240},
+            ],
+        }
+    )
+    c = _client()
+    r1 = await c.fetch_stock_snapshot(["2330"])
+    r2 = await c.fetch_stock_snapshot(["2317"])  # 不同股票
+    r3 = await c.fetch_stock_snapshot(["2330", "2317"])  # 多檔
+
+    assert len(mock_transport["calls"]) == 1  # ← 三次查詢只打上游一次
+    assert r1["cached"] is False and r2["cached"] is True and r3["cached"] is True
+    assert [q["symbol"] for q in r2["quotes"]] == ["2317"]
+    assert {q["symbol"] for q in r3["quotes"]} == {"2330", "2317"}
+    # 快取有帶 TTL，否則報價會永遠不更新
+    assert fake.set_calls[0][1] == SNAPSHOT_CACHE_TTL_S
+
+
+@pytest.mark.asyncio
+async def test_stock_and_futures_use_separate_cache_keys(mock_transport, monkeypatch) -> None:
+    """個股與期貨不可共用快取鍵，否則會互相覆蓋。"""
+    fake = _FakeRedis()
+
+    async def _fake_get_redis(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return fake
+
+    monkeypatch.setattr("app.data_sources.tw.finmind_realtime.get_redis", _fake_get_redis)
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {
+            "msg": "ok",
+            "status": 200,
+            "data": [{"stock_id": "2330", "close": 1150}, {"futures_id": "TXFR2", "close": 45721}],
+        }
+    )
+    c = _client()
+    await c.fetch_stock_snapshot(["2330"])
+    res = await c.fetch_futures_snapshot(["TXF"])
+    assert len(mock_transport["calls"]) == 2  # 兩種各打一次，沒有互吃快取
+    assert [q["symbol"] for q in res["quotes"]] == ["TXFR2"]
 
 
 @pytest.mark.asyncio

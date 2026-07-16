@@ -280,6 +280,39 @@ export interface MarketOverview {
   [k: string]: unknown;
 }
 
+// 即時報價（對應 backend/app/data_sources/tw/finmind_realtime.py 的輸出）
+// 需 FinMind Sponsor 等級；未開通/非交易時段時 available=false + reason。
+export interface RealtimeQuote {
+  symbol: string;
+  name?: string | null;
+  price?: string | null;
+  open?: string | null;
+  high?: string | null;
+  low?: string | null;
+  change?: string | null;
+  change_rate?: string | null;
+  average_price?: string | null;
+  volume?: number | null;
+  total_volume?: number | null;
+  bid_price?: string | null;
+  ask_price?: string | null;
+  time?: string | null;
+  [k: string]: unknown;
+}
+
+export interface RealtimeSnapshot {
+  available: boolean;
+  /** available=false 時的原因碼：disabled / tier_insufficient / quota_exceeded / empty … */
+  reason?: string | null;
+  /** 可直接顯示給使用者的中文說明 */
+  message?: string | null;
+  as_of?: string | null;
+  /** 本次是否命中後端快取（除錯用） */
+  cached?: boolean;
+  quotes: RealtimeQuote[];
+  [k: string]: unknown;
+}
+
 // ════════════════ Phase 17 ════════════════
 // 三大法人 row（對應 backend/schemas/market.py InstitutionalRow）
 export interface InstitutionalRow {
@@ -442,11 +475,20 @@ export interface DLQItem {
 }
 
 // 對齊 backend/app/schemas/market.py CalendarItem（v1.1 接真實資料用；目前 calendar 頁仍用本地 mock）
+// 對齊 backend/app/services/market_service.py get_calendar（真實資料，非 mock）
+//   filing_deadline：法定申報期限（依證交法 §36 推算，全市場共通 → 無 symbol）
+//   ex_dividend    ：除權息（FinMind 本地庫真實資料）
+export type CalendarEventType = "filing_deadline" | "ex_dividend";
+
 export interface CalendarEvent {
-  symbol: string;
+  /** 法定申報期限為全市場事件，無個股代號 → 可能為 null */
+  symbol?: string | null;
+  name?: string | null;
   market?: string;
-  event_type: string;
+  event_type: CalendarEventType;
   event_date: string;
   title: string;
+  /** statutory（依法規推算）或 finmind_local（真實資料源） */
+  source?: string | null;
   extra?: Record<string, unknown> | null;
 }

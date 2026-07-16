@@ -13,6 +13,7 @@ FinMind 等級」而非拋例外）。實際欄位命名以官方回傳為準；
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -21,11 +22,24 @@ import httpx
 from app.core.config import Settings
 from app.core.http_client import get_async_client, request_with_retry
 from app.core.logging_config import get_logger
+from app.core.redis_client import RedisDB, get_redis
 
 logger = get_logger(__name__)
 
 STOCK_SNAPSHOT_URL = "https://api.finmindtrade.com/api/v4/taiwan_stock_tick_snapshot"
 FUTURES_SNAPSHOT_URL = "https://api.finmindtrade.com/api/v4/taiwan_futures_snapshot"
+
+# 全市場快照快取秒數。
+# 設計要點：一律「不帶 data_id 抓全部」再本地過濾，並把整份快照快取數秒 → 上游用量與
+# 「開了幾個頁面、查了幾檔股票」完全脫鉤，固定為 3600/TTL 次/小時（TTL=5 → 720/hr），
+# 遠低於 Sponsor 的 6000/hr。若改成逐檔查詢，多開幾個分頁輪詢就會吃爆額度。
+SNAPSHOT_CACHE_TTL_S = 5
+_CACHE_KEY_STOCK = "cache:realtime:tw:stock:all"
+_CACHE_KEY_FUTURES = "cache:realtime:tw:futures:all"
+
+# FinMind tick_snapshot 的 3 碼指數代號 → 我方慣用 symbol（與 stock_prices / market_service 對齊）
+TW_INDEX_CODE_TO_SYMBOL: dict[str, str] = {"001": "TAIEX", "101": "TPEX"}
+TW_INDEX_NAMES: dict[str, str] = {"TAIEX": "加權指數", "TPEX": "櫃買指數"}
 
 
 # ── unavailable reason codes（上層/前端可據此顯示對應訊息）─────────────────
@@ -85,6 +99,7 @@ def _unavailable(reason: str, *, detail: str | None = None) -> dict[str, Any]:
         "message": _REASON_MESSAGE_ZH.get(reason, reason),
         "detail": detail,
         "as_of": None,
+        "cached": False,
         "quotes": [],
     }
 
@@ -238,7 +253,7 @@ class FinMindRealtimeClient:
         return out
 
     @staticmethod
-    def _ok(quotes: list[dict[str, Any]]) -> dict[str, Any]:
+    def _ok(quotes: list[dict[str, Any]], *, cached: bool = False) -> dict[str, Any]:
         if not quotes:
             return _unavailable(Reason.EMPTY)
         return {
@@ -247,38 +262,84 @@ class FinMindRealtimeClient:
             "message": None,
             "detail": None,
             "as_of": quotes[0].get("time"),
+            "cached": cached,
             "quotes": quotes,
         }
 
-    async def fetch_stock_snapshot(self, symbols: list[str]) -> dict[str, Any]:
-        """台股即時 tick snapshot。symbols 為股票代號 list（如 ['2330','2317']）。
+    async def _fetch_all_cached(self, url: str, cache_key: str) -> dict[str, Any]:
+        """抓全市場快照，並以 Redis 快取數秒。回 {"ok":True,"data":[...],"cached":bool}。
 
-        單一代號 → 直接帶 data_id；多代號 → 一次抓全部（約 2,851 檔）再本地過濾。
-        FinMind 不支援逗號合併多代號（會靜默回空），而「抓全部」不論幾檔都只花 1 次額度，
-        比逐檔各發一次請求更省（Sponsor 6000 req/hr）。
+        一律抓全部（不帶 data_id）：FinMind 不支援逗號合併多代號（會靜默回空），而抓全部
+        一次就涵蓋所有代號，配上快取後上游用量與查詢檔數/頁面數無關。
+        Redis 掛掉不影響正確性——只是退化成每次都打上游。
         """
+        redis = None
+        try:
+            redis = await get_redis(RedisDB.CACHE)
+            cached = await redis.get(cache_key)
+            if cached:
+                return {"ok": True, "data": json.loads(cached), "cached": True}
+        except Exception as exc:  # 快取讀失敗不致命
+            logger.warning("finmind_realtime.cache_read_failed", key=cache_key, error=str(exc))
+
+        res = await self._call(url, None)
+        if not res.get("ok"):
+            return res
+
+        if redis is not None:
+            try:
+                await redis.set(cache_key, json.dumps(res["data"]), ex=SNAPSHOT_CACHE_TTL_S)
+            except Exception as exc:
+                logger.warning("finmind_realtime.cache_write_failed", key=cache_key, error=str(exc))
+        return {"ok": True, "data": res["data"], "cached": False}
+
+    async def fetch_stock_snapshot(self, symbols: list[str]) -> dict[str, Any]:
+        """台股個股即時報價。symbols 為股票代號 list（如 ['2330','2317']）。"""
         if not self.settings.FINMIND_REALTIME_ENABLED:
             return _unavailable(Reason.DISABLED)
         symbols = [s.strip() for s in symbols if s and s.strip()]
         if not symbols:
             return _unavailable(Reason.NO_SYMBOLS)
 
-        single = symbols[0] if len(symbols) == 1 else None
-        res = await self._call(STOCK_SNAPSHOT_URL, single)
+        res = await self._fetch_all_cached(STOCK_SNAPSHOT_URL, _CACHE_KEY_STOCK)
         if not res.get("ok"):
             return res
 
-        records = res["data"]
-        if single is None:
-            want = {s.upper() for s in symbols}
-            records = [r for r in records if str(r.get("stock_id", "")).upper() in want]
-        return self._ok([self._normalize_stock(r) for r in records])
+        want = {s.upper() for s in symbols}
+        records = [r for r in res["data"] if str(r.get("stock_id", "")).upper() in want]
+        return self._ok([self._normalize_stock(r) for r in records], cached=bool(res.get("cached")))
+
+    async def fetch_index_snapshot(self) -> dict[str, Any]:
+        """大盤指數即時報價（加權 TAIEX / 櫃買 TPEX）。
+
+        FinMind 的 tick_snapshot 除了 4 碼股票，data_id 也吃 3 碼指數代號
+        （001=加權指數、101=櫃買）。而「抓全部」的回應裡本來就含這兩筆 → 與個股共用
+        同一份快取，取得即時大盤**不額外花任何額度**。
+        輸出 symbol 統一成我方慣用的 TAIEX / TPEX（與 stock_prices、market_service 一致）。
+        """
+        if not self.settings.FINMIND_REALTIME_ENABLED:
+            return _unavailable(Reason.DISABLED)
+
+        res = await self._fetch_all_cached(STOCK_SNAPSHOT_URL, _CACHE_KEY_STOCK)
+        if not res.get("ok"):
+            return res
+
+        quotes: list[dict[str, Any]] = []
+        for rec in res["data"]:
+            our = TW_INDEX_CODE_TO_SYMBOL.get(str(rec.get("stock_id", "")))
+            if our is None:
+                continue
+            q = self._normalize_stock(rec)
+            q["symbol"] = our
+            q["name"] = TW_INDEX_NAMES[our]
+            quotes.append(q)
+        return self._ok(quotes, cached=bool(res.get("cached")))
 
     async def fetch_futures_snapshot(self, contract_ids: list[str]) -> dict[str, Any]:
-        """台股期貨即時 snapshot。contract_ids 為期貨代號 list（如 ['TXF','MXF']）。
+        """台股期貨即時報價。contract_ids 為期貨代號 list（如 ['TXF','MXF']）。
 
-        注意 data_id=TXF 回的是各月份契約（futures_id 形如 `TXFR2`），故多代號過濾用
-        prefix 比對而非完全相等。
+        注意 data_id=TXF 回的是各月份契約（futures_id 形如 `TXFR2`），故過濾用 prefix
+        比對而非完全相等。
         """
         if not self.settings.FINMIND_REALTIME_ENABLED:
             return _unavailable(Reason.DISABLED)
@@ -286,18 +347,17 @@ class FinMindRealtimeClient:
         if not contract_ids:
             return _unavailable(Reason.NO_SYMBOLS)
 
-        single = contract_ids[0] if len(contract_ids) == 1 else None
-        res = await self._call(FUTURES_SNAPSHOT_URL, single)
+        res = await self._fetch_all_cached(FUTURES_SNAPSHOT_URL, _CACHE_KEY_FUTURES)
         if not res.get("ok"):
             return res
 
-        records = res["data"]
-        if single is None:
-            prefixes = tuple(c.upper() for c in contract_ids)
-            records = [
-                r for r in records if str(r.get("futures_id", "")).upper().startswith(prefixes)
-            ]
-        return self._ok([self._normalize_futures(r) for r in records])
+        prefixes = tuple(c.upper() for c in contract_ids)
+        records = [
+            r for r in res["data"] if str(r.get("futures_id", "")).upper().startswith(prefixes)
+        ]
+        return self._ok(
+            [self._normalize_futures(r) for r in records], cached=bool(res.get("cached"))
+        )
 
 
 __all__ = ["FinMindRealtimeClient", "Reason"]

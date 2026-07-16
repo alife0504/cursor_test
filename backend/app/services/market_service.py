@@ -17,14 +17,18 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import ValidationError
 from app.core.logging_config import get_logger
 from app.core.redis_client import RedisDB, get_redis
+from app.domain.disclosure_calendar import monthly_revenue_deadline, statement_deadline
 from app.repos.market_repo import MarketRepository
 
 logger = get_logger(__name__)
 
 OVERVIEW_CACHE_TTL = 300  # 5 minutes
+# 除權息事件變動極慢（公司決議後才變），快取久一點；法定期限則是純計算不用快取。
+CALENDAR_CACHE_TTL = 3600  # 1 hour
 MARKET_VALUES = {"TW", "US"}
 
 
@@ -175,7 +179,7 @@ class MarketService:
             )
         return await self.repo.get_movers(m, mt, limit=limit)
 
-    # ── calendar（mock，P17 完整）────────────────────────
+    # ── calendar（真實：法定申報期限 + 除權息）──────────────
     async def get_calendar(
         self,
         *,
@@ -183,9 +187,13 @@ class MarketService:
         to_date: date_type,
         market: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Mock：回 from~to 之間的「月初」當作 mock event。
+        """財報日曆（真實資料，非 mock）。目前提供兩類事件：
 
-        P17 整合真實財報日曆後改寫。
+        1. **法定申報期限**（event_type='filing_deadline'）：依證交法 §36 推算，全市場共通，
+           由法規決定故永遠正確、不需外部資料源。
+        2. **除權息**（event_type='ex_dividend'）：來自 FinMind 本地庫的真實決議資料。
+
+        刻意不提供「股東會 / 法說會」：FinMind 無此 dataset，與其顯示假資料不如不顯示。
         """
         if from_date > to_date:
             raise ValidationError(
@@ -193,22 +201,112 @@ class MarketService:
                 field="date_range",
             )
         m = _validate_market(market or "TW")
+        if m != "TW":
+            # 目前僅台股有法定期限/除權息來源；美股待接
+            return []
+
+        events: list[dict[str, Any]] = _tw_filing_deadlines(from_date, to_date)
+        events.extend(await self._tw_ex_dividend_events(from_date, to_date))
+        events.sort(key=lambda e: (e["event_date"], e.get("symbol") or ""))
+        return events
+
+    async def _tw_ex_dividend_events(
+        self, from_date: date_type, to_date: date_type
+    ) -> list[dict[str, Any]]:
+        """從 FinMind 本地庫讀除權息事件；未啟用或失敗時回空（日曆仍有法定期限可看）。"""
+        if not getattr(settings, "FINMIND_LOCAL_ENABLED", False):
+            return []
+
+        cache_key = f"cache:market:calendar:exdiv:{from_date}:{to_date}"
+        try:
+            redis = await get_redis(RedisDB.CACHE)
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as exc:
+            logger.warning("market.calendar.cache_read_failed", error=str(exc))
+            redis = None
+
+        try:
+            from app.data_sources.tw.finmind_local_source import FinMindLocalSource
+
+            rows = await FinMindLocalSource(settings).fetch_dividend_events(from_date, to_date)
+        except Exception as exc:
+            # 日曆不該因為本地庫連不上就整頁掛掉
+            logger.warning("market.calendar.exdiv_failed", error=str(exc))
+            return []
+
+        names = await self.repo.get_names_for([r["stock_id"] for r in rows])
         out: list[dict[str, Any]] = []
-        cur = from_date
-        while cur <= to_date:
-            # 每月 1 日塞一個 mock 「公司財報週」
-            if cur.day == 1:
-                out.append(
-                    {
-                        "symbol": "MOCK",
-                        "market": m,
-                        "event_type": "earnings_week_start",
-                        "event_date": cur.isoformat(),
-                        "title": f"{m} 市場 — {cur.strftime('%Y-%m')} 財報季開跑",
-                    }
-                )
-            cur = _next_day(cur)
+        for r in rows:
+            sym = r["stock_id"]
+            name = names.get(sym) or sym
+            if r["kind"] == "cash":
+                amount = r.get("cash")
+                title = f"{name} 除息" + (f" {amount} 元" if amount else "")
+            else:
+                amount = r.get("stock_div")
+                title = f"{name} 除權" + (f" {amount} 元" if amount else "")
+            out.append(
+                {
+                    "symbol": sym,
+                    "name": name,
+                    "market": "TW",
+                    "event_type": "ex_dividend",
+                    "event_date": r["ex_date"].isoformat(),
+                    "title": title,
+                    "source": "finmind_local",
+                }
+            )
+
+        if redis is not None:
+            try:
+                await redis.set(cache_key, json.dumps(out), ex=CALENDAR_CACHE_TTL)
+            except Exception as exc:
+                logger.warning("market.calendar.cache_write_failed", error=str(exc))
         return out
+
+
+def _deadline_event(d: date_type, title: str) -> dict[str, Any]:
+    """法定申報期限事件（全市場共通，故無個股 symbol）。"""
+    return {
+        "symbol": None,
+        "name": None,
+        "market": "TW",
+        "event_type": "filing_deadline",
+        "event_date": d.isoformat(),
+        "title": title,
+        "source": "statutory",
+    }
+
+
+def _tw_filing_deadlines(from_date: date_type, to_date: date_type) -> list[dict[str, Any]]:
+    """產生 from~to 之間的法定申報期限事件。
+
+    期限一律委派給 app.domain.disclosure_calendar（證交法 §36 的權威實作，已處理年報 vs
+    季報、金融保險業例外、週末順延等）——不要在這裡重寫一份，那份才是單一事實來源。
+    此處用 FilerCategory 預設值（一般公司），因日曆是全市場視角、不分個股類別。
+    """
+    out: list[dict[str, Any]] = []
+    # 前後各多掃一年：年報期限落在次年（fiscal_year=Y 的年報在 Y+1/3/31），
+    # 12 月營收期限也落在次年 1 月，不多掃會漏掉跨年的事件。
+    for year in range(from_date.year - 1, to_date.year + 2):
+        for quarter, label in (
+            (1, f"{year} 第一季財報申報截止"),
+            (2, f"{year} 半年度財報申報截止"),
+            (3, f"{year} 第三季財報申報截止"),
+            (4, f"{year} 年度財報申報截止"),
+        ):
+            out.append((statement_deadline(year, quarter), label))
+        for month in range(1, 13):
+            out.append(
+                (
+                    monthly_revenue_deadline(year, month),
+                    f"{year}-{month:02d} 月營收公告截止",
+                )
+            )
+
+    return [_deadline_event(d, t) for d, t in out if from_date <= d <= to_date]
 
 
 def _next_day(d: date_type) -> date_type:
@@ -217,4 +315,4 @@ def _next_day(d: date_type) -> date_type:
     return d + timedelta(days=1)
 
 
-__all__ = ["MARKET_VALUES", "OVERVIEW_CACHE_TTL", "MarketService"]
+__all__ = ["CALENDAR_CACHE_TTL", "MARKET_VALUES", "OVERVIEW_CACHE_TTL", "MarketService"]

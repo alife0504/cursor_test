@@ -229,6 +229,16 @@ class MarketRepository(BaseRepository):
             await self.session.commit()
         return len(clean)
 
+    async def get_names_for(self, symbols: list[str]) -> dict[str, str]:
+        """批次取股票中文名（symbol → name）。查無者不會出現在結果中。"""
+        if not symbols:
+            return {}
+        stmt = select(StockList.symbol, StockList.name).where(
+            StockList.symbol.in_(list(set(symbols)))
+        )
+        result = await self.session.execute(stmt)
+        return {r.symbol: r.name for r in result.all() if r.name}
+
     # ── 漲跌幅 / 成交量排行 ────────────────────────────────
     async def get_movers(
         self,

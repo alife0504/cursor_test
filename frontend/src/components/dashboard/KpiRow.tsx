@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/common/ErrorState";
 import { KpiCard } from "@/components/common/KpiCard";
 import { KpiSkeleton } from "@/components/common/LoadingSkeleton";
-import { useMarketOverview } from "@/hooks/useMarket";
+import { useMarketOverview, useRealtimeIndex } from "@/hooks/useMarket";
 import { useOrders } from "@/hooks/useOrders";
 import { useMyQuota } from "@/hooks/useQuota";
 import { useOhlcv } from "@/hooks/useStocks";
@@ -73,6 +73,8 @@ export function KpiRow() {
   const end = isoDate(0);
 
   const market = useMarketOverview("TW");
+  // 盤中即時大盤（每 5 秒；收盤後自動停止輪詢）
+  const realtime = useRealtimeIndex();
   const quota = useMyQuota();
   const orders = useOrders({ status: "PENDING", limit: 1 });
 
@@ -113,10 +115,35 @@ export function KpiRow() {
     twseSpark,
   );
   const tpex = deriveIndexValue(idxObj?.tpex_close, idxObj?.tpex_change_pct, tpexSpark);
-  const twseClose = twse.close;
-  const twseChange = twse.change;
-  const tpexClose = tpex.close;
-  const tpexChange = tpex.change;
+
+  // 盤中有即時報價就蓋掉盤後值（每 5 秒更新）；未開通/收盤/取不到時自動退回盤後值。
+  const rtQuotes = realtime.data?.available ? (realtime.data.quotes ?? []) : [];
+  const rtOf = (sym: string) => rtQuotes.find((q) => q.symbol === sym);
+  const merge = (
+    eod: { close: string | null; change: number | string | null },
+    sym: string,
+  ) => {
+    const rt = rtOf(sym);
+    if (rt?.price == null) return { ...eod, live: false };
+    return {
+      close: Number(rt.price).toLocaleString("en-US", { maximumFractionDigits: 2 }),
+      // delta 語意是「漲跌%」，故用 change_rate 而非 change（點數）
+      change: rt.change_rate != null ? Number(rt.change_rate) : eod.change,
+      live: true,
+    };
+  };
+
+  const twseV = merge(twse, "TAIEX");
+  const tpexV = merge(tpex, "TPEX");
+  const twseClose = twseV.close;
+  const twseChange = twseV.change;
+  const tpexClose = tpexV.close;
+  const tpexChange = tpexV.change;
+
+  // 即時時間標記（只取 HH:MM:SS）
+  const liveAt = realtime.data?.as_of?.slice(11, 19) ?? null;
+  const liveSubtitle = (live: boolean, fallback: string) =>
+    live && liveAt ? `即時 · ${liveAt}` : fallback;
 
   const used = quota.data?.used_usd ?? "0";
   const limit = quota.data?.limit_usd ?? "0";
@@ -136,7 +163,11 @@ export function KpiRow() {
         deltaMode="raw"
         spark={twseSpark}
         icon={TrendingUp}
-        subtitle={twseClose !== null ? "近 14 日走勢" : "指數資料待接入"}
+        subtitle={
+          twseClose !== null
+            ? liveSubtitle(twseV.live, "近 14 日走勢")
+            : "指數資料待接入"
+        }
         accent={
           twseChange !== null && Number(twseChange) > 0
             ? "bull"
@@ -154,7 +185,11 @@ export function KpiRow() {
         deltaMode="raw"
         spark={tpexSpark}
         icon={TrendingUp}
-        subtitle={tpexClose !== null ? "近 14 日走勢" : "指數資料待接入"}
+        subtitle={
+          tpexClose !== null
+            ? liveSubtitle(tpexV.live, "近 14 日走勢")
+            : "指數資料待接入"
+        }
         accent={
           tpexChange !== null && Number(tpexChange) > 0
             ? "bull"
