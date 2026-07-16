@@ -97,23 +97,59 @@ class DataPipelineService:
         sources = self._sources_for(DataKind.OHLCV, market=market)
         if not sources:
             raise ValueError("DataPipelineService: 無 OHLCV source 註冊")
-        fb = DataSourceFallback(sources)
-        df = await fb.fetch_ohlcv(symbol, start, end)
-        if df.empty:
+
+        # **按優先序合併，而非「第一個有資料就用」**：
+        # DataSourceFallback 只要來源回任何資料就採用，但對日期區間查詢「有資料」≠「涵蓋完整」。
+        # 實測 finmind_local 只到 2026-07-07（本地庫回補中），卻因 priority 最高而勝出 →
+        # 07-08 之後永遠拿不到，個股近期價格長期缺漏（finmind API 與 twse_openapi 都有到 07-15）。
+        # 故逐一詢問各來源，每個日期由**優先序最高且有該日資料**的來源提供；
+        # 一旦已涵蓋到請求上限即提早結束，本地庫補齊後就會退化成只打第一個來源。
+        merged: dict[Any, dict[str, Any]] = {}
+        used_names: list[str] = []
+        for src in sources:
+            if merged and max(merged) >= end:
+                break  # 已涵蓋到 end，不必再問後面的來源（省配額）
+            try:
+                df = await src.fetch_ohlcv(symbol, start, end)
+            except Exception:  # 單一來源失敗不影響其他
+                logger.warning(
+                    "data_pipeline.sync_ohlcv.source_failed",
+                    symbol=symbol,
+                    source=src.name,
+                    exc_info=True,
+                )
+                continue
+            if df is None or df.empty:
+                continue
+            added = 0
+            for r in df.to_dict(orient="records"):
+                d = r.get("date")
+                if d is None or d in merged:
+                    continue  # 已有較高優先序來源提供該日
+                r["symbol"] = store_as or symbol
+                r["_source"] = src.name
+                merged[d] = r
+                added += 1
+            if added:
+                used_names.append(src.name)
+
+        if not merged:
             logger.info("data_pipeline.sync_ohlcv.empty", symbol=symbol, market=market)
             return 0
-        rows = df.to_dict(orient="records")
-        for r in rows:
-            r["symbol"] = store_as or symbol
-        # 標「實際取得資料的 source」（fb.last_used_source），而非優先序第一個——否則 fallback
-        # 生效時 source 欄位會誤標成主源（如明明來自 finmind_local 卻標 finmind）。
-        used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)
-        n = await self.ohlcv_repo.upsert_many(rows, source=used, commit=True)
+
+        # 逐來源分批寫入，讓 source 欄位標的是「該列實際的來源」而非整批一個值
+        by_source: dict[str, list[dict[str, Any]]] = {}
+        for r in merged.values():
+            by_source.setdefault(r.pop("_source"), []).append(r)
+        n = 0
+        for name, batch in by_source.items():
+            n += await self.ohlcv_repo.upsert_many(batch, source=name, commit=True)
         logger.info(
             "data_pipeline.sync_ohlcv.done",
             symbol=symbol,
             market=market,
             written=n,
+            sources=used_names,
         )
         return n
 
