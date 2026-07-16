@@ -58,7 +58,7 @@ class MarketRepository(BaseRepository):
         stmt = (
             select(func.max(StockPrice.date))
             .join(StockList, StockList.symbol == StockPrice.symbol)
-            .where(StockList.market.in_(markets))
+            .where(and_(StockList.market.in_(markets), StockList.is_active.is_(True)))
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -91,6 +91,9 @@ class MarketRepository(BaseRepository):
             .where(
                 and_(
                     StockList.market.in_(markets),
+                    # 只計 active 標的：權證已於 stock_list 停用。不濾的話漲跌家數會被權證
+                    # 灌爆（實測 2026-07-15 當日 367 筆中有 300 筆是權證 = 81.7%）。
+                    StockList.is_active.is_(True),
                     StockPrice.date == as_of,
                 )
             )
@@ -178,6 +181,7 @@ class MarketRepository(BaseRepository):
             .where(
                 and_(
                     StockList.market.in_(markets),
+                    StockList.is_active.is_(True),
                     InstitutionalTrading.date == target_date,
                 )
             )
@@ -285,6 +289,8 @@ class MarketRepository(BaseRepository):
             .where(
                 and_(
                     StockList.market.in_(markets),
+                    # 同 get_overview_aggregates：不濾 active，排行榜會塞滿權證
+                    StockList.is_active.is_(True),
                     StockPrice.date == as_of,
                 )
             )

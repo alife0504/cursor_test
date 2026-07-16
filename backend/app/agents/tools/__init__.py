@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.errors import ValidationError
 from app.core.logging_config import get_logger
@@ -182,11 +182,21 @@ class ToolRegistry:
         self,
         symbol: str,
         quarters_back: int = 4,
+        *,
+        as_of: date | None = None,
     ) -> list[dict[str, Any]]:
-        """取得近 N 季財務報表（IS+BS+CF）。
+        """取得近 N 季財務報表（IS+BS+CF），**只回在 as_of 當下已公開的期別**。
 
         Args:
             quarters_back: 取最近幾季（含季報 + 年報；fiscal_quarter=0 是年報）。
+            as_of: point-in-time 基準日，預設今天。只回
+                `COALESCE(announced_at, disclosure_deadline) <= as_of` 的資料。
+
+        PIT 正確性：財報期末 ≠ 可得日。Q1 期間 3/31 結束，但法定 5/15 才公告——若讓 4 月的
+        分析讀到 Q1 數字就是**偷看未來**，回測會系統性高估（與存活者偏誤同類：不會報錯）。
+        上游 FinMind 不提供實際公告日（announced_at 全 NULL），故以法定期限
+        （disclosure_deadline）當邊界：correct-by-construction，永遠不會偷看未來，
+        代價是低估「你多早知道」。保守會少賺、樂觀會爆炸。
 
         Returns:
             list of {fiscal_year, fiscal_quarter, statement_type, revenue, net_income, eps, ...}。
@@ -194,11 +204,20 @@ class ToolRegistry:
         """
         if quarters_back <= 0 or quarters_back > 20:
             raise ValidationError(message_zh="quarters_back 必須在 1~20 之間")
+        pit = as_of or datetime.now(UTC).date()
         limit_rows = quarters_back * 3  # IS / BS / CF
+        available_at = func.coalesce(
+            FinancialStatement.announced_at, FinancialStatement.disclosure_deadline
+        )
         async with self.ro() as session:
             stmt = (
                 select(FinancialStatement)
-                .where(FinancialStatement.symbol == symbol)
+                .where(
+                    FinancialStatement.symbol == symbol,
+                    # 期限未知（兩欄都 NULL）時保守排除——寧可少看，不可偷看
+                    available_at.is_not(None),
+                    available_at <= pit,
+                )
                 .order_by(
                     FinancialStatement.fiscal_year.desc(),
                     FinancialStatement.fiscal_quarter.desc(),

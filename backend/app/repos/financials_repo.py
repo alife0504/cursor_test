@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from datetime import date as date_type
 from decimal import Decimal
 from typing import Any
 
@@ -18,11 +19,33 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.logging_config import get_logger
+from app.domain.disclosure_calendar import monthly_revenue_deadline, statement_deadline
 from app.models.financials import FinancialStatement
 from app.models.tw_specific import MonthlyRevenue
 from app.repos.base import BaseRepository
 
 logger = get_logger(__name__)
+
+
+def _safe_statement_deadline(fiscal_year: int, fiscal_quarter: int) -> date_type | None:
+    """算財報法定期限；資料異常（如 quarter 超出 1~4）不該讓整批 upsert 掛掉。"""
+    try:
+        return statement_deadline(fiscal_year, fiscal_quarter)
+    except (ValueError, TypeError):
+        logger.warning(
+            "financials.deadline.skip", fiscal_year=fiscal_year, fiscal_quarter=fiscal_quarter
+        )
+        return None
+
+
+def _safe_monthly_revenue_deadline(year: int, month: int) -> date_type | None:
+    """算月營收法定期限；月份異常時回 None 而非中斷。"""
+    try:
+        return monthly_revenue_deadline(year, month)
+    except (ValueError, TypeError):
+        logger.warning("monthly_revenue.deadline.skip", year=year, month=month)
+        return None
+
 
 # financial_statements 的 11 個金額 typed 欄位（IS/BS/CF 合計）——
 # upsert 時一律填齊（缺值 None）以保 pg_insert 多列 VALUES 欄位一致。
@@ -82,13 +105,18 @@ class FinancialsRepository(BaseRepository):
                 for k in ("symbol", "fiscal_year", "fiscal_quarter", "statement_type")
             ):
                 continue
+            fy, fq = int(r["fiscal_year"]), int(r["fiscal_quarter"])
             entry: dict[str, Any] = {
                 "symbol": r["symbol"],
-                "fiscal_year": int(r["fiscal_year"]),
-                "fiscal_quarter": int(r["fiscal_quarter"]),
+                "fiscal_year": fy,
+                "fiscal_quarter": fq,
                 "statement_type": r["statement_type"],
                 "payload": r.get("payload"),
+                # 實際公告日：上游不給 → 通常為 None。絕不用期限頂替（見 model docstring）
                 "announced_at": r.get("announced_at"),
+                # 法定期限：純計算，寫入時就算好，PIT 查詢才有邊界可用
+                "disclosure_deadline": r.get("disclosure_deadline")
+                or _safe_statement_deadline(fy, fq),
                 "source": r.get("source"),
             }
             # 一律填齊所有 typed 欄位（缺值填 None）——pg_insert().values(list) 要求每列
@@ -105,6 +133,7 @@ class FinancialsRepository(BaseRepository):
         update_set: dict[str, Any] = {
             "payload": stmt.excluded.payload,
             "announced_at": stmt.excluded.announced_at,
+            "disclosure_deadline": stmt.excluded.disclosure_deadline,
             "source": stmt.excluded.source,
         }
         for col in _STATEMENT_MONEY_COLS:
@@ -152,6 +181,8 @@ class FinancialsRepository(BaseRepository):
                 "ytd_revenue": _ensure_decimal(r.get("ytd_revenue")),
                 "ytd_yoy": _ensure_decimal(r.get("ytd_yoy")),
                 "announced_at": r.get("announced_at"),
+                "disclosure_deadline": r.get("disclosure_deadline")
+                or _safe_monthly_revenue_deadline(int(r["year"]), int(r["month"])),
                 "source": r.get("source"),
             }
             clean.append(entry)

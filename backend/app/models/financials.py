@@ -90,7 +90,16 @@ class FinancialStatement(Base):
     """完整 source response（如 FinMind 的 type / value 行對照）"""
 
     announced_at: Mapped[date_type | None] = mapped_column(Date)
-    """財報公告日（CommonReturn 的填報日）。"""
+    """**實際**公告日。FinMind 不提供財報公告日 → 目前全為 NULL，待接 MOPS。
+
+    ⚠️ 絕不可把法定期限填進此欄——那會造出一個會說謊的欄位。期限請用 disclosure_deadline。
+    """
+    disclosure_deadline: Mapped[date_type | None] = mapped_column(Date)
+    """**法定**最晚公告期限（由 app.domain.disclosure_calendar 依證交法 §36 推算）。
+
+    PIT 邊界：`COALESCE(announced_at, disclosure_deadline) <= as_of`。
+    用期限當邊界是 correct-by-construction——永遠不會偷看未來，代價是低估你多早知道。
+    """
     source: Mapped[str | None] = mapped_column(String(30))
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -104,6 +113,7 @@ class FinancialStatement(Base):
             "fiscal_quarter",
         ),
         Index("ix_financial_statements_announced", "announced_at"),
+        Index("ix_financial_statements_disclosure_deadline", "disclosure_deadline"),
     )
 
 

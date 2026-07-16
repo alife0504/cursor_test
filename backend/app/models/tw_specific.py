@@ -116,12 +116,25 @@ class MonthlyRevenue(Base):
     ytd_yoy: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
 
     announced_at: Mapped[date_type | None] = mapped_column(Date)
+    """**實際**公告日。FinMind 不提供 → 目前全為 NULL，待接 MOPS。
+
+    ⚠️ 不可拿 FinMind 的 date（次月 1 日的慣例）充當公告日——法定是次月 10 日前，
+    那會偷看未來 9 天。期限請用 disclosure_deadline。
+    """
+    disclosure_deadline: Mapped[date_type | None] = mapped_column(Date)
+    """**法定**最晚公告期限（app.domain.disclosure_calendar，證交法 §36：次月 10 日前）。
+
+    PIT 邊界：`COALESCE(announced_at, disclosure_deadline) <= as_of`。
+    """
     source: Mapped[str | None] = mapped_column(String(30))
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    __table_args__ = (Index("ix_monthly_revenue_year_month", "year", "month"),)
+    __table_args__ = (
+        Index("ix_monthly_revenue_year_month", "year", "month"),
+        Index("ix_monthly_revenue_disclosure_deadline", "disclosure_deadline"),
+    )
 
 
 __all__ = ["InstitutionalTrading", "MarginTrading", "MonthlyRevenue"]
