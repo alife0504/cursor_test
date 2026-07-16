@@ -384,11 +384,53 @@ def test_normalize_handles_missing_and_bad_values() -> None:
 
 
 @pytest.mark.asyncio
-async def test_multiple_symbols_joined_as_comma_param(mock_transport) -> None:
-    """多代號應以逗號合併成單一 data_id 參數（一次請求，省配額）。"""
+async def test_single_symbol_uses_data_id(mock_transport) -> None:
+    """單一代號直接帶 data_id。"""
     mock_transport["response_factory"] = lambda m, u, k: _resp(
-        {"msg": "ok", "status": 200, "data": []}
+        {"msg": "ok", "status": 200, "data": [{"stock_id": "2330", "close": 1150}]}
     )
-    await _client().fetch_stock_snapshot(["2330", "2317"])
+    await _client().fetch_stock_snapshot(["2330"])
     assert len(mock_transport["calls"]) == 1
-    assert mock_transport["calls"][0]["kwargs"]["params"]["data_id"] == "2330,2317"
+    assert mock_transport["calls"][0]["kwargs"]["params"]["data_id"] == "2330"
+
+
+@pytest.mark.asyncio
+async def test_multiple_symbols_fetch_all_then_filter(mock_transport) -> None:
+    """多代號不可用逗號合併：實測 FinMind 對 `data_id=2330,2317` 會靜默回 data:[]。
+
+    改為一次抓全部（不帶 data_id，官方語意=全部）再本地過濾：1 次請求即可。
+    """
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {
+            "msg": "ok",
+            "status": 200,
+            "data": [
+                {"stock_id": "2330", "close": 1150},
+                {"stock_id": "2317", "close": 240},
+                {"stock_id": "5701", "close": 4.38},  # 沒要的股票要被濾掉
+            ],
+        }
+    )
+    res = await _client().fetch_stock_snapshot(["2330", "2317"])
+    assert len(mock_transport["calls"]) == 1
+    # 關鍵迴歸：不得帶 data_id（帶逗號合併值會回空）
+    assert "data_id" not in mock_transport["calls"][0]["kwargs"]["params"]
+    assert {q["symbol"] for q in res["quotes"]} == {"2330", "2317"}
+
+
+@pytest.mark.asyncio
+async def test_multiple_futures_filtered_by_prefix(mock_transport) -> None:
+    """data_id=TXF 實回各月份契約（futures_id 形如 TXFR2），故多代號過濾用 prefix。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {
+            "msg": "ok",
+            "status": 200,
+            "data": [
+                {"futures_id": "TXFR2", "close": 45721},
+                {"futures_id": "MXFR2", "close": 45700},
+                {"futures_id": "TEFR2", "close": 2000},  # 電子期，不該出現
+            ],
+        }
+    )
+    res = await _client().fetch_futures_snapshot(["TXF", "MXF"])
+    assert {q["symbol"] for q in res["quotes"]} == {"TXFR2", "MXFR2"}

@@ -113,8 +113,12 @@ class FinMindRealtimeClient:
         tok = self.settings.FINMIND_TOKEN
         return tok.get_secret_value() if tok else None
 
-    async def _call(self, url: str, data_ids: list[str]) -> dict[str, Any]:
-        """呼叫單一 snapshot 端點；回 FinMind 原始 envelope 或結構化 unavailable。"""
+    async def _call(self, url: str, data_id: str | None) -> dict[str, Any]:
+        """呼叫單一 snapshot 端點；回 FinMind 原始 envelope 或結構化 unavailable。
+
+        data_id=None → 官方語意是「回全部」（實測台股一次回 2,851 檔）。
+        ⚠️ 不可用逗號合併多代號：實測 `data_id=2330,2317` 會回 data:[]（靜默空結果）。
+        """
         token = self._token()
         if not token:
             return _unavailable(Reason.NO_TOKEN)
@@ -124,9 +128,8 @@ class FinMindRealtimeClient:
         # /data 端點成立），故兩者都送以求相容。注意 token 值本身不含 "Bearer " 前綴——
         # 前綴屬於 header 格式，誤寫進 token 會被判 "Token is illegal"。
         params: dict[str, Any] = {"token": token}
-        if data_ids:
-            # FinMind snapshot 端點以逗號分隔多代號
-            params["data_id"] = ",".join(data_ids)
+        if data_id:
+            params["data_id"] = data_id
 
         # 即時報價要短 timeout：預設(connect 10s/read 30s)×3 retries 最壞會拖到 ~2 分鐘，
         # 而本呼叫期間 request 仍握著 rw DB 連線（get_current_user 依賴），會拖垮連線池。
@@ -234,51 +237,67 @@ class FinMindRealtimeClient:
         out["symbol"] = _pick(rec, "futures_id", "FuturesID", "contract_id", "data_id", "stock_id")
         return out
 
+    @staticmethod
+    def _ok(quotes: list[dict[str, Any]]) -> dict[str, Any]:
+        if not quotes:
+            return _unavailable(Reason.EMPTY)
+        return {
+            "available": True,
+            "reason": None,
+            "message": None,
+            "detail": None,
+            "as_of": quotes[0].get("time"),
+            "quotes": quotes,
+        }
+
     async def fetch_stock_snapshot(self, symbols: list[str]) -> dict[str, Any]:
-        """台股即時 tick snapshot。symbols 為股票代號 list（如 ['2330','2317']）。"""
+        """台股即時 tick snapshot。symbols 為股票代號 list（如 ['2330','2317']）。
+
+        單一代號 → 直接帶 data_id；多代號 → 一次抓全部（約 2,851 檔）再本地過濾。
+        FinMind 不支援逗號合併多代號（會靜默回空），而「抓全部」不論幾檔都只花 1 次額度，
+        比逐檔各發一次請求更省（Sponsor 6000 req/hr）。
+        """
         if not self.settings.FINMIND_REALTIME_ENABLED:
             return _unavailable(Reason.DISABLED)
         symbols = [s.strip() for s in symbols if s and s.strip()]
         if not symbols:
             return _unavailable(Reason.NO_SYMBOLS)
 
-        res = await self._call(STOCK_SNAPSHOT_URL, symbols)
+        single = symbols[0] if len(symbols) == 1 else None
+        res = await self._call(STOCK_SNAPSHOT_URL, single)
         if not res.get("ok"):
             return res
-        quotes = [self._normalize_stock(r) for r in res["data"]]
-        if not quotes:
-            return _unavailable(Reason.EMPTY)
-        return {
-            "available": True,
-            "reason": None,
-            "message": None,
-            "detail": None,
-            "as_of": quotes[0].get("time"),
-            "quotes": quotes,
-        }
+
+        records = res["data"]
+        if single is None:
+            want = {s.upper() for s in symbols}
+            records = [r for r in records if str(r.get("stock_id", "")).upper() in want]
+        return self._ok([self._normalize_stock(r) for r in records])
 
     async def fetch_futures_snapshot(self, contract_ids: list[str]) -> dict[str, Any]:
-        """台股期貨即時 snapshot。contract_ids 為期貨代號 list（如 ['TX','MTX']）。"""
+        """台股期貨即時 snapshot。contract_ids 為期貨代號 list（如 ['TXF','MXF']）。
+
+        注意 data_id=TXF 回的是各月份契約（futures_id 形如 `TXFR2`），故多代號過濾用
+        prefix 比對而非完全相等。
+        """
         if not self.settings.FINMIND_REALTIME_ENABLED:
             return _unavailable(Reason.DISABLED)
         contract_ids = [s.strip() for s in contract_ids if s and s.strip()]
         if not contract_ids:
             return _unavailable(Reason.NO_SYMBOLS)
 
-        res = await self._call(FUTURES_SNAPSHOT_URL, contract_ids)
+        single = contract_ids[0] if len(contract_ids) == 1 else None
+        res = await self._call(FUTURES_SNAPSHOT_URL, single)
         if not res.get("ok"):
             return res
-        quotes = [self._normalize_futures(r) for r in res["data"]]
-        if not quotes:
-            return _unavailable(Reason.EMPTY)
-        return {
-            "available": True,
-            "reason": None,
-            "message": None,
-            "detail": None,
-            "as_of": quotes[0].get("time"),
-            "quotes": quotes,
-        }
+
+        records = res["data"]
+        if single is None:
+            prefixes = tuple(c.upper() for c in contract_ids)
+            records = [
+                r for r in records if str(r.get("futures_id", "")).upper().startswith(prefixes)
+            ]
+        return self._ok([self._normalize_futures(r) for r in records])
 
 
 __all__ = ["FinMindRealtimeClient", "Reason"]
