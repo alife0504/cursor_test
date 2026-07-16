@@ -21,24 +21,45 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
-from app.domain.disclosure_calendar import monthly_revenue_deadline, statement_deadline
+from app.domain.disclosure_calendar import (
+    FilerCategory,
+    monthly_revenue_deadline,
+    statement_deadline,
+)
+from app.domain.filer_classification import SQL_FILER_CATEGORY_EXPR
 
-# 一次更新一個 (year, quarter) 組合 → SQL 短、可觀察進度，且每組期限相同故能整批更新
+# 逐 (期別 × 申報人類別) 更新。**必須分類別**：金融保險 Q2 是 8/31、一般是 8/14，
+# 全部套 GENERAL 會對金融股寫入過早的期限 → 偷看未來 18 天（見 filer_classification）。
+# 類別在 DB 端用子查詢判定；stock_list 查無該 symbol 時取 'insurer'（保守）。
+_CAT = (
+    # 內插的是本模組常數而非使用者輸入；期限/類別值仍走 bind param（故下行抑制 S608）
+    f"COALESCE((SELECT {SQL_FILER_CATEGORY_EXPR} FROM stock_list s"  # noqa: S608
+    " WHERE s.symbol = f.symbol), 'insurer')"
+)
+
 _STMT_SQL = text(
-    """
-    UPDATE financial_statements
+    f"""
+    UPDATE financial_statements f
        SET disclosure_deadline = :deadline
-     WHERE fiscal_year = :year AND fiscal_quarter = :quarter
-       AND disclosure_deadline IS DISTINCT FROM :deadline
-    """
+     WHERE f.fiscal_year = :year AND f.fiscal_quarter = :quarter
+       AND {_CAT} = :category
+       AND f.disclosure_deadline IS DISTINCT FROM :deadline
+    """  # noqa: S608 — 內插的是本模組常數，非使用者輸入
 )
 _REV_SQL = text(
-    """
-    UPDATE monthly_revenue
+    f"""
+    UPDATE monthly_revenue f
        SET disclosure_deadline = :deadline
-     WHERE year = :year AND month = :month
-       AND disclosure_deadline IS DISTINCT FROM :deadline
-    """
+     WHERE f.year = :year AND f.month = :month
+       AND {_CAT} = :category
+       AND f.disclosure_deadline IS DISTINCT FROM :deadline
+    """  # noqa: S608 — 同上
+)
+
+#: 要逐一套用的類別。GENERAL 與 INSURER 的期限不同故必須分開跑。
+_CATEGORIES: tuple[tuple[str, FilerCategory], ...] = (
+    ("general", FilerCategory.GENERAL),
+    ("insurer", FilerCategory.INSURER),
 )
 
 
@@ -66,32 +87,46 @@ async def main(dry_run: bool) -> None:
 
             fs_total = 0
             for year, quarter in fs_periods:
-                try:
-                    deadline = statement_deadline(int(year), int(quarter))
-                except (ValueError, TypeError) as exc:
-                    print(f"  [skip] {year}Q{quarter}: {exc}")
-                    continue
-                if dry_run:
-                    print(f"  [dry-run] {year}Q{quarter} → {deadline}")
-                    continue
-                res = await session.execute(
-                    _STMT_SQL, {"deadline": deadline, "year": int(year), "quarter": int(quarter)}
-                )
-                fs_total += res.rowcount or 0
+                for cat_sql, cat in _CATEGORIES:
+                    try:
+                        deadline = statement_deadline(int(year), int(quarter), category=cat)
+                    except (ValueError, TypeError) as exc:
+                        print(f"  [skip] {year}Q{quarter} {cat_sql}: {exc}")
+                        continue
+                    if dry_run:
+                        print(f"  [dry-run] {year}Q{quarter} {cat_sql} → {deadline}")
+                        continue
+                    res = await session.execute(
+                        _STMT_SQL,
+                        {
+                            "deadline": deadline,
+                            "year": int(year),
+                            "quarter": int(quarter),
+                            "category": cat_sql,
+                        },
+                    )
+                    fs_total += res.rowcount or 0
 
             rev_total = 0
             for year, month in rev_periods:
-                try:
-                    deadline = monthly_revenue_deadline(int(year), int(month))
-                except (ValueError, TypeError) as exc:
-                    print(f"  [skip] {year}-{month}: {exc}")
-                    continue
-                if dry_run:
-                    continue
-                res = await session.execute(
-                    _REV_SQL, {"deadline": deadline, "year": int(year), "month": int(month)}
-                )
-                rev_total += res.rowcount or 0
+                for cat_sql, cat in _CATEGORIES:
+                    try:
+                        deadline = monthly_revenue_deadline(int(year), int(month), category=cat)
+                    except (ValueError, TypeError) as exc:
+                        print(f"  [skip] {year}-{month} {cat_sql}: {exc}")
+                        continue
+                    if dry_run:
+                        continue
+                    res = await session.execute(
+                        _REV_SQL,
+                        {
+                            "deadline": deadline,
+                            "year": int(year),
+                            "month": int(month),
+                            "category": cat_sql,
+                        },
+                    )
+                    rev_total += res.rowcount or 0
 
             if dry_run:
                 print("dry-run：未寫入")

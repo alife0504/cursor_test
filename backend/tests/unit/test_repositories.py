@@ -275,7 +275,9 @@ async def test_financials_repo_decimal_precision() -> None:
         ]
     )
     assert n == 1
-    session.execute.assert_awaited_once()
+    # 2 次 execute：先 _filer_categories 查 symbol→產業別（決定法定期限用哪組），
+    # 再 pg_insert。金融保險 Q2 是 8/31、一般是 8/14，不分類會偷看未來 18 天。
+    assert session.execute.await_count == 2
     # 驗 clean stage 後的 entry 用 Decimal 而非 float
     val = _ensure_decimal("300000000.123456")
     assert isinstance(val, Decimal)

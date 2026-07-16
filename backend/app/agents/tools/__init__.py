@@ -463,15 +463,33 @@ class ToolRegistry:
         self,
         symbol: str,
         months_back: int = 12,
+        *,
+        as_of: date | None = None,
     ) -> list[dict[str, Any]]:
-        """月營收（台股 only，第 10 號公報）。"""
+        """月營收（台股 only，證交法 §36：次月 10 日前公告），**只回 as_of 當下已公開者**。
+
+        Args:
+            as_of: point-in-time 基準日，預設今天。
+
+        PIT：4 月營收要到 5/10（保險業 2026 起 5/15）才須公告；5/05 就讀到 4 月營收＝偷看未來。
+        與 get_financial 同樣以 COALESCE(announced_at, disclosure_deadline) 為邊界。
+        """
         self._assert_tw_only(symbol, "get_monthly_revenue")
         if months_back <= 0 or months_back > 60:
             raise ValidationError(message_zh="months_back 必須在 1~60 之間")
+        pit = as_of or datetime.now(UTC).date()
+        available_at = func.coalesce(
+            MonthlyRevenue.announced_at, MonthlyRevenue.disclosure_deadline
+        )
         async with self.ro() as session:
             stmt = (
                 select(MonthlyRevenue)
-                .where(MonthlyRevenue.symbol == symbol)
+                .where(
+                    MonthlyRevenue.symbol == symbol,
+                    # 期限未知時保守排除——寧可少看，不可偷看
+                    available_at.is_not(None),
+                    available_at <= pit,
+                )
                 .order_by(
                     MonthlyRevenue.year.desc(),
                     MonthlyRevenue.month.desc(),

@@ -19,18 +19,33 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.logging_config import get_logger
-from app.domain.disclosure_calendar import monthly_revenue_deadline, statement_deadline
+from app.domain.disclosure_calendar import (
+    FilerCategory,
+    monthly_revenue_deadline,
+    statement_deadline,
+)
+from app.domain.filer_classification import filer_category_for
 from app.models.financials import FinancialStatement
+from app.models.stock import StockList
 from app.models.tw_specific import MonthlyRevenue
 from app.repos.base import BaseRepository
 
 logger = get_logger(__name__)
 
 
-def _safe_statement_deadline(fiscal_year: int, fiscal_quarter: int) -> date_type | None:
-    """算財報法定期限；資料異常（如 quarter 超出 1~4）不該讓整批 upsert 掛掉。"""
+def _safe_statement_deadline(
+    fiscal_year: int,
+    fiscal_quarter: int,
+    category: FilerCategory = FilerCategory.INSURER,
+) -> date_type | None:
+    """算財報法定期限；資料異常（如 quarter 超出 1~4）不該讓整批 upsert 掛掉。
+
+    ⚠️ category 預設 **INSURER 而非 GENERAL**：金融保險 Q2 是 8/31、一般是 8/14，
+    套錯成 GENERAL 會寫入**過早**的期限 → PIT 邊界提早開放 → 偷看未來 18 天。
+    未知時取期限最晚者才安全（見 app.domain.filer_classification）。
+    """
     try:
-        return statement_deadline(fiscal_year, fiscal_quarter)
+        return statement_deadline(fiscal_year, fiscal_quarter, category=category)
     except (ValueError, TypeError):
         logger.warning(
             "financials.deadline.skip", fiscal_year=fiscal_year, fiscal_quarter=fiscal_quarter
@@ -38,13 +53,29 @@ def _safe_statement_deadline(fiscal_year: int, fiscal_quarter: int) -> date_type
         return None
 
 
-def _safe_monthly_revenue_deadline(year: int, month: int) -> date_type | None:
-    """算月營收法定期限；月份異常時回 None 而非中斷。"""
+def _safe_monthly_revenue_deadline(
+    year: int,
+    month: int,
+    category: FilerCategory = FilerCategory.INSURER,
+) -> date_type | None:
+    """算月營收法定期限；月份異常時回 None 而非中斷。
+
+    ⚠️ category 預設 INSURER：保險業自 2026 起月營收得延至 15 日，套成 GENERAL(10 日)
+    會偷看未來 5 天。
+    """
     try:
-        return monthly_revenue_deadline(year, month)
+        return monthly_revenue_deadline(year, month, category=category)
     except (ValueError, TypeError):
         logger.warning("monthly_revenue.deadline.skip", year=year, month=month)
         return None
+
+
+def _rev_deadline(row: dict[str, Any], cats: dict[str, FilerCategory | None]) -> date_type | None:
+    """月營收法定期限；非台股（cat 為 None）不套台灣期限。"""
+    cat = cats.get(row["symbol"], FilerCategory.INSURER)
+    if cat is None:
+        return None
+    return _safe_monthly_revenue_deadline(int(row["year"]), int(row["month"]), cat)
 
 
 # financial_statements 的 11 個金額 typed 欄位（IS/BS/CF 合計）——
@@ -90,6 +121,35 @@ class FinancialsRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    #: 適用台灣證交法 §36 期限的市場。其餘（美股等）另有各自法規，不可套用。
+    _TW_MARKETS = ("TWSE", "TPEX")
+
+    async def _filer_categories(self, symbols: list[str]) -> dict[str, FilerCategory | None]:
+        """批次取 symbol → FilerCategory（依 stock_list.industry）。
+
+        回傳值語意：
+          - FilerCategory：台股，且已知該用哪組期限
+          - None：**非台股**（美股等）——台灣 §36 不適用，故不可算期限，
+            應寫 NULL 讓 PIT 查詢直接排除，而不是套上事實上錯誤的台灣期限。
+            （美股需另接 SEC 期限：10-Q 40/45 日、10-K 60/75/90 日，屬後續工作。）
+          - 不在結果中：stock_list 查無此 symbol → caller 退回保守預設（INSURER）
+
+        期限算晚只是保守，算早就是偷看未來。
+        """
+        if not symbols:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(StockList.symbol, StockList.market, StockList.industry).where(
+                    StockList.symbol.in_(list(set(symbols)))
+                )
+            )
+        ).all()
+        return {
+            r.symbol: (filer_category_for(r.industry) if r.market in self._TW_MARKETS else None)
+            for r in rows
+        }
+
     async def upsert_statements(self, rows: list[dict[str, Any]], *, commit: bool = False) -> int:
         """ON CONFLICT (symbol, fiscal_year, fiscal_quarter, statement_type) DO UPDATE。
 
@@ -98,14 +158,25 @@ class FinancialsRepository(BaseRepository):
         """
         if not rows:
             return 0
-        clean: list[dict[str, Any]] = []
-        for r in rows:
-            if not all(
+        # 先濾出有效列再查類別：全部無效時就不該白跑一次 DB query
+        valid = [
+            r
+            for r in rows
+            if all(
                 k in r and r[k] is not None
                 for k in ("symbol", "fiscal_year", "fiscal_quarter", "statement_type")
-            ):
-                continue
+            )
+        ]
+        if not valid:
+            return 0
+        cats = await self._filer_categories([r["symbol"] for r in valid])
+        clean: list[dict[str, Any]] = []
+        for r in valid:
             fy, fq = int(r["fiscal_year"]), int(r["fiscal_quarter"])
+            # 查不到產業別 → INSURER（保守：期限最晚，不會偷看未來）
+            # 明確為 None → 非台股，台灣 §36 不適用 → 不算期限（PIT 查詢會排除該列）
+            cat = cats.get(r["symbol"], FilerCategory.INSURER)
+            deadline = _safe_statement_deadline(fy, fq, cat) if cat is not None else None
             entry: dict[str, Any] = {
                 "symbol": r["symbol"],
                 "fiscal_year": fy,
@@ -115,8 +186,7 @@ class FinancialsRepository(BaseRepository):
                 # 實際公告日：上游不給 → 通常為 None。絕不用期限頂替（見 model docstring）
                 "announced_at": r.get("announced_at"),
                 # 法定期限：純計算，寫入時就算好，PIT 查詢才有邊界可用
-                "disclosure_deadline": r.get("disclosure_deadline")
-                or _safe_statement_deadline(fy, fq),
+                "disclosure_deadline": r.get("disclosure_deadline") or deadline,
                 "source": r.get("source"),
             }
             # 一律填齊所有 typed 欄位（缺值填 None）——pg_insert().values(list) 要求每列
@@ -165,12 +235,19 @@ class FinancialsRepository(BaseRepository):
     ) -> int:
         if not rows:
             return 0
+        valid = [
+            r
+            for r in rows
+            if r.get("symbol")
+            and r.get("year") is not None
+            and r.get("month") is not None
+            and r.get("revenue") is not None
+        ]
+        if not valid:
+            return 0
+        cats = await self._filer_categories([r["symbol"] for r in valid])
         clean: list[dict[str, Any]] = []
-        for r in rows:
-            if not r.get("symbol") or r.get("year") is None or r.get("month") is None:
-                continue
-            if r.get("revenue") is None:
-                continue
+        for r in valid:
             entry = {
                 "symbol": r["symbol"],
                 "year": int(r["year"]),
@@ -181,8 +258,7 @@ class FinancialsRepository(BaseRepository):
                 "ytd_revenue": _ensure_decimal(r.get("ytd_revenue")),
                 "ytd_yoy": _ensure_decimal(r.get("ytd_yoy")),
                 "announced_at": r.get("announced_at"),
-                "disclosure_deadline": r.get("disclosure_deadline")
-                or _safe_monthly_revenue_deadline(int(r["year"]), int(r["month"])),
+                "disclosure_deadline": r.get("disclosure_deadline") or _rev_deadline(r, cats),
                 "source": r.get("source"),
             }
             clean.append(entry)

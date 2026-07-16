@@ -30,6 +30,7 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from app.core.logging_config import configure_logging, get_logger  # noqa: E402
+from app.domain.instrument_classification import is_tw_warrant  # noqa: E402
 
 configure_logging()
 logger = get_logger(__name__)
@@ -112,7 +113,17 @@ async def fetch_twse_listed(client: httpx.AsyncClient) -> list[dict[str, Any]]:
         name = (row.get("Name") or "").strip()
         if not code or not name:
             continue
-        items.append({"symbol": code, "market": "TWSE", "name": name, "is_active": True})
+        items.append(
+            {
+                "symbol": code,
+                "market": "TWSE",
+                "name": name,
+                # 權證一律停用：使用者不交易，且會污染漲跌家數與同步 fan-out。
+                # 必須在這裡判定——upsert 的 ON CONFLICT 會覆寫 is_active，
+                # 若只靠手動 UPDATE，下次 seed 就會把兩萬多檔權證全部復活。
+                "is_active": not is_tw_warrant(code),
+            }
+        )
     logger.info("seed_stock_list.twse fetched=%d", len(items))
     return items
 
@@ -138,7 +149,14 @@ async def fetch_tpex_listed(client: httpx.AsyncClient) -> list[dict[str, Any]]:
         name = (row.get("CompanyName") or row.get("Name") or "").strip()
         if not code or not name:
             continue
-        items.append({"symbol": code, "market": "TPEX", "name": name, "is_active": True})
+        items.append(
+            {
+                "symbol": code,
+                "market": "TPEX",
+                "name": name,
+                "is_active": not is_tw_warrant(code),  # 同 TWSE：權證停用
+            }
+        )
     logger.info("seed_stock_list.tpex fetched=%d", len(items))
     return items
 
@@ -164,9 +182,10 @@ def build_us_universe() -> list[dict[str, Any]]:
 
 async def upsert_to_db(items: list[dict[str, Any]]) -> int:
     """寫入 stock_list 表（ON CONFLICT (symbol) DO UPDATE）。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from app.core.database import dispose_db_connections, get_rw_engine
     from app.repos.stock_repo import StockRepository
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     engine = get_rw_engine()
     sm = async_sessionmaker(engine, expire_on_commit=False)
