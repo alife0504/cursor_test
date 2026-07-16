@@ -119,6 +119,10 @@ class FinMindRealtimeClient:
         if not token:
             return _unavailable(Reason.NO_TOKEN)
 
+        # 官方文件（API 使用說明 / llms-full.txt）明訂 V4 以
+        # `Authorization: Bearer {token}` header 認證；query param ?token= 亦可通（實測
+        # /data 端點成立），故兩者都送以求相容。注意 token 值本身不含 "Bearer " 前綴——
+        # 前綴屬於 header 格式，誤寫進 token 會被判 "Token is illegal"。
         params: dict[str, Any] = {"token": token}
         if data_ids:
             # FinMind snapshot 端點以逗號分隔多代號
@@ -129,6 +133,7 @@ class FinMindRealtimeClient:
         # 何況等 30 秒才拿到的「即時」報價也沒有意義。
         client = get_async_client(
             name=self.name,
+            headers={"Authorization": f"Bearer {token}"},
             timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=5.0),
         )
         try:
@@ -189,33 +194,43 @@ class FinMindRealtimeClient:
 
     @staticmethod
     def _normalize_stock(rec: dict[str, Any]) -> dict[str, Any]:
-        """防禦式正規化台股即時 tick（多候選鍵；保留 raw 供 forward-compat）。"""
+        """正規化台股即時 tick。
+
+        欄位名以官方文件為準（https://finmind.github.io/llms-full.txt）：
+        amount, average_price, buy_price, buy_volume, change_price, change_rate, close,
+        high, low, open, sell_price, sell_volume, total_amount, total_volume, volume,
+        volume_ratio, yesterday_volume, date, stock_id, TickType
+        買/賣價官方用 buy_price / sell_price（非 bid/ask），漲跌用 change_price。
+        仍保留其他候選鍵與 raw passthrough，以防官方欄位微調。
+        """
         return {
             "symbol": _pick(rec, "stock_id", "StockID", "data_id"),
-            "price": _to_decimal(
-                _pick(rec, "close", "Close", "last_price", "LastPrice", "deal_price")
-            ),
+            "price": _to_decimal(_pick(rec, "close", "Close", "last_price", "deal_price")),
             "open": _to_decimal(_pick(rec, "open", "Open")),
             "high": _to_decimal(_pick(rec, "high", "High")),
             "low": _to_decimal(_pick(rec, "low", "Low")),
-            "change": _to_decimal(_pick(rec, "change", "Change")),
-            "change_rate": _to_decimal(_pick(rec, "change_rate", "ChangeRate", "change_percent")),
-            "volume": _to_int(_pick(rec, "volume", "Volume", "TickVolume")),
+            "change": _to_decimal(_pick(rec, "change_price", "change", "Change")),
+            "change_rate": _to_decimal(_pick(rec, "change_rate", "ChangeRate")),
+            "average_price": _to_decimal(_pick(rec, "average_price")),
+            "volume": _to_int(_pick(rec, "volume", "Volume")),
             "total_volume": _to_int(_pick(rec, "total_volume", "TotalVolume")),
+            "yesterday_volume": _to_int(_pick(rec, "yesterday_volume")),
+            "volume_ratio": _to_decimal(_pick(rec, "volume_ratio")),
             "amount": _to_decimal(_pick(rec, "amount", "Amount")),
             "total_amount": _to_decimal(_pick(rec, "total_amount", "TotalAmount")),
-            "bid_price": _to_decimal(_pick(rec, "best_bid_price", "BidPrice", "bid_price")),
-            "ask_price": _to_decimal(_pick(rec, "best_ask_price", "AskPrice", "ask_price")),
-            "tick_type": _pick(rec, "tick_type", "TickType"),
-            "time": _pick(rec, "date", "time", "TickTime", "datetime"),
+            "bid_price": _to_decimal(_pick(rec, "buy_price", "bid_price", "BidPrice")),
+            "bid_volume": _to_int(_pick(rec, "buy_volume", "bid_volume", "BidVolume")),
+            "ask_price": _to_decimal(_pick(rec, "sell_price", "ask_price", "AskPrice")),
+            "ask_volume": _to_int(_pick(rec, "sell_volume", "ask_volume", "AskVolume")),
+            "tick_type": _pick(rec, "TickType", "tick_type"),
+            "time": _pick(rec, "date", "time", "datetime"),
             "raw": rec,
         }
 
     @staticmethod
     def _normalize_futures(rec: dict[str, Any]) -> dict[str, Any]:
-        """防禦式正規化期貨即時 snapshot。"""
+        """正規化期貨即時 snapshot（欄位與個股相同，僅代號欄位是 futures_id）。"""
         out = FinMindRealtimeClient._normalize_stock(rec)
-        # 期貨代號欄位名不同
         out["symbol"] = _pick(rec, "futures_id", "FuturesID", "contract_id", "data_id", "stock_id")
         return out
 

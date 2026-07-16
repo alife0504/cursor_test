@@ -139,7 +139,8 @@ async def get_realtime_stock(
 @router.get("/realtime/futures", summary="台股期貨即時報價（需 FinMind Sponsor 等級）")
 async def get_realtime_futures(
     request: Request,
-    ids: str = Query(default="TX", max_length=200, description="逗號分隔期貨代號，如 TX,MTX"),
+    # 官方 data_id 是 TXF（台指期），非 TX；小型台指為 MXF
+    ids: str = Query(default="TXF", max_length=200, description="逗號分隔期貨代號，如 TXF,MXF"),
     _user: User = Depends(get_current_user),
 ):
     client = FinMindRealtimeClient(settings)

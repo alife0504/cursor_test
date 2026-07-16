@@ -240,7 +240,12 @@ def test_nan_and_infinity_values_do_not_raise() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stock_snapshot_normalization_snake_case(mock_transport) -> None:
+async def test_stock_snapshot_normalization_official_columns(mock_transport) -> None:
+    """以官方文件所載欄位為準（llms-full.txt: taiwan_stock_tick_snapshot）。
+
+    官方買/賣價是 buy_price / sell_price（不是 bid/ask），漲跌是 change_price。
+    這組欄位名先前是我臆測的，導致真實資料會抓不到 → 本測試釘住官方名稱。
+    """
     mock_transport["response_factory"] = lambda m, u, k: _resp(
         {
             "msg": "success",
@@ -249,19 +254,24 @@ async def test_stock_snapshot_normalization_snake_case(mock_transport) -> None:
                 {
                     "date": "2026-07-15 10:30:00",
                     "stock_id": "2330",
-                    "close": 1150.0,
+                    "TickType": 1,
                     "open": 1140.0,
                     "high": 1155.0,
                     "low": 1138.0,
-                    "change": 10.0,
+                    "close": 1150.0,
+                    "change_price": 10.0,
                     "change_rate": 0.88,
+                    "average_price": 1147.5,
                     "volume": 120,
                     "total_volume": 18500,
+                    "yesterday_volume": 20100,
+                    "volume_ratio": 0.92,
                     "amount": 138000000,
                     "total_amount": 21275000000,
-                    "best_bid_price": 1149.0,
-                    "best_ask_price": 1150.0,
-                    "tick_type": 1,
+                    "buy_price": 1149.0,
+                    "buy_volume": 3,
+                    "sell_price": 1150.0,
+                    "sell_volume": 5,
                 }
             ],
         }
@@ -273,14 +283,68 @@ async def test_stock_snapshot_normalization_snake_case(mock_transport) -> None:
     q = res["quotes"][0]
     assert q["symbol"] == "2330"
     assert q["price"] == Decimal("1150.0")
+    assert q["change"] == Decimal("10.0")  # 來自 change_price
+    assert q["change_rate"] == Decimal("0.88")
+    assert q["average_price"] == Decimal("1147.5")
     assert q["volume"] == 120
     assert q["total_volume"] == 18500
-    assert q["bid_price"] == Decimal("1149.0")
+    assert q["yesterday_volume"] == 20100
+    assert q["volume_ratio"] == Decimal("0.92")
+    assert q["bid_price"] == Decimal("1149.0")  # 來自 buy_price
+    assert q["bid_volume"] == 3
+    assert q["ask_price"] == Decimal("1150.0")  # 來自 sell_price
+    assert q["ask_volume"] == 5
+    assert q["tick_type"] == 1
     assert q["raw"]["stock_id"] == "2330"  # raw passthrough 供 forward-compat
 
 
-def test_normalize_stock_accepts_pascal_case() -> None:
-    """FinMind 若回 PascalCase 命名，多候選鍵也要吃得下（防禦式正規化）。"""
+@pytest.mark.asyncio
+async def test_futures_snapshot_official_columns(mock_transport) -> None:
+    """期貨官方 data_id 是 TXF，代號欄位是 futures_id。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {
+            "msg": "success",
+            "status": 200,
+            "data": [
+                {
+                    "date": "2026-07-15 10:30:00",
+                    "futures_id": "TXF",
+                    "close": 23150.0,
+                    "change_price": -35.0,
+                    "buy_price": 23149.0,
+                    "sell_price": 23151.0,
+                    "total_volume": 88000,
+                }
+            ],
+        }
+    )
+    res = await _client().fetch_futures_snapshot(["TXF"])
+    assert res["available"] is True
+    q = res["quotes"][0]
+    assert q["symbol"] == "TXF"
+    assert q["price"] == Decimal("23150.0")
+    assert q["change"] == Decimal("-35.0")
+    assert q["bid_price"] == Decimal("23149.0")
+    assert q["ask_price"] == Decimal("23151.0")
+
+
+@pytest.mark.asyncio
+async def test_token_sent_as_bearer_header(mock_transport) -> None:
+    """官方文件明訂以 Authorization: Bearer {token} 認證（token 值本身不含前綴）。"""
+    mock_transport["response_factory"] = lambda m, u, k: _resp(
+        {"status": 200, "msg": "ok", "data": []}
+    )
+    await _client(token="tok123").fetch_stock_snapshot(["2330"])
+    # headers 掛在 client 上，實際送出的 request 會帶上；此處驗證 params 仍相容帶 token
+    assert mock_transport["calls"][0]["kwargs"]["params"]["token"] == "tok123"
+
+
+def test_normalize_stock_tolerates_naming_variants() -> None:
+    """官方欄位名以 test_stock_snapshot_normalization_official_columns 為準；
+
+    這裡確保萬一上游改用其他常見命名（PascalCase / bid-ask 用語）也不會整組變空——
+    官方名稱優先，這些只是最後的保險。
+    """
     q = FinMindRealtimeClient._normalize_stock(
         {
             "date": "2026-07-15 10:30:00",
