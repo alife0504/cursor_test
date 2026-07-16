@@ -28,6 +28,29 @@ from app.data_sources.base import BaseDataSource, DataKind, MarketRegion, regist
 logger = get_logger(__name__)
 
 
+#: MOPS 反爬蟲攔截頁的特徵字串。被擋時它回 **HTTP 200** + 一頁「安全性考量」說明，
+#: 內容解不出資料 → parser 靜默回 0 筆，看起來像「查無資料」而非「來源掛了」。
+#: 這與 FinMind 的 307 轉址同型：不報錯的失敗最難發現。
+_WAF_MARKERS: tuple[str, ...] = (
+    "因為安全性考量",
+    "FOR SECURITY REASONS",
+    "THIS PAGE CAN NOT BE ACCESSED",
+)
+
+
+def _raise_if_waf_blocked(html: str, source: str, what: str) -> None:
+    """MOPS 被 WAF 擋時要**大聲失敗**，不要假裝查無資料。
+
+    2026-07-16 實測：MOPS 對程式化請求一律回攔截頁（帶瀏覽器 User-Agent/Referer 亦然），
+    故本源目前實質不可用。留著是為了讓故障可見——靜默回空會讓上層以為「這檔沒資料」。
+    """
+    if any(m in html for m in _WAF_MARKERS):
+        raise ExternalServiceError(
+            message_zh=f"MOPS {what} 被反爬蟲攔截（回攔截頁）——本源目前不可用",
+            source=source,
+        )
+
+
 @register_data_source
 class MOPSSource(BaseDataSource):
     """MOPS — 財報 / 月營收 / 重大訊息 備源。"""
@@ -57,13 +80,20 @@ class MOPSSource(BaseDataSource):
 
             year = datetime.utcnow().year
 
+        from datetime import datetime as _dt
+
+        today = _dt.utcnow().date()
         out: list[dict[str, Any]] = []
         for month in range(1, 13):
+            # 只有「該月尚未結束」時，404 才是合理的（資料還沒產生）。
+            # 過去月份仍 404 代表來源壞了/被擋，必須大聲失敗——原本一律 swallow 所有 4xx，
+            # 導致 MOPS 被封鎖時 12 個月全被當成「還沒到」，靜默回 0 筆看起來像「查無資料」。
+            not_yet = (year, month) >= (today.year, today.month)
             try:
                 html = await self._fetch_monthly_html(year, month)
             except ExternalServiceError as e:
-                # 月份還沒到 → 404，繼續下一個
-                if str(e.details.get("status", "")).startswith("4"):
+                status = str(e.details.get("status", ""))
+                if status.startswith("4") and not_yet:
                     continue
                 raise
 
@@ -95,6 +125,7 @@ class MOPSSource(BaseDataSource):
         # MOPS 月營收頁是 big5 編碼（HTML meta 標 big5）
         if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
             resp.encoding = "big5"
+        _raise_if_waf_blocked(resp.text, self.name, "月營收")
         return resp.text
 
     def _parse_monthly_for_symbol(
@@ -170,6 +201,7 @@ class MOPSSource(BaseDataSource):
             )
         if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
             resp.encoding = "utf-8"
+        _raise_if_waf_blocked(resp.text, self.name, "重大訊息")
         return self._parse_announcements(resp.text, symbol, since)
 
     def _parse_announcements(

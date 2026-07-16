@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from datetime import datetime as _dt
 from decimal import Decimal
 
 import httpx
@@ -139,20 +140,42 @@ async def test_fetch_monthly_revenue_full_year(mops: MOPSSource, mock_get) -> No
 
 
 @pytest.mark.asyncio
-async def test_fetch_monthly_revenue_404_for_future_month(mops: MOPSSource, mock_get) -> None:
-    """月份還沒到 → 404 → 該月份跳過，不要整個 fail。"""
-    state = {"call_count": 0}
+async def test_fetch_monthly_revenue_skips_404_only_for_months_not_yet_ended(
+    mops: MOPSSource, mock_get
+) -> None:
+    """**尚未到來**的月份 404 → 跳過（資料本來就還沒產生）。
+
+    刻意依「今天」計算而非寫死月份：原測試寫死「前 3 月 200、其餘 404」並斷言 len==3，
+    等時間走到年中就會把「已過月份卻 404」也當成正常，反而保護了靜默失敗。
+    """
+    today = _dt.utcnow().date()
+    calls = {"n": 0}
 
     def factory(url, kw):  # type: ignore[no-untyped-def]
-        state["call_count"] += 1
-        # 前 3 月 200，之後 404
-        if state["call_count"] <= 3:
-            return _html_resp(200, SAMPLE_MONTHLY_HTML)
-        return _html_resp(404, "")
+        calls["n"] += 1
+        # 依呼叫順序即為月份 1..12
+        return (
+            _html_resp(200, SAMPLE_MONTHLY_HTML)
+            if calls["n"] < today.month
+            else _html_resp(404, "")
+        )
 
     mock_get["response_factory"] = factory
-    out = await mops.fetch_monthly_revenue("2330", year=2026)
-    assert len(out) == 3
+    out = await mops.fetch_monthly_revenue("2330", year=today.year)
+    assert len(out) == today.month - 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_monthly_revenue_past_month_404_raises(mops: MOPSSource, mock_get) -> None:
+    """**已過**月份仍 404 = 來源壞了或被擋 → 必須大聲失敗，不可靜默回空。
+
+    這正是 MOPS 現況：對 python-httpx 一律 404（對 curl 則回「安全性考量」攔截頁）。
+    原本一律 swallow 所有 4xx → 12 個月全被當成「還沒到」→ 回 0 筆看起來像「查無資料」，
+    與 FinMind 307 同型的無聲故障。
+    """
+    mock_get["response_factory"] = lambda url, kw: _html_resp(404, "")
+    with pytest.raises(ExternalServiceError):
+        await mops.fetch_monthly_revenue("2330", year=2024)  # 整年都是過去
 
 
 @pytest.mark.asyncio
