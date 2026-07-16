@@ -72,6 +72,53 @@ export function useRealtimeStock(symbols: string[], enabled = true) {
   });
 }
 
+/** 台指期是否開盤（台北時間）。含日盤與夜盤：
+ *  - 日盤 08:45–13:45（週一~五）
+ *  - 夜盤 15:00–翌日 05:00；前半(當日 15:00 後)週一~五、後半(翌日 05:00 前)週二~六。
+ */
+export function isTwFuturesOpen(now: Date = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TW_TIMEZONE,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (t: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === t)?.value ?? "";
+  const weekday = get("weekday");
+  const min = Number(get("hour")) * 60 + Number(get("minute"));
+
+  const isWeekday = weekday !== "Sat" && weekday !== "Sun"; // 週一~五
+  const isTueToSat = weekday !== "Sun" && weekday !== "Mon"; // 週二~六（承接前一日夜盤尾）
+
+  const daySession = min >= 8 * 60 + 45 && min <= 13 * 60 + 45; // 08:45–13:45
+  const nightEve = min >= 15 * 60; // 15:00–24:00（當日）
+  const nightMorn = min <= 5 * 60; // 00:00–05:00（翌日）
+
+  if (daySession || nightEve) return isWeekday;
+  if (nightMorn) return isTueToSat;
+  return false;
+}
+
+/** 即時期貨報價。contract=台指期 TXF；盤中每 5 秒更新，收盤停止輪詢。 */
+export function useRealtimeFutures(ids: string[] = ["TXF"], enabled = true) {
+  const key = ids.join(",");
+  return useQuery({
+    queryKey: ["market", "realtime", "futures", key],
+    enabled: enabled && ids.length > 0,
+    staleTime: REALTIME_POLL_MS - 1_000,
+    refetchInterval: () => (isTwFuturesOpen() ? REALTIME_POLL_MS : false),
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
+        "/market/realtime/futures",
+        { params: { ids: key } },
+      );
+      return res.data.data;
+    },
+  });
+}
+
 export function useMarketOverview(market = "TW", enabled = true) {
   return useQuery({
     queryKey: ["market", "overview", market],

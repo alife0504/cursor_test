@@ -11,22 +11,128 @@ import { PieChart } from "@/components/common/PieChart";
 import { IndexCard } from "@/components/market/IndexCard";
 import { MarketSwitcher } from "@/components/market/MarketSwitcher";
 import { MoversTable } from "@/components/market/MoversTable";
-import { useMarketOverview } from "@/hooks/useMarket";
+import {
+  useMarketOverview,
+  useRealtimeFutures,
+  useRealtimeIndex,
+} from "@/hooks/useMarket";
+import type {
+  IndexQuote,
+  RealtimeQuote,
+  RealtimeSnapshot,
+} from "@/lib/api-types";
+
+interface IndexCardData {
+  name: string;
+  value: string | number | null;
+  changePct: string | number | null;
+  subtitle: string | null;
+}
+
+/** as_of "2026-07-16 13:25:01.123" → "即時 · 13:25:01"；取不到時回「即時」。 */
+function liveLabel(asOf?: string | null): string {
+  const t = asOf && asOf.length >= 19 ? asOf.slice(11, 19) : null;
+  return t ? `即時 · ${t}` : "即時";
+}
+
+/** 即時不可用時的小標，依 reason 給人看得懂的說明。 */
+function unavailableLabel(snap?: RealtimeSnapshot): string {
+  switch (snap?.reason) {
+    case "disabled":
+      return "即時未啟用";
+    case "tier_insufficient":
+      return "需 Sponsor";
+    case "quota_exceeded":
+      return "配額用盡";
+    case "empty":
+      return "非交易時段";
+    default:
+      return "收盤";
+  }
+}
+
+/** 台指期近月：data_id=TXF 回多個月份契約，取成交量最大者（最活躍＝近月）。 */
+function nearMonthFutures(snap?: RealtimeSnapshot): RealtimeQuote | null {
+  if (!snap?.available || !snap.quotes?.length) return null;
+  return snap.quotes.reduce((best, q) =>
+    (q.total_volume ?? 0) > (best.total_volume ?? 0) ? q : best,
+  );
+}
+
+/**
+ * 組出指數卡片：TW → 加權 / 櫃買 / 台指期（盤中即時覆蓋盤後值）；其他市場 → 盤後 indices。
+ * 即時取不到（收盤 / 未開通 / 非交易時段）時自動退回盤後值，並在小標註明狀態。
+ */
+function buildIndexCards(
+  market: "TW" | "US",
+  eod: IndexQuote[],
+  rtIndex?: RealtimeSnapshot,
+  rtFutures?: RealtimeSnapshot,
+): IndexCardData[] {
+  if (market !== "TW") {
+    return eod.map((q) => ({
+      name: q.name,
+      value: q.close ?? null,
+      changePct: q.change_pct ?? null,
+      subtitle: "收盤",
+    }));
+  }
+
+  const eodBy = new Map(eod.map((q) => [q.symbol, q]));
+  const rtBy = new Map(
+    rtIndex?.available ? (rtIndex.quotes ?? []).map((q) => [q.symbol, q]) : [],
+  );
+
+  const indexCard = (symbol: string, name: string): IndexCardData => {
+    const rt = rtBy.get(symbol);
+    if (rt && rt.price != null) {
+      return {
+        name,
+        value: rt.price,
+        changePct: rt.change_rate ?? null,
+        subtitle: liveLabel(rtIndex?.as_of),
+      };
+    }
+    const q = eodBy.get(symbol);
+    return {
+      name,
+      value: q?.close ?? null,
+      changePct: q?.change_pct ?? null,
+      subtitle: q?.close != null ? "收盤" : unavailableLabel(rtIndex),
+    };
+  };
+
+  const fut = nearMonthFutures(rtFutures);
+  const futuresCard: IndexCardData =
+    fut && fut.price != null
+      ? {
+          name: "台指期",
+          value: fut.price,
+          changePct: fut.change_rate ?? null,
+          subtitle: liveLabel(rtFutures?.as_of),
+        }
+      : { name: "台指期", value: null, changePct: null, subtitle: unavailableLabel(rtFutures) };
+
+  return [
+    indexCard("TAIEX", "加權指數"),
+    indexCard("TPEX", "櫃買指數"),
+    futuresCard,
+  ];
+}
 
 // 市場總覽
-//   - TW：加權、櫃買；US：S&P / NASDAQ / Dow
+//   - TW：加權、櫃買、台指期（盤中即時，每 5 秒更新）；US：S&P / NASDAQ / Dow（盤後）
 //   - 漲跌家數 pie（紅漲綠跌）
 //   - 漲幅 / 跌幅 / 成交量榜
 export default function MarketOverviewPage() {
   const [market, setMarket] = useState<"TW" | "US">("TW");
   const { data, isLoading, error, refetch } = useMarketOverview(market);
+  // 盤中即時：加權/櫃買 + 台指期。僅 TW 啟用；收盤後 hook 自動停止輪詢。
+  const isTW = market === "TW";
+  const rtIndex = useRealtimeIndex(isTW);
+  const rtFutures = useRealtimeFutures(["TXF"], isTW);
 
-  // 後端 indices 是 IndexQuote[]（已依 market 回對應指數）；直接 map，欄位名以後端為準。
-  const indexes = (data?.indices ?? []).map((q) => ({
-    name: q.name,
-    value: q.close ?? null,
-    changePct: q.change_pct ?? null,
-  }));
+  const indexes = buildIndexCards(market, data?.indices ?? [], rtIndex.data, rtFutures.data);
 
   const adv = (data?.advance_count as number | undefined) ?? 0;
   const dec = (data?.decline_count as number | undefined) ?? 0;
@@ -67,8 +173,9 @@ export default function MarketOverviewPage() {
             <IndexCard
               key={i.name}
               name={i.name}
-              value={i.value as string | number | null}
-              changePct={i.changePct as string | number | null}
+              value={i.value}
+              changePct={i.changePct}
+              subtitle={i.subtitle}
             />
           ))
         )}
