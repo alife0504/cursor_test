@@ -266,12 +266,12 @@ class FinMindRealtimeClient:
             "quotes": quotes,
         }
 
-    async def _fetch_all_cached(self, url: str, cache_key: str) -> dict[str, Any]:
-        """抓全市場快照，並以 Redis 快取數秒。回 {"ok":True,"data":[...],"cached":bool}。
+    async def _fetch_cached(self, url: str, cache_key: str, data_id: str | None) -> dict[str, Any]:
+        """打一次 snapshot 並以 Redis 快取數秒。回 {"ok":True,"data":[...],"cached":bool}。
 
-        一律抓全部（不帶 data_id）：FinMind 不支援逗號合併多代號（會靜默回空），而抓全部
-        一次就涵蓋所有代號，配上快取後上游用量與查詢檔數/頁面數無關。
-        Redis 掛掉不影響正確性——只是退化成每次都打上游。
+        data_id=None → 抓全部（個股/指數用；FinMind 不支援逗號合併多代號故抓全部再過濾）。
+        data_id 給值 → 帶 data_id 查（期貨用；期貨端點強制要 data_id，不帶會 422）。
+        配上快取後上游用量與查詢檔數/頁面數無關。Redis 掛掉不影響正確性——只是每次打上游。
         """
         redis = None
         try:
@@ -282,7 +282,7 @@ class FinMindRealtimeClient:
         except Exception as exc:  # 快取讀失敗不致命
             logger.warning("finmind_realtime.cache_read_failed", key=cache_key, error=str(exc))
 
-        res = await self._call(url, None)
+        res = await self._call(url, data_id)
         if not res.get("ok"):
             return res
 
@@ -292,6 +292,16 @@ class FinMindRealtimeClient:
             except Exception as exc:
                 logger.warning("finmind_realtime.cache_write_failed", key=cache_key, error=str(exc))
         return {"ok": True, "data": res["data"], "cached": False}
+
+    async def _fetch_all_cached(self, url: str, cache_key: str) -> dict[str, Any]:
+        """抓全市場快照（不帶 data_id）並快取。個股/指數用。"""
+        return await self._fetch_cached(url, cache_key, None)
+
+    async def _fetch_by_data_id_cached(
+        self, url: str, cache_key: str, data_id: str
+    ) -> dict[str, Any]:
+        """帶 data_id 抓 snapshot 並快取。期貨用（其端點強制要 data_id）。"""
+        return await self._fetch_cached(url, cache_key, data_id)
 
     async def fetch_stock_snapshot(self, symbols: list[str]) -> dict[str, Any]:
         """台股個股即時報價。symbols 為股票代號 list（如 ['2330','2317']）。"""
@@ -338,8 +348,9 @@ class FinMindRealtimeClient:
     async def fetch_futures_snapshot(self, contract_ids: list[str]) -> dict[str, Any]:
         """台股期貨即時報價。contract_ids 為期貨代號 list（如 ['TXF','MXF']）。
 
-        注意 data_id=TXF 回的是各月份契約（futures_id 形如 `TXFR2`），故過濾用 prefix
-        比對而非完全相等。
+        ⚠️ 與個股/指數不同：期貨端點**強制要 data_id**，不帶會回 422「Field required」，
+        故不能用「抓全部再過濾」。改為逐 contract_id 帶 data_id 查、各自快取。
+        data_id=TXF 回的是各月份契約（futures_id 形如 `TXFR2`），全部保留、由 caller 取近月。
         """
         if not self.settings.FINMIND_REALTIME_ENABLED:
             return _unavailable(Reason.DISABLED)
@@ -347,17 +358,19 @@ class FinMindRealtimeClient:
         if not contract_ids:
             return _unavailable(Reason.NO_SYMBOLS)
 
-        res = await self._fetch_all_cached(FUTURES_SNAPSHOT_URL, _CACHE_KEY_FUTURES)
-        if not res.get("ok"):
-            return res
+        records: list[dict[str, Any]] = []
+        cached_all = True
+        for cid in contract_ids:
+            res = await self._fetch_by_data_id_cached(
+                FUTURES_SNAPSHOT_URL, f"{_CACHE_KEY_FUTURES}:{cid.upper()}", cid
+            )
+            if not res.get("ok"):
+                # 任一代號取得失敗即回該錯誤（tier/quota/upstream），不假裝部分成功
+                return res
+            records.extend(res["data"])
+            cached_all = cached_all and bool(res.get("cached"))
 
-        prefixes = tuple(c.upper() for c in contract_ids)
-        records = [
-            r for r in res["data"] if str(r.get("futures_id", "")).upper().startswith(prefixes)
-        ]
-        return self._ok(
-            [self._normalize_futures(r) for r in records], cached=bool(res.get("cached"))
-        )
+        return self._ok([self._normalize_futures(r) for r in records], cached=cached_all)
 
 
 __all__ = ["FinMindRealtimeClient", "Reason"]

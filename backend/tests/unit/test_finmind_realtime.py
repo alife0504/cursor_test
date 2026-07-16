@@ -508,13 +508,16 @@ async def test_stock_and_futures_use_separate_cache_keys(mock_transport, monkeyp
         return fake
 
     monkeypatch.setattr("app.data_sources.tw.finmind_realtime.get_redis", _fake_get_redis)
-    mock_transport["response_factory"] = lambda m, u, k: _resp(
-        {
-            "msg": "ok",
-            "status": 200,
-            "data": [{"stock_id": "2330", "close": 1150}, {"futures_id": "TXFR2", "close": 45721}],
-        }
-    )
+
+    def factory(m, u, k):  # type: ignore[no-untyped-def]
+        # 期貨帶 data_id=TXF → 只回 TXF 契約；個股不帶 data_id → 回全部
+        if k.get("params", {}).get("data_id") == "TXF":
+            return _resp(
+                {"msg": "ok", "status": 200, "data": [{"futures_id": "TXFR2", "close": 45721}]}
+            )
+        return _resp({"msg": "ok", "status": 200, "data": [{"stock_id": "2330", "close": 1150}]})
+
+    mock_transport["response_factory"] = factory
     c = _client()
     await c.fetch_stock_snapshot(["2330"])
     res = await c.fetch_futures_snapshot(["TXF"])
@@ -523,18 +526,24 @@ async def test_stock_and_futures_use_separate_cache_keys(mock_transport, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_multiple_futures_filtered_by_prefix(mock_transport) -> None:
-    """data_id=TXF 實回各月份契約（futures_id 形如 TXFR2），故多代號過濾用 prefix。"""
-    mock_transport["response_factory"] = lambda m, u, k: _resp(
-        {
-            "msg": "ok",
-            "status": 200,
-            "data": [
-                {"futures_id": "TXFR2", "close": 45721},
-                {"futures_id": "MXFR2", "close": 45700},
-                {"futures_id": "TEFR2", "close": 2000},  # 電子期，不該出現
-            ],
-        }
-    )
+async def test_futures_sends_data_id_and_fetches_per_contract(mock_transport) -> None:
+    """回歸本次修補：期貨端點**強制要 data_id**（不帶回 422）。
+
+    故不能沿用個股的「抓全部再 prefix 過濾」；改為每個 contract_id 各帶 data_id 查一次。
+    """
+    seen: dict[str, list[dict[str, Any]]] = {
+        "TXF": [{"futures_id": "TXFR2", "close": 45721}],
+        "MXF": [{"futures_id": "MXFR2", "close": 45700}],
+    }
+
+    def factory(m, u, k):  # type: ignore[no-untyped-def]
+        did = k.get("params", {}).get("data_id")
+        assert did is not None, "期貨呼叫必須帶 data_id，否則 FinMind 回 422"
+        return _resp({"msg": "ok", "status": 200, "data": seen.get(did, [])})
+
+    mock_transport["response_factory"] = factory
     res = await _client().fetch_futures_snapshot(["TXF", "MXF"])
+    # 兩個代號各打一次（各自帶 data_id）
+    ids_sent = [c["kwargs"]["params"]["data_id"] for c in mock_transport["calls"]]
+    assert ids_sent == ["TXF", "MXF"]
     assert {q["symbol"] for q in res["quotes"]} == {"TXFR2", "MXFR2"}
