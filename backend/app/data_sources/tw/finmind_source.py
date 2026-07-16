@@ -151,7 +151,12 @@ class FinMindSource(BaseDataSource):
                 resp = await request_with_retry(
                     client,
                     "GET",
-                    "",  # base_url 即 endpoint
+                    # 必須傳「絕對 URL」：httpx 會把 base_url 正規化成尾端帶斜線
+                    # (".../api/v4/data" → ".../api/v4/data/")，再與相對路徑 "" 合併後
+                    # 打到 ".../api/v4/data/"，FinMind 對此回 307 轉址；而 client 基於防
+                    # SSRF 設了 follow_redirects=False → 拿到空 body → "回傳非 JSON"，
+                    # 導致整條 FinMind API 源實質失效。傳絕對 URL 可跳過 base_url 合併。
+                    self.base_url,
                     source_name=self.name,
                     raise_on_4xx=False,
                     params=params,

@@ -22,9 +22,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.data_sources.base import DataKind
 from app.data_sources.tw import get_tw_sources
 from app.data_sources.us import get_us_sources
 from app.models.stock import StockList
+from app.repos.ohlcv_repo import OHLCVRepository
 from app.services.data_pipeline_service import DataPipelineService
 from app.workers.celery_app import celery_app
 
@@ -123,6 +125,79 @@ def sync_ohlcv_tw_all(days_back: int = 7) -> dict[str, Any]:
 def sync_ohlcv_us_all(days_back: int = 7) -> dict[str, Any]:
     """fan-out：對所有 active US 股票排程 sync_ohlcv_one。"""
     return asyncio.run(_async_fan_out_market(["NASDAQ", "NYSE", "AMEX"], US_BATCH_SIZE, days_back))
+
+
+# 大盤指數：我方 symbol → 上游查詢用 data_id。
+# FinMind 的櫃買指數是 `TPEx`（大小寫敏感，查 `TPEX` 會回空陣列）；我方 stock_prices /
+# market_service 統一用 `TPEX`，故查詢與儲存代號需分離。
+TW_INDEX_IDS: dict[str, str] = {"TAIEX": "TAIEX", "TPEX": "TPEx"}
+
+
+@celery_app.task(
+    name="app.workers.tasks.sync_ohlcv.sync_index_tw",
+    soft_time_limit=180,
+    time_limit=300,
+)
+def sync_index_tw(days_back: int = 30) -> dict[str, Any]:
+    """同步大盤指數（加權 TAIEX / 櫃買 TPEX）OHLCV。
+
+    指數在 stock_list 是 market='OTHER' 且 is_active=false，不會被 sync_ohlcv_tw_all 的
+    fan-out 選中 → 過去只能靠 seed 腳本塞假資料，dashboard 的指數因此長期凍結。
+    本任務直接以 TW source chain 補上（本地庫沒有指數歷史時會自動 fallback 到 FinMind API）。
+    """
+    return asyncio.run(_async_sync_index_tw(days_back))
+
+
+async def _async_sync_index_tw(days_back: int) -> dict[str, Any]:
+    """對每個指數詢問所有 TW OHLCV source，採用「涵蓋天數最多」的那個。
+
+    不用一般的 DataSourceFallback：它只要第一個 source 回傳**任何**資料就算成功，而本地
+    FinMind 庫目前 TAIEX/TPEx 各只有 1 列（2026-07-06），會直接勝出並蓋掉有完整歷史的
+    FinMind API → 指數只剩 1 天，畫不出趨勢也算不出漲跌。指數要的是連續序列，
+    「拿到 1 列」不該算成功。本地庫補齊後，它自然會因涵蓋最完整而被選中。
+    """
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=days_back)
+    ohlcv_sources = get_tw_sources(settings).get(DataKind.OHLCV, [])
+
+    engine, sm = _new_async_engine_and_sessionmaker()
+    out: dict[str, Any] = {}
+    try:
+        async with sm() as session:
+            repo = OHLCVRepository(session)
+            for our_symbol, upstream_id in TW_INDEX_IDS.items():
+                best_df = None
+                best_src: str | None = None
+                for src in ohlcv_sources:
+                    try:
+                        df = await src.fetch_ohlcv(upstream_id, start, end)
+                    except Exception:  # 單一 source 掛掉不影響其他
+                        logger.warning(
+                            "sync_index_tw.source_failed symbol=%s source=%s",
+                            our_symbol,
+                            src.name,
+                            exc_info=True,
+                        )
+                        continue
+                    if df is None or df.empty:
+                        continue
+                    if best_df is None or len(df) > len(best_df):
+                        best_df, best_src = df, src.name
+
+                if best_df is None:
+                    logger.warning("sync_index_tw.no_data symbol=%s", our_symbol)
+                    out[our_symbol] = {"written": 0, "source": None}
+                    continue
+
+                rows = best_df.to_dict(orient="records")
+                for r in rows:
+                    r["symbol"] = our_symbol
+                n = await repo.upsert_many(rows, source=best_src, commit=True)
+                out[our_symbol] = {"written": int(n), "source": best_src}
+        logger.info("sync_index_tw.done %s", out)
+        return {"written": out}
+    finally:
+        await engine.dispose()
 
 
 async def _async_fan_out_market(

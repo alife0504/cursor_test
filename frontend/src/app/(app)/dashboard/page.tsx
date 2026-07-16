@@ -23,9 +23,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+// 台股平台一律以台北時間為準。本頁是 Server Component，new Date() 在容器內執行（UTC），
+// 若不指定時區會顯示 UTC 的日期與時段（台北 07:10 會被算成前一天 23:10 →「晚安」）。
+// 明確指定時區同時可避免 SSR 與瀏覽器端算出不同結果造成的 hydration 不一致。
+const TW_TIMEZONE = "Asia/Taipei";
+
 function TodayString() {
-  const d = new Date();
-  return d.toLocaleDateString("zh-TW", {
+  return new Date().toLocaleDateString("zh-TW", {
+    timeZone: TW_TIMEZONE,
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -33,8 +38,19 @@ function TodayString() {
   });
 }
 
+function taipeiHour(now: Date = new Date()) {
+  // hourCycle h23 → "00"~"23"（避免 hour12:false 在部分環境把午夜給成 "24"）
+  return Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: TW_TIMEZONE,
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(now),
+  );
+}
+
 function Greeting() {
-  const h = new Date().getHours();
+  const h = taipeiHour();
   if (h < 5) return "夜深了";
   if (h < 11) return "早安";
   if (h < 14) return "午安";

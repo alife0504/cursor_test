@@ -84,8 +84,16 @@ class DataPipelineService:
         market: str,
         start: date,
         end: date,
+        *,
+        store_as: str | None = None,
     ) -> int:
-        """抓 + 寫 OHLCV。"""
+        """抓 + 寫 OHLCV。
+
+        Args:
+            symbol: 上游查詢用代號
+            store_as: 寫入 DB 時要用的代號（預設同 symbol）。給指數用：上游 FinMind 的
+                櫃買指數是 `TPEx`（大小寫敏感，`TPEX` 會回空），我方統一存 `TPEX`。
+        """
         sources = self._sources_for(DataKind.OHLCV, market=market)
         if not sources:
             raise ValueError("DataPipelineService: 無 OHLCV source 註冊")
@@ -96,7 +104,7 @@ class DataPipelineService:
             return 0
         rows = df.to_dict(orient="records")
         for r in rows:
-            r["symbol"] = symbol
+            r["symbol"] = store_as or symbol
         # 標「實際取得資料的 source」（fb.last_used_source），而非優先序第一個——否則 fallback
         # 生效時 source 欄位會誤標成主源（如明明來自 finmind_local 卻標 finmind）。
         used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)

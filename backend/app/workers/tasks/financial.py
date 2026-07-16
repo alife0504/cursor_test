@@ -173,6 +173,29 @@ def sync_institutional_tw() -> dict[str, Any]:
 
 
 @celery_app.task(
+    name="app.workers.tasks.financial.sync_quarterly_financial_tw",
+    soft_time_limit=180,
+    time_limit=300,
+)
+def sync_quarterly_financial_tw() -> dict[str, Any]:
+    """fan-out：對所有 active TW 股票排季報（IS/BS/CF）抓取。
+
+    先前只有 US 有 fan-out，台股財報沒有任何排程也沒有 fan-out → financial_statements
+    長期只有手動同步過的少數幾檔，基本面分析對其他股票全都拿不到資料。
+    資料來自 FinMind 三張表（本地庫優先，缺則 fallback API）。
+    """
+    return asyncio.run(
+        _fan_out_generic(
+            markets=["TWSE", "TPEX"],
+            batch_size=TW_FIN_BATCH,
+            task_name=sync_quarterly_financial_one.name,
+            args_builder=lambda sym, mkt: [sym, mkt],
+            kwargs_builder=lambda _s, _m: {},
+        )
+    )
+
+
+@celery_app.task(
     name="app.workers.tasks.financial.sync_quarterly_financial_us",
     soft_time_limit=120,
     time_limit=180,

@@ -87,6 +87,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.sync_ohlcv.sync_ohlcv_tw_all",
         "schedule": crontab(hour=14, minute=30, day_of_week="mon-fri"),
     },
+    # 大盤指數（TAIEX / TPEX）盤後：指數在 stock_list 是 market='OTHER'+is_active=false，
+    # 不會被 tw-ohlcv-after-close 的 fan-out 選到 → 需獨立排程，否則 dashboard 指數永遠不動。
+    "tw-index-after-close": {
+        "task": "app.workers.tasks.sync_ohlcv.sync_index_tw",
+        "schedule": crontab(hour=14, minute=35, day_of_week="mon-fri"),
+    },
     # 美股盤後（ET 16:00 = 台北 04:00 隔日 / 夏令 05:00）→ 5:30 拉
     "us-ohlcv-after-close": {
         "task": "app.workers.tasks.sync_ohlcv.sync_ohlcv_us_all",
@@ -111,6 +117,12 @@ celery_app.conf.beat_schedule = {
     "tw-institutional-daily": {
         "task": "app.workers.tasks.financial.sync_institutional_tw",
         "schedule": crontab(hour=15, minute=0, day_of_week="mon-fri"),
+    },
+    # TW 季報（IS/BS/CF）：財報公告期集中在 3/5/8/11 月中旬前，每週日補一次即可。
+    # 先前完全沒有台股財報排程 → financial_statements 只有手動同步過的少數幾檔。
+    "tw-quarterly-financial-weekly": {
+        "task": "app.workers.tasks.financial.sync_quarterly_financial_tw",
+        "schedule": crontab(hour=3, minute=0, day_of_week="sun"),
     },
     # Orphan cleanup 每小時（PLAN 15.4 原為每日 04:00；worker 崩潰留下的
     # status='running' 孤兒會讓前端無止境 5s 輪詢 → 改每小時，最慢 ~1.5h 內收斂）

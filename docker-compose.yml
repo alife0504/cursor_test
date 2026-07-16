@@ -237,6 +237,9 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
+      # Server Component 的 new Date() 在容器內執行；不設 TZ 會是 UTC，
+      # 台北 07:10 會被算成前一天 23:10（日期差一天、問候語也錯）。
+      TZ: Asia/Taipei
       # 在 docker network 內 backend 用 service name
       BACKEND_INTERNAL_URL: http://backend:8000
       NEXT_PUBLIC_API_BASE_URL: /api/v1
