@@ -233,6 +233,18 @@ class MarketRepository(BaseRepository):
             await self.session.commit()
         return len(clean)
 
+    async def get_latest_institutional_date(self, market: str) -> date_type | None:
+        """三大法人最近一筆 date（依 market）。與 get_latest_trading_date 分開——
+        法人資料盤後才出，且本地庫覆蓋日期常與股價不同，用股價日會查到空。"""
+        markets = _market_filter(market)
+        stmt = (
+            select(func.max(InstitutionalTrading.date))
+            .join(StockList, StockList.symbol == InstitutionalTrading.symbol)
+            .where(StockList.market.in_(markets), StockList.is_active.is_(True))
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_active_symbols(self, market: str) -> set[str]:
         """回某 market 所有 is_active 的 symbol 集合（給即時漲跌家數過濾用）。"""
         markets = _market_filter(market)

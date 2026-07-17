@@ -149,7 +149,9 @@ class MarketService:
                 value=market,
             )
         if target_date is None:
-            target_date = await self.repo.get_latest_trading_date("TW")
+            # 用「最新法人資料日」而非最新股價日：法人盤後才出，且本地庫覆蓋日期常不同，
+            # 用股價日（可能是今天、法人還沒出）會查到空 → 頁面誤顯示「無資料」。
+            target_date = await self.repo.get_latest_institutional_date("TW")
         if target_date is None:
             return None, []
         rows = await self.repo.get_institutional_for_date(target_date, market=m, limit=limit)

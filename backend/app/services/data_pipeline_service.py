@@ -255,24 +255,54 @@ class DataPipelineService:
         return items
 
     async def sync_institutional(self, symbol: str, start: date, end: date) -> int:
-        """三大法人 — TW only（PLAN 10.5）。"""
+        """三大法人 — TW only（PLAN 10.5）。
+
+        與 sync_ohlcv 同：按優先序「合併涵蓋」而非「第一個有資料就用」。本地庫近期常缺
+        （回補中），若讓它因 priority 最高就勝出，07-08 之後的三大法人會拿不到
+        （finmind API / twse_openapi 有較新資料卻輪不到）。每個日期由優先序最高且有該日
+        資料的來源提供。
+        """
         self._ensure_tw_only(symbol, "籌碼資料（三大法人）")
         sources = self._sources_for(DataKind.INSTITUTIONAL, market="TWSE")
         if not sources:
             raise ValueError("DataPipelineService: 無 INSTITUTIONAL source 註冊")
-        fb = DataSourceFallback(sources)
-        df = await fb.fetch_institutional(symbol, start, end)
-        if df is None or df.empty:
+
+        merged: dict[Any, dict[str, Any]] = {}
+        by_source: dict[str, list[dict[str, Any]]] = {}
+        for src in sources:
+            if merged and max(merged) >= end:
+                break  # 已涵蓋到 end
+            try:
+                df = await src.fetch_institutional(symbol, start, end)
+            except Exception:
+                logger.warning(
+                    "data_pipeline.sync_institutional.source_failed",
+                    symbol=symbol,
+                    source=src.name,
+                    exc_info=True,
+                )
+                continue
+            if df is None or df.empty:
+                continue
+            for r in df.to_dict(orient="records"):
+                d = r.get("date")
+                if d is None or d in merged:
+                    continue  # 已有較高優先序來源提供該日
+                r["symbol"] = symbol
+                merged[d] = r
+                by_source.setdefault(src.name, []).append(r)
+
+        if not merged:
             return 0
-        rows = df.to_dict(orient="records")
-        for r in rows:
-            r["symbol"] = symbol
-        used = getattr(fb, "last_used_source", None) or (sources[0].name if sources else None)
-        n = await self.market_repo.upsert_institutional(rows, source=used, commit=True)
+
+        n = 0
+        for name, batch in by_source.items():
+            n += await self.market_repo.upsert_institutional(batch, source=name, commit=True)
         logger.info(
             "data_pipeline.sync_institutional.done",
             symbol=symbol,
             written=n,
+            sources=list(by_source),
         )
         return n
 
