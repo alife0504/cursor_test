@@ -234,7 +234,12 @@ def sync_institutional_tw() -> dict[str, Any]:
     time_limit=180,
 )
 def sync_margin_tw() -> dict[str, Any]:
-    """fan-out：對所有 active TW 股票排融資融券抓取。"""
+    """fan-out：對所有 active TW 股票排融資融券抓取。
+
+    ⚠️ 已停用於 beat 排程 —— 2,375 檔逐檔對 FinMind 打 API 會在數秒內爆量觸發
+    「IP ban」（403 ip banned，retry_after ~640s），還會波及同 IP 的 realtime/OHLCV。
+    改用 sync_margin_bulk_tw（每日一請求抓全市場）。保留本 task 供手動單檔補洞。
+    """
     return asyncio.run(
         _fan_out_tw(
             sync_margin_one.name,
@@ -242,6 +247,37 @@ def sync_margin_tw() -> dict[str, Any]:
             kwargs_builder=lambda _sym: {"days_back": 7},
         )
     )
+
+
+@celery_app.task(
+    name="app.workers.tasks.financial.sync_margin_bulk_tw",
+    autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
+    retry_backoff=2,
+    retry_backoff_max=120,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=180,
+    time_limit=300,
+)
+def sync_margin_bulk_tw(days_back: int = 10) -> dict[str, Any]:
+    """全市場融資融券（FinMind 不帶 data_id → 單日回整個市場，逐日查）。
+
+    取代 sync_margin_tw 的逐檔 fan-out：近 N 天只需 ~N 次請求，不會 IP ban。
+    """
+    return asyncio.run(_async_margin_bulk(days_back))
+
+
+async def _async_margin_bulk(days_back: int) -> dict[str, Any]:
+    sources = get_tw_sources(settings)
+    engine, sm = _new_engine_sm()
+    try:
+        async with sm() as session:
+            service = DataPipelineService(sources_by_kind=sources, session=session)
+            written = await service.sync_margin_bulk(days_back=days_back)
+        logger.info("financial.margin_bulk.done written=%d", written)
+        return {"written": int(written)}
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(
@@ -384,6 +420,7 @@ __all__ = [
     "sync_company_info_tw",
     "sync_institutional_one",
     "sync_institutional_tw",
+    "sync_margin_bulk_tw",
     "sync_margin_one",
     "sync_margin_tw",
     "sync_monthly_revenue",

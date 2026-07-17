@@ -162,6 +162,65 @@ class FinMindSource(BaseDataSource):
         )
         return self._normalize_margin(data)
 
+    async def fetch_all_margin(self, start: date, end: date) -> list[dict[str, Any]]:
+        """全市場融資融券（不帶 data_id → 單日回整個市場，逐日查）。
+
+        用途：本地 FinMind 庫盤後入庫有落差（近 1~2 週只有零星幾檔）時，用「每天一次
+        請求」補齊近日全市場，避開 2,000 檔逐檔 fan-out 打爆連線/配額。回標準化 upsert
+        dict：symbol + 8 個 margin 欄位 + date（int 已轉好，缺值補 0）。
+        """
+        from datetime import timedelta
+
+        _cols = (
+            "MarginPurchaseBuy",
+            "MarginPurchaseSell",
+            "MarginPurchaseTodayBalance",
+            "MarginPurchaseLimit",
+            "ShortSaleBuy",
+            "ShortSaleSell",
+            "ShortSaleTodayBalance",
+            "ShortSaleLimit",
+        )
+        _out_map = {
+            "MarginPurchaseBuy": "margin_buy",
+            "MarginPurchaseSell": "margin_sell",
+            "MarginPurchaseTodayBalance": "margin_balance",
+            "MarginPurchaseLimit": "margin_quota",
+            "ShortSaleBuy": "short_buy",
+            "ShortSaleSell": "short_sell",
+            "ShortSaleTodayBalance": "short_balance",
+            "ShortSaleLimit": "short_quota",
+        }
+        out: list[dict[str, Any]] = []
+        day = start
+        while day <= end:
+            try:
+                data = await self._call(
+                    dataset="TaiwanStockMarginPurchaseShortSale",
+                    start_date=day.isoformat(),
+                )
+            except (AuthError, RateLimitError, ExternalServiceError):
+                data = []  # 單日失敗不影響其他日
+            for r in data:
+                sid = r.get("stock_id")
+                d = r.get("date")
+                if not sid or not d:
+                    continue
+                try:
+                    d_obj = date.fromisoformat(str(d)[:10])
+                except ValueError:
+                    continue
+                item: dict[str, Any] = {"symbol": sid, "date": d_obj}
+                for src in _cols:
+                    v = r.get(src)
+                    try:
+                        item[_out_map[src]] = int(float(v)) if v not in (None, "", "-") else 0
+                    except (ValueError, TypeError):
+                        item[_out_map[src]] = 0
+                out.append(item)
+            day += timedelta(days=1)
+        return out
+
     async def fetch_monthly_revenue(
         self, symbol: str, *, year: int | None = None
     ) -> list[dict[str, Any]]:

@@ -123,10 +123,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.financial.sync_institutional_tw",
         "schedule": crontab(hour=15, minute=0, day_of_week="mon-fri"),
     },
-    # TW 融資融券每日 15:10（盤後）
+    # TW 融資融券每日 21:30 —— bulk 全市場，每日一請求（逐檔 fan-out 會 IP ban）。
+    # 排 21:30 而非盤後 15:xx：TWSE 融資融券餘額約 21:00 才公布，太早跑抓不到當日；
+    # 且 sync_margin_bulk 用 days_back=10 每次回抓近 10 天 → 即使某日 FinMind 延遲，
+    # 隔天視窗仍會補上（idempotent upsert），不會有永久缺口。
     "tw-margin-daily": {
-        "task": "app.workers.tasks.financial.sync_margin_tw",
-        "schedule": crontab(hour=15, minute=10, day_of_week="mon-fri"),
+        "task": "app.workers.tasks.financial.sync_margin_bulk_tw",
+        "schedule": crontab(hour=21, minute=30, day_of_week="mon-fri"),
     },
     # TW 公司基本資料每週日（靜態資料，變動極慢）
     "tw-company-info-weekly": {

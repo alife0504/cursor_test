@@ -273,6 +273,31 @@ class DataPipelineService:
         logger.info("data_pipeline.sync_margin.done", symbol=symbol, written=n)
         return n
 
+    async def sync_margin_bulk(self, *, days_back: int = 10) -> int:
+        """全市場融資融券（FinMind 不帶 data_id → 單日回整個市場，逐日查）。
+
+        取代逐檔 fan-out：2,375 檔各打一次 API 會在幾秒內爆量 → FinMind 直接「IP ban」
+        （實測 403 ip banned，retry_after ~640s），還會波及同 IP 的 realtime/OHLCV。
+        改用「每天一次請求」抓整個市場，近日缺口 ~10 天只需 ~10 次請求。只寫 active 個股。
+        """
+        from app.core.config import settings
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        end = datetime.now(UTC).date()
+        start = end - timedelta(days=days_back)
+        rows = await FinMindSource(settings).fetch_all_margin(start, end)
+        if not rows:
+            return 0
+        active = set(await self.market_repo.get_active_symbols("TWSE")) | set(
+            await self.market_repo.get_active_symbols("TPEX")
+        )
+        batch = [r for r in rows if r.get("symbol") in active]
+        if not batch:
+            return 0
+        n = await self.market_repo.upsert_margin(batch, source="finmind", commit=True)
+        logger.info("data_pipeline.sync_margin_bulk.done", fetched=len(rows), written=n)
+        return n
+
     async def sync_company_info(self, symbol: str) -> int:
         """公司基本資料 — TW only。FinMind 只提供產業別/名稱（無資本額/員工數），填可得者。"""
         self._ensure_tw_only(symbol, "公司基本資料")
