@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date as date_type
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import (
     Date,
@@ -171,6 +171,13 @@ class MarketRepository(BaseRepository):
         return out
 
     # ── 三大法人（TW only）──────────────────────────────────
+    # 三大法人排行可依哪個淨額欄位排序（外資 / 投信 / 自營商）
+    _RANK_NET_COLS: ClassVar[dict[str, Any]] = {
+        "foreign": InstitutionalTrading.foreign_net,
+        "trust": InstitutionalTrading.trust_net,
+        "dealer": InstitutionalTrading.dealer_net,
+    }
+
     async def get_institutional_for_date(
         self,
         target_date: date_type,
@@ -178,14 +185,16 @@ class MarketRepository(BaseRepository):
         market: str = "TW",
         limit: int = 100,
         order: str = "buy",
+        by: str = "foreign",
     ) -> list[InstitutionalTrading]:
-        """依外資買賣超排序回前 N 檔。order="buy" → 買超最大（desc）；"sell" → 賣超最大（asc）。"""
+        """依某法人買賣超排序回前 N 檔。
+
+        by ∈ foreign/trust/dealer（依哪個淨額欄位）；order="buy" → 買超最大（desc）、
+        "sell" → 賣超最大（asc）。
+        """
         markets = _market_filter(market)
-        order_col = (
-            InstitutionalTrading.foreign_net.asc()
-            if order == "sell"
-            else InstitutionalTrading.foreign_net.desc()
-        )
+        net_col = self._RANK_NET_COLS.get(by, InstitutionalTrading.foreign_net)
+        order_col = net_col.asc() if order == "sell" else net_col.desc()
         stmt = (
             select(InstitutionalTrading)
             .join(StockList, StockList.symbol == InstitutionalTrading.symbol)

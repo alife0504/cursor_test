@@ -48,12 +48,13 @@ async def get_institutional(
     target_date: date | None = Query(default=None, alias="date"),
     limit: int = Query(default=100, ge=1, le=500),
     order: str = Query(default="buy", pattern="^(buy|sell)$"),
+    by: str = Query(default="foreign", pattern="^(foreign|trust|dealer)$"),
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_rw_session),
 ):
     service = MarketService(session)
     used_date, rows, totals = await service.get_institutional(
-        target_date=target_date, market=market, limit=limit, order=order
+        target_date=target_date, market=market, limit=limit, order=order, by=by
     )
     # 批次取股票中文名（symbol → name）供表格顯示
     names = await service.repo.get_names_for([r.symbol for r in rows])

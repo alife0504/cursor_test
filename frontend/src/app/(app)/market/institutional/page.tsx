@@ -27,45 +27,39 @@ function compactNet(n: number): string {
 
 export default function InstitutionalPage() {
   const [date, setDate] = useState<string>("");
-  // 外資買超（foreign_net desc）——供 Top 10 與全市場淨額合計 totals
-  const { data, isLoading } = useInstitutional({
-    market: "TW",
-    date: date || null,
-    limit: 50,
-    order: "buy",
-  });
-  // 外資賣超（foreign_net asc）——供下方「外資賣超」明細，與買超榜互補、不重複
-  const { data: sellData, isLoading: sellLoading } = useInstitutional({
-    market: "TW",
-    date: date || null,
-    limit: 50,
-    order: "sell",
-  });
+  const common = { market: "TW" as const, date: date || null, limit: 10 };
+  // 6 個榜：外資 / 投信 / 自營商，各買超（desc）與賣超（asc）。totals 取自第一個查詢。
+  const foreignBuy = useInstitutional({ ...common, by: "foreign", order: "buy" });
+  const foreignSell = useInstitutional({ ...common, by: "foreign", order: "sell" });
+  const trustBuy = useInstitutional({ ...common, by: "trust", order: "buy" });
+  const trustSell = useInstitutional({ ...common, by: "trust", order: "sell" });
+  const dealerBuy = useInstitutional({ ...common, by: "dealer", order: "buy" });
+  const dealerSell = useInstitutional({ ...common, by: "dealer", order: "sell" });
 
-  const rows = useMemo(() => data?.rows ?? [], [data?.rows]);
-  const sellRows = useMemo(() => sellData?.rows ?? [], [sellData?.rows]);
-  const usedDate = data?.date ?? null;
-
-  // 個股買超 top 10:依 foreign_net desc
-  const topBuyers = useMemo(() => {
-    return [...rows]
-      .sort((a, b) => Number(b.foreign_net ?? 0) - Number(a.foreign_net ?? 0))
-      .slice(0, 10);
-  }, [rows]);
+  const usedDate = foreignBuy.data?.date ?? null;
 
   // 三大法人淨額合計（本日，全市場）——用後端 SUM 全母體的 totals，
-  // 不可拿 rows（依 foreign_net desc 截斷的前 N 檔）加總，否則方向會與市場相反。
+  // 不可拿榜單（截斷的 Top 10）加總，否則方向會與市場相反。
   const totals = useMemo(() => {
-    const tt = data?.totals;
+    const tt = foreignBuy.data?.totals;
     return {
       f: Number(tt?.foreign_net ?? 0),
       t: Number(tt?.trust_net ?? 0),
       d: Number(tt?.dealer_net ?? 0),
       count: Number(tt?.count ?? 0),
     };
-  }, [data?.totals]);
+  }, [foreignBuy.data?.totals]);
   const netAccent = (n: number): "bull" | "bear" | undefined =>
     n > 0 ? "bull" : n < 0 ? "bear" : undefined;
+
+  const sections = [
+    { title: "外資買超 Top 10", q: foreignBuy },
+    { title: "外資賣超 Top 10", q: foreignSell },
+    { title: "投信買超 Top 10", q: trustBuy },
+    { title: "投信賣超 Top 10", q: trustSell },
+    { title: "自營商買超 Top 10", q: dealerBuy },
+    { title: "自營商賣超 Top 10", q: dealerSell },
+  ];
 
   const columns = useMemo<ColumnDef<InstitutionalRow>[]>(
     () => [
@@ -198,28 +192,17 @@ export default function InstitutionalPage() {
         />
       </section>
 
-      <section className="space-y-2">
-        <h3 className="text-sm font-medium">外資買超 Top 10</h3>
-        <DataTable
-          columns={columns}
-          data={topBuyers}
-          isLoading={isLoading}
-          emptyText="該日期無三大法人資料"
-        />
-      </section>
-
-      <section className="space-y-2">
-        <h3 className="text-sm font-medium">
-          外資賣超 Top {sellRows.length}
-          {totals.count > sellRows.length ? `（共 ${totals.count} 檔）` : ""}
-        </h3>
-        <DataTable
-          columns={columns}
-          data={sellRows}
-          isLoading={sellLoading}
-          emptyText="該日期無三大法人資料"
-        />
-      </section>
+      {sections.map((s) => (
+        <section key={s.title} className="space-y-2">
+          <h3 className="text-sm font-medium">{s.title}</h3>
+          <DataTable
+            columns={columns}
+            data={s.q.data?.rows ?? []}
+            isLoading={s.q.isLoading}
+            emptyText="該日期無三大法人資料"
+          />
+        </section>
+      ))}
     </div>
   );
 }

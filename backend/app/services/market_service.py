@@ -145,12 +145,13 @@ class MarketService:
         market: str = "TW",
         limit: int = 100,
         order: str = "buy",
+        by: str = "foreign",
     ) -> tuple[date_type | None, list, dict[str, int] | None]:
         """回 (日期, top-N rows, 全市場淨額合計)。
 
-        rows 依外資買賣超截斷（order="buy" 買超最大 / "sell" 賣超最大）供表格/Top 榜；
-        totals 由後端對全母體 SUM（與 order 無關），頁面 KPI 合計卡必須用 totals，不可拿
-        截斷後的 rows 子集加總（方向會相反）。
+        rows 依某法人買賣超截斷（by=foreign/trust/dealer；order="buy" 買超最大 /
+        "sell" 賣超最大）供表格/Top 榜；totals 由後端對全母體 SUM（與 order/by 無關），
+        頁面 KPI 合計卡必須用 totals，不可拿截斷後的 rows 子集加總（方向會相反）。
         """
         m = _validate_market(market)
         if m != "TW":
@@ -166,8 +167,9 @@ class MarketService:
         if target_date is None:
             return None, [], None
         ord_ = "sell" if str(order).lower() == "sell" else "buy"
+        by_ = by if by in ("foreign", "trust", "dealer") else "foreign"
         rows = await self.repo.get_institutional_for_date(
-            target_date, market=m, limit=limit, order=ord_
+            target_date, market=m, limit=limit, order=ord_, by=by_
         )
         totals = await self.repo.get_institutional_totals(target_date, market=m)
         return target_date, rows, totals
