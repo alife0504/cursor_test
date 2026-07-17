@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from app.core.errors import ValidationError
@@ -179,6 +179,24 @@ class DataPipelineService:
             market=default_market,
             written=n,
         )
+        return n
+
+    async def sync_news_bulk_tw(self, *, days_back: int = 3) -> int:
+        """全市場台股新聞（FinMind TaiwanStockNews，一次抓全部，取代 MOPS/稀疏 RSS）。
+
+        逐日抓（含 published_at 過濾無效者），以 url dedupe upsert。回實際寫入筆數。
+        """
+        from app.core.config import settings
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        end = datetime.now(UTC).date()
+        start = end - timedelta(days=days_back)
+        items = await FinMindSource(settings).fetch_all_news(start, end)
+        items = [it for it in items if it.get("published_at") is not None]
+        if not items:
+            return 0
+        n = await self.news_repo.upsert_many_by_url(items, commit=True)
+        logger.info("data_pipeline.sync_news_bulk_tw.done", fetched=len(items), written=n)
         return n
 
     async def sync_monthly_revenue(self, symbol: str, *, year: int | None = None) -> int:

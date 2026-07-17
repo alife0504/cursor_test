@@ -31,6 +31,22 @@ from app.data_sources.base import BaseDataSource, DataKind, MarketRegion, regist
 logger = get_logger(__name__)
 
 
+def _parse_news_dt(v: Any) -> Any:
+    """FinMind 新聞 date（'2026-07-10 01:12:24' 或純日期）→ tz-aware datetime。
+
+    解析失敗回 None（caller 應略過該筆——published_at 不可為 NULL）。
+    """
+    from datetime import UTC, datetime
+
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(v))
+    except (ValueError, TypeError):
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
+
+
 @register_data_source
 class FinMindSource(BaseDataSource):
     """FinMind API。"""
@@ -59,6 +75,41 @@ class FinMindSource(BaseDataSource):
             end_date=end.isoformat(),
         )
         return self._normalize_ohlcv(data)
+
+    async def fetch_all_news(self, start: date, end: date) -> list[dict[str, Any]]:
+        """全市場相關新聞（FinMind TaiwanStockNews，Free 等級，取代被 WAF 擋的 MOPS）。
+
+        單次請求只回一天（官方 Single day per request），故逐日查；不帶 data_id → 整天全市場
+        （實測單日 ~1,593 筆 / 576 檔）。回標準化 news item：symbol/title/summary/url/source/
+        published_at/market，url 作 dedupe key。
+        """
+        from datetime import timedelta
+
+        out: list[dict[str, Any]] = []
+        day = start
+        while day <= end:
+            try:
+                data = await self._call(dataset="TaiwanStockNews", start_date=day.isoformat())
+            except (AuthError, RateLimitError, ExternalServiceError):
+                data = []  # 單日失敗不影響其他日
+            for r in data:
+                link = r.get("link")
+                title = r.get("title")
+                if not link or not title:
+                    continue
+                out.append(
+                    {
+                        "symbol": r.get("stock_id"),
+                        "title": title,
+                        "summary": r.get("description"),
+                        "url": link,
+                        "source": r.get("source"),
+                        "published_at": _parse_news_dt(r.get("date")),
+                        "market": "TWSE",
+                    }
+                )
+            day += timedelta(days=1)
+        return out
 
     async def fetch_company_info(self, symbol: str) -> dict[str, Any]:
         data = await self._call(dataset="TaiwanStockInfo", data_id=symbol)

@@ -74,6 +74,37 @@ def ingest_us_news(hours_back: int = 24) -> dict[str, Any]:
     return asyncio.run(_async_ingest("NASDAQ", hours_back))
 
 
+@celery_app.task(
+    name="app.workers.tasks.news_ingest.ingest_tw_news_bulk",
+    autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
+    retry_backoff=2,
+    retry_backoff_max=60,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=300,
+    time_limit=600,
+)
+def ingest_tw_news_bulk(days_back: int = 3) -> dict[str, Any]:
+    """全市場台股新聞（FinMind TaiwanStockNews，一次抓全部）。
+
+    取代被 WAF 擋的 MOPS 與稀疏的 cnyes RSS —— 單日 ~1,593 筆 / 576 檔。
+    """
+    return asyncio.run(_async_ingest_bulk(days_back))
+
+
+async def _async_ingest_bulk(days_back: int) -> dict[str, Any]:
+    sources = get_tw_sources(settings)
+    engine, sm = _new_engine_sm()
+    try:
+        async with sm() as session:
+            service = DataPipelineService(sources_by_kind=sources, session=session)
+            written = await service.sync_news_bulk_tw(days_back=days_back)
+        logger.info("news_ingest.bulk.done written=%d", written)
+        return {"written": int(written)}
+    finally:
+        await engine.dispose()
+
+
 async def _async_ingest(market: str, hours_back: int) -> dict[str, Any]:
     sources = get_tw_sources(settings) if market in ("TWSE", "TPEX") else get_us_sources(settings)
     since_dt = datetime.now(UTC) - timedelta(hours=hours_back)
@@ -97,4 +128,4 @@ async def _async_ingest(market: str, hours_back: int) -> dict[str, Any]:
         await engine.dispose()
 
 
-__all__ = ["ingest_tw_news", "ingest_us_news"]
+__all__ = ["ingest_tw_news", "ingest_tw_news_bulk", "ingest_us_news"]

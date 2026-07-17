@@ -98,9 +98,9 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.sync_ohlcv.sync_ohlcv_us_all",
         "schedule": crontab(hour=5, minute=30, day_of_week="tue-sat"),
     },
-    # TW 新聞每小時 15 分（避開整點）
+    # TW 新聞每小時 15 分（FinMind 全市場，取代被 WAF 擋的 MOPS / 稀疏 RSS）
     "tw-news-hourly": {
-        "task": "app.workers.tasks.news_ingest.ingest_tw_news",
+        "task": "app.workers.tasks.news_ingest.ingest_tw_news_bulk",
         "schedule": crontab(minute=15),
     },
     # US 新聞每 3 小時 10 分
