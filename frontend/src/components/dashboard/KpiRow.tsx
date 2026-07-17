@@ -38,10 +38,9 @@ function closeSeries(
 
 /**
  * 大盤指數值來源策略：
- *  - 後端 market.overview 目前只回 indices 名稱清單、無即時報價（見 market_service）。
- *    若日後後端補上 index close/change_pct，優先採用。
- *  - 否則從指數 OHLCV 序列推導：close = 最後一筆、漲跌% = 最後兩筆當日變化。
- *    這讓 dashboard 在有指數 OHLCV（真實回填或 dev seed）時即能顯示，不再全是「—」。
+ *  - 優先採用後端 market.overview 的 indices 報價（close/change_pct，從 stock_prices 算）。
+ *  - 缺報價時從指數 OHLCV 序列推導：close = 最後一筆、漲跌% = 最後兩筆當日變化。
+ *    這讓 dashboard 在有指數 OHLCV（真實回填）時即能顯示，不再全是「—」。
  */
 function deriveIndexValue(
   backendClose: unknown,
@@ -103,7 +102,19 @@ export function KpiRow() {
     );
   }
 
-  const idxObj = (market.data?.index ?? null) as Record<string, unknown> | null;
+  // 後端 /market/overview 回 indices（複數陣列 IndexQuote[]）；攤平成 deriveIndexValue
+  // 需要的 {twse_*, tpex_*}。原本讀單數 market.data?.index 恆為 null（欄位名打錯）→
+  // 後端從 stock_prices 算好的指數報價從未被採用、只能靠 OHLCV 序列墊底。
+  const indices = market.data?.indices ?? [];
+  const findQuote = (sym: string) => indices.find((q) => q.symbol === sym);
+  const taiexQ = findQuote("TAIEX");
+  const tpexQ = findQuote("TPEX");
+  const idxObj: Record<string, unknown> = {
+    twse_close: taiexQ?.close ?? null,
+    twse_change_pct: taiexQ?.change_pct ?? null,
+    tpex_close: tpexQ?.close ?? null,
+    tpex_change_pct: tpexQ?.change_pct ?? null,
+  };
 
   const twseSpark = closeSeries(twseOhlcv.data);
   const tpexSpark = closeSeries(tpexOhlcv.data);

@@ -327,6 +327,7 @@ class DataPipelineService:
         """
         from app.core.config import settings
         from app.data_sources.tw.finmind_source import FinMindSource
+        from app.domain.sentiment_lexicon import classify_sentiment
 
         end = datetime.now(UTC).date()
         start = end - timedelta(days=days_back)
@@ -334,6 +335,11 @@ class DataPipelineService:
         items = [it for it in items if it.get("published_at") is not None]
         if not items:
             return 0
+        # 情緒分類（詞典 net-score，免 LLM）——原本 sentiment 全 unknown、情緒分佈圖恆空
+        for it in items:
+            label, score = classify_sentiment(it.get("title"), it.get("summary"))
+            it["sentiment"] = label
+            it["sentiment_score"] = score
         n = await self.news_repo.upsert_many_by_url(items, commit=True)
         logger.info("data_pipeline.sync_news_bulk_tw.done", fetched=len(items), written=n)
         return n

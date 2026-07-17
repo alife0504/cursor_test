@@ -15,13 +15,14 @@ import { useStockNews } from "@/hooks/useNews";
 //   - 提供個股檢視 + sentiment 分佈
 //   - 全市場聚合留 v1.1
 
-// 情緒色：positive → bull（紅、台股慣例「利多」）；negative → bear（綠）；neutral → 灰
+// 情緒色：positive → bull（紅、台股慣例「利多」）；negative → bear（綠）；neutral → 灰。
+// DB 實際只有 positive/neutral/negative/unknown 四值；unknown = 未評級（無法判定），
+// 不可 fallback 成「中性」（會與情緒分佈圖自相矛盾）。
 const SENTIMENT_LABEL_MAP: Record<string, { text: string; color: string }> = {
-  very_positive: { text: "極正面", color: "text-bull bg-bull-muted" },
   positive: { text: "正面", color: "text-bull bg-bull-muted" },
   neutral: { text: "中性", color: "text-muted-foreground bg-muted" },
   negative: { text: "負面", color: "text-bear bg-bear-muted" },
-  very_negative: { text: "極負面", color: "text-bear bg-bear-muted" },
+  unknown: { text: "未評級", color: "text-muted-foreground bg-muted/50" },
 };
 
 export default function NewsSentimentPage() {
@@ -83,8 +84,8 @@ export default function NewsSentimentPage() {
               </thead>
               <tbody>
                 {data.map((it, idx) => {
-                  const lbl = it.sentiment ?? it.sentiment_label ?? "neutral";
-                  const tag = SENTIMENT_LABEL_MAP[lbl] ?? SENTIMENT_LABEL_MAP.neutral;
+                  const lbl = it.sentiment ?? it.sentiment_label ?? "unknown";
+                  const tag = SENTIMENT_LABEL_MAP[lbl] ?? SENTIMENT_LABEL_MAP.unknown;
                   return (
                     <tr key={(it.id ?? idx) + it.title.slice(0, 20)} className="border-b">
                       <td className="p-2">

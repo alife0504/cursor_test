@@ -41,7 +41,12 @@ export function MarketIndexMiniChart() {
       ? rtIndex.data.as_of.slice(11, 19)
       : null;
 
-  const idxObj = (overview.data?.index ?? null) as Record<string, unknown> | null;
+  // 後端 overview 回 indices（複數陣列）；取 TAIEX 攤平。原讀單數 overview.data?.index
+  // 恆為 null（欄位名打錯）→ 後端算好的指數報價從未被採用。
+  const taiexQuote = (overview.data?.indices ?? []).find((q) => q.symbol === "TAIEX");
+  const idxObj: Record<string, unknown> | null = taiexQuote
+    ? { twse_close: taiexQuote.close ?? null, twse_change_pct: taiexQuote.change_pct ?? null }
+    : null;
 
   const series = useMemo(() => {
     return (ohlcv.data ?? [])
@@ -49,8 +54,8 @@ export function MarketIndexMiniChart() {
       .filter((n) => Number.isFinite(n));
   }, [ohlcv.data]);
 
-  // 後端 overview 目前只回 indices 名稱清單、無指數報價 →
-  // 從 OHLCV 序列推導：close = 最後一筆、漲跌% = 區間首尾變化（對應所選 N 日）。
+  // 優先用後端 indices 的指數報價；缺時從 OHLCV 序列推導
+  // （close = 最後一筆、漲跌% = 區間首尾變化，對應所選 N 日）。
   const backendClose = (idxObj?.twse_close ??
     idxObj?.close ??
     idxObj?.value ??
