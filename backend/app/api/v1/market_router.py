@@ -54,9 +54,12 @@ async def get_institutional(
     used_date, rows, totals = await service.get_institutional(
         target_date=target_date, market=market, limit=limit
     )
+    # 批次取股票中文名（symbol → name）供表格顯示
+    names = await service.repo.get_names_for([r.symbol for r in rows])
     items = [
         InstitutionalRow(
             symbol=r.symbol,
+            name=names.get(r.symbol),
             date=r.date,
             foreign_buy=r.foreign_buy,
             foreign_sell=r.foreign_sell,

@@ -328,6 +328,7 @@ export interface RealtimeSnapshot {
 // 三大法人 row（對應 backend/schemas/market.py InstitutionalRow）
 export interface InstitutionalRow {
   symbol: string;
+  name?: string | null;
   date: string;
   foreign_buy?: string | null;
   foreign_sell?: string | null;

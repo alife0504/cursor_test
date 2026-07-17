@@ -62,6 +62,7 @@ export default function InstitutionalPage() {
       {
         accessorKey: "symbol",
         header: "代號",
+        meta: { align: "left" },
         cell: ({ row }) => (
           <Link
             href={`/analysis/new?symbol=${row.original.symbol}`}
@@ -72,8 +73,17 @@ export default function InstitutionalPage() {
         ),
       },
       {
+        accessorKey: "name",
+        header: "名稱",
+        meta: { align: "left" },
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap">{row.original.name ?? "-"}</span>
+        ),
+      },
+      {
         accessorKey: "foreign_net",
         header: "外資買賣超",
+        meta: { align: "right" },
         cell: ({ row }) => (
           <NumberFormat
             value={row.original.foreign_net ?? null}
@@ -88,6 +98,7 @@ export default function InstitutionalPage() {
       {
         accessorKey: "trust_net",
         header: "投信買賣超",
+        meta: { align: "right" },
         cell: ({ row }) => (
           <NumberFormat
             value={row.original.trust_net ?? null}
@@ -102,6 +113,7 @@ export default function InstitutionalPage() {
       {
         accessorKey: "dealer_net",
         header: "自營商買賣超",
+        meta: { align: "right" },
         cell: ({ row }) => (
           <NumberFormat
             value={row.original.dealer_net ?? null}

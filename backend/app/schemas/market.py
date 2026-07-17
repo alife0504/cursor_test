@@ -51,6 +51,7 @@ class InstitutionalRow(BaseSchema):
     """單一股票的三大法人。"""
 
     symbol: str
+    name: str | None = None
     date: date
     foreign_buy: int
     foreign_sell: int

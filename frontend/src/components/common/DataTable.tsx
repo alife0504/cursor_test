@@ -5,6 +5,7 @@ import {
   flexRender,
   getCoreRowModel,
   getSortedRowModel,
+  type RowData,
   SortingState,
   useReactTable,
 } from "@tanstack/react-table";
@@ -21,6 +22,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+
+// 讓每個 column 可透過 meta.align 指定對齊（代號/名稱 left、數字 right）。
+declare module "@tanstack/react-table" {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface ColumnMeta<TData extends RowData, TValue> {
+    align?: "left" | "right" | "center";
+  }
+}
+
+function alignClass(align?: "left" | "right" | "center"): string {
+  if (align === "right") return "text-right tabular-nums";
+  if (align === "center") return "text-center";
+  return "text-left";
+}
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -67,7 +82,10 @@ export function DataTable<TData, TValue>({
           {table.getHeaderGroups().map((hg) => (
             <TableRow key={hg.id}>
               {hg.headers.map((header) => (
-                <TableHead key={header.id}>
+                <TableHead
+                  key={header.id}
+                  className={alignClass(header.column.columnDef.meta?.align)}
+                >
                   {header.isPlaceholder
                     ? null
                     : flexRender(
@@ -83,7 +101,10 @@ export function DataTable<TData, TValue>({
           {table.getRowModel().rows.map((row) => (
             <TableRow key={row.id}>
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id}>
+                <TableCell
+                  key={cell.id}
+                  className={alignClass(cell.column.columnDef.meta?.align)}
+                >
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </TableCell>
               ))}
