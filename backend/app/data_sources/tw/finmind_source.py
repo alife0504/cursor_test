@@ -162,6 +162,75 @@ class FinMindSource(BaseDataSource):
         )
         return self._normalize_margin(data)
 
+    async def fetch_all_per(self, start: date, end: date) -> list[dict[str, Any]]:
+        """全市場本益比 / 殖利率 / 淨值比（TaiwanStockPER，不帶 data_id → 單日全市場）。
+
+        用於刷新 stock_metrics 的近日 PE/殖利率。回 {symbol, date, pe_ratio, pbr, dividend_yield}。
+        """
+        from datetime import timedelta
+
+        out: list[dict[str, Any]] = []
+        day = start
+        while day <= end:
+            try:
+                data = await self._call(dataset="TaiwanStockPER", start_date=day.isoformat())
+            except (AuthError, RateLimitError, ExternalServiceError):
+                data = []
+            for r in data:
+                sid = r.get("stock_id")
+                d = r.get("date")
+                if not sid or not d:
+                    continue
+                try:
+                    d_obj = date.fromisoformat(str(d)[:10])
+                except ValueError:
+                    continue
+                out.append(
+                    {
+                        "symbol": sid,
+                        "date": d_obj,
+                        "pe_ratio": _to_decimal_or_none(r.get("PER")),
+                        "pbr": _to_decimal_or_none(r.get("PBR")),
+                        "dividend_yield": _to_decimal_or_none(r.get("dividend_yield")),
+                    }
+                )
+            day += timedelta(days=1)
+        return out
+
+    async def fetch_all_market_value(self, start: date, end: date) -> list[dict[str, Any]]:
+        """全市場市值（TaiwanStockMarketValue，不帶 data_id → 單日全市場）。
+
+        回 {symbol, date, market_cap}。用於刷新 stock_metrics 近日市值。
+        """
+        from datetime import timedelta
+
+        out: list[dict[str, Any]] = []
+        day = start
+        while day <= end:
+            try:
+                data = await self._call(
+                    dataset="TaiwanStockMarketValue", start_date=day.isoformat()
+                )
+            except (AuthError, RateLimitError, ExternalServiceError):
+                data = []
+            for r in data:
+                sid = r.get("stock_id")
+                d = r.get("date")
+                if not sid or not d:
+                    continue
+                try:
+                    d_obj = date.fromisoformat(str(d)[:10])
+                except ValueError:
+                    continue
+                mv = r.get("market_value")
+                try:
+                    mv_int = int(float(mv)) if mv not in (None, "", "-") else None
+                except (ValueError, TypeError):
+                    mv_int = None
+                out.append({"symbol": sid, "date": d_obj, "market_cap": mv_int})
+            day += timedelta(days=1)
+        return out
+
     async def fetch_all_margin(self, start: date, end: date) -> list[dict[str, Any]]:
         """全市場融資融券（不帶 data_id → 單日回整個市場，逐日查）。
 

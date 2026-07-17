@@ -37,11 +37,11 @@ export default function ScreenerFilterPage() {
   const items = data?.items ?? [];
 
   const summary = useMemo(() => {
-    const withClose = items.filter((r) => r.close != null).length;
+    const withPe = items.filter((r) => r.pe_ratio != null).length;
     const industries = new Set(
       items.map((r) => r.industry).filter(Boolean),
     ).size;
-    return { n: items.length, withClose, industries };
+    return { n: items.length, withPe, industries };
   }, [items]);
 
   const columns = useMemo<ColumnDef<ScreenerRow>[]>(
@@ -145,9 +145,9 @@ export default function ScreenerFilterPage() {
           accent="info"
         />
         <KpiCard
-          title="有收盤資料"
-          value={summary.withClose}
-          subtitle="其餘待行情回填"
+          title="有本益比"
+          value={summary.withPe}
+          subtitle="本頁（ETF/虧損股無 PE）"
           icon={LineChart}
           accent="info"
         />

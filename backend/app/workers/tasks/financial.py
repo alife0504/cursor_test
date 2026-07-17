@@ -281,6 +281,29 @@ async def _async_margin_bulk(days_back: int) -> dict[str, Any]:
 
 
 @celery_app.task(
+    name="app.workers.tasks.financial.sync_stock_metrics_tw",
+    soft_time_limit=300,
+    time_limit=420,
+)
+def sync_stock_metrics_tw() -> dict[str, Any]:
+    """刷新 stock_metrics 每檔最新指標快照（PE/殖利率/PBR/市值/RSI/EPS 成長）——選股篩選器用。"""
+    return asyncio.run(_async_stock_metrics())
+
+
+async def _async_stock_metrics() -> dict[str, Any]:
+    from app.services.metrics_service import MetricsService
+
+    engine, sm = _new_engine_sm()
+    try:
+        async with sm() as session:
+            result = await MetricsService(session).sync_stock_metrics()
+        logger.info("financial.stock_metrics.done result=%s", result)
+        return {k: int(v) for k, v in result.items()}
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
     name="app.workers.tasks.financial.sync_company_info_tw",
     soft_time_limit=120,
     time_limit=180,
@@ -427,4 +450,5 @@ __all__ = [
     "sync_monthly_revenue_one",
     "sync_quarterly_financial_one",
     "sync_quarterly_financial_us",
+    "sync_stock_metrics_tw",
 ]

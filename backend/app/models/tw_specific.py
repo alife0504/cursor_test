@@ -137,4 +137,43 @@ class MonthlyRevenue(Base):
     )
 
 
-__all__ = ["InstitutionalTrading", "MarginTrading", "MonthlyRevenue"]
+class StockMetrics(Base):
+    """每檔最新指標快照（選股篩選器用）。
+
+    每檔一列（symbol PK），由每日排程 sync_stock_metrics 刷新為「最新」快照，非時序。
+    PE/PBR/殖利率 來自 FinMind TaiwanStockPER、市值 來自 TaiwanStockMarketValue、
+    rsi14 由 stock_prices 算、eps_growth 由 financial_statements EPS YoY 算。
+    """
+
+    __tablename__ = "stock_metrics"
+
+    symbol: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("stock_list.symbol", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    as_of_date: Mapped[date_type | None] = mapped_column(Date)
+    """指標對應資料日（PER/市值 as-of；RSI 用最新收盤日）。"""
+
+    pe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    pbr: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    dividend_yield: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    """殖利率 (%)，如 0.9 = 0.9%。"""
+    market_cap: Mapped[int | None] = mapped_column(BigInteger)
+    """市值 (TWD)。"""
+    rsi14: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    eps_growth: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    """最新一季 EPS 對去年同季 YoY (%)，如 15.5 = +15.5%。"""
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_stock_metrics_pe_ratio", "pe_ratio"),
+        Index("ix_stock_metrics_market_cap", "market_cap"),
+        Index("ix_stock_metrics_dividend_yield", "dividend_yield"),
+    )
+
+
+__all__ = ["InstitutionalTrading", "MarginTrading", "MonthlyRevenue", "StockMetrics"]

@@ -131,6 +131,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.financial.sync_margin_bulk_tw",
         "schedule": crontab(hour=21, minute=30, day_of_week="mon-fri"),
     },
+    # TW 選股指標快照每日 22:00（收盤後 PE/市值/RSI/EPS 成長全物化 → 選股篩選器用）。
+    # 排最後：需當日 OHLCV（14:30）與 FinMind PER/市值 傍晚公布皆到位後才算得準。
+    "tw-stock-metrics-daily": {
+        "task": "app.workers.tasks.financial.sync_stock_metrics_tw",
+        "schedule": crontab(hour=22, minute=0, day_of_week="mon-fri"),
+    },
     # TW 公司基本資料每週日（靜態資料，變動極慢）
     "tw-company-info-weekly": {
         "task": "app.workers.tasks.financial.sync_company_info_tw",
