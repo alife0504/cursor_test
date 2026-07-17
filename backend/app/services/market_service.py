@@ -139,12 +139,18 @@ class MarketService:
 
     # ── institutional（TW only）─────────────────────────
     async def get_institutional(
-        self, *, target_date: date_type | None = None, market: str = "TW", limit: int = 100
+        self,
+        *,
+        target_date: date_type | None = None,
+        market: str = "TW",
+        limit: int = 100,
+        order: str = "buy",
     ) -> tuple[date_type | None, list, dict[str, int] | None]:
         """回 (日期, top-N rows, 全市場淨額合計)。
 
-        rows 依 foreign_net desc 截斷（供表格/Top 榜）；totals 由後端對全母體 SUM，
-        頁面 KPI 合計卡必須用 totals，不可拿截斷後的 rows 子集加總（方向會相反）。
+        rows 依外資買賣超截斷（order="buy" 買超最大 / "sell" 賣超最大）供表格/Top 榜；
+        totals 由後端對全母體 SUM（與 order 無關），頁面 KPI 合計卡必須用 totals，不可拿
+        截斷後的 rows 子集加總（方向會相反）。
         """
         m = _validate_market(market)
         if m != "TW":
@@ -159,7 +165,10 @@ class MarketService:
             target_date = await self.repo.get_latest_institutional_date("TW")
         if target_date is None:
             return None, [], None
-        rows = await self.repo.get_institutional_for_date(target_date, market=m, limit=limit)
+        ord_ = "sell" if str(order).lower() == "sell" else "buy"
+        rows = await self.repo.get_institutional_for_date(
+            target_date, market=m, limit=limit, order=ord_
+        )
         totals = await self.repo.get_institutional_totals(target_date, market=m)
         return target_date, rows, totals
 

@@ -27,13 +27,23 @@ function compactNet(n: number): string {
 
 export default function InstitutionalPage() {
   const [date, setDate] = useState<string>("");
+  // 外資買超（foreign_net desc）——供 Top 10 與全市場淨額合計 totals
   const { data, isLoading } = useInstitutional({
     market: "TW",
     date: date || null,
     limit: 50,
+    order: "buy",
+  });
+  // 外資賣超（foreign_net asc）——供下方「外資賣超」明細，與買超榜互補、不重複
+  const { data: sellData, isLoading: sellLoading } = useInstitutional({
+    market: "TW",
+    date: date || null,
+    limit: 50,
+    order: "sell",
   });
 
   const rows = useMemo(() => data?.rows ?? [], [data?.rows]);
+  const sellRows = useMemo(() => sellData?.rows ?? [], [sellData?.rows]);
   const usedDate = data?.date ?? null;
 
   // 個股買超 top 10:依 foreign_net desc
@@ -200,13 +210,13 @@ export default function InstitutionalPage() {
 
       <section className="space-y-2">
         <h3 className="text-sm font-medium">
-          個股明細 · 外資買超排序（前 {rows.length} 檔
-          {totals.count > rows.length ? ` / 共 ${totals.count} 檔` : ""}）
+          外資賣超 Top {sellRows.length}
+          {totals.count > sellRows.length ? `（共 ${totals.count} 檔）` : ""}
         </h3>
         <DataTable
           columns={columns}
-          data={rows}
-          isLoading={isLoading}
+          data={sellRows}
+          isLoading={sellLoading}
           emptyText="該日期無三大法人資料"
         />
       </section>

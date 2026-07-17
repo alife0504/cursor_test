@@ -177,8 +177,15 @@ class MarketRepository(BaseRepository):
         *,
         market: str = "TW",
         limit: int = 100,
+        order: str = "buy",
     ) -> list[InstitutionalTrading]:
+        """依外資買賣超排序回前 N 檔。order="buy" → 買超最大（desc）；"sell" → 賣超最大（asc）。"""
         markets = _market_filter(market)
+        order_col = (
+            InstitutionalTrading.foreign_net.asc()
+            if order == "sell"
+            else InstitutionalTrading.foreign_net.desc()
+        )
         stmt = (
             select(InstitutionalTrading)
             .join(StockList, StockList.symbol == InstitutionalTrading.symbol)
@@ -189,7 +196,7 @@ class MarketRepository(BaseRepository):
                     InstitutionalTrading.date == target_date,
                 )
             )
-            .order_by(InstitutionalTrading.foreign_net.desc())
+            .order_by(order_col)
             .limit(limit)
         )
         result = await self.session.execute(stmt)

@@ -20,19 +20,20 @@ export interface UseInstitutionalParams {
   market?: "TW" | "TPEX" | "US";
   date?: string | null;
   limit?: number;
+  order?: "buy" | "sell"; // buy=外資買超最大 / sell=外資賣超最大
   enabled?: boolean;
 }
 
 export function useInstitutional(params: UseInstitutionalParams = {}) {
-  const { market = "TW", date, limit = 100, enabled = true } = params;
+  const { market = "TW", date, limit = 100, order = "buy", enabled = true } = params;
   return useQuery({
-    queryKey: ["market", "institutional", { market, date, limit }],
+    queryKey: ["market", "institutional", { market, date, limit, order }],
     enabled,
     staleTime: 60_000,
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<InstitutionalResponse>>(
         "/market/institutional",
-        { params: { market, date: date || undefined, limit } },
+        { params: { market, date: date || undefined, limit, order } },
       );
       return res.data.data;
     },
