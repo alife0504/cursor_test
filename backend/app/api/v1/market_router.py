@@ -51,7 +51,7 @@ async def get_institutional(
     session: AsyncSession = Depends(get_rw_session),
 ):
     service = MarketService(session)
-    used_date, rows = await service.get_institutional(
+    used_date, rows, totals = await service.get_institutional(
         target_date=target_date, market=market, limit=limit
     )
     items = [
@@ -71,7 +71,13 @@ async def get_institutional(
         for r in rows
     ]
     return envelope_success(
-        {"date": used_date.isoformat() if used_date else None, "rows": items},
+        {
+            "date": used_date.isoformat() if used_date else None,
+            "rows": items,
+            # 全市場淨額合計（後端 SUM 全母體）——頁面 KPI 合計卡用這個，
+            # 不可拿截斷後的 rows 子集加總（方向會與市場相反）。
+            "totals": totals,
+        },
         trace_id=_trace_id(request),
     )
 

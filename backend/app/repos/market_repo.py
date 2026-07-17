@@ -195,6 +195,40 @@ class MarketRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_institutional_totals(
+        self, target_date: date_type, *, market: str = "TW"
+    ) -> dict[str, int]:
+        """當日全市場三大法人淨額合計 + 有資料檔數（不受 list 的 limit 截斷影響）。
+
+        頁面「外資/投信/自營商淨額合計」KPI 需要當日『整個市場』的總額；若拿 list 回的
+        top-N（依 foreign_net desc 截斷）子集在前端加總，得到的是「買超最大的 N 檔」之和，
+        方向會與市場實際淨額相反（實測把市場淨賣超顯示成淨買超）。此處直接對全母體 SUM。
+        """
+        markets = _market_filter(market)
+        stmt = (
+            select(
+                func.coalesce(func.sum(InstitutionalTrading.foreign_net), 0),
+                func.coalesce(func.sum(InstitutionalTrading.trust_net), 0),
+                func.coalesce(func.sum(InstitutionalTrading.dealer_net), 0),
+                func.count(),
+            )
+            .join(StockList, StockList.symbol == InstitutionalTrading.symbol)
+            .where(
+                and_(
+                    StockList.market.in_(markets),
+                    StockList.is_active.is_(True),
+                    InstitutionalTrading.date == target_date,
+                )
+            )
+        )
+        row = (await self.session.execute(stmt)).one()
+        return {
+            "foreign_net": int(row[0] or 0),
+            "trust_net": int(row[1] or 0),
+            "dealer_net": int(row[2] or 0),
+            "count": int(row[3] or 0),
+        }
+
     _INST_COLS = (
         "foreign_buy",
         "foreign_sell",

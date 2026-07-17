@@ -30,7 +30,13 @@ export default function NewsAnnouncementsPage() {
   const filtered = useMemo(() => {
     if (!data) return [];
     return data.filter((row) => {
-      if (typeFilter && row.announcement_type !== typeFilter) return false;
+      // 用「包含」比對：DB 的 announcement_type 是 TWSE 條款代碼（如「第51款」），
+      // 精確比對會讓使用者輸入任何關鍵字都落空。
+      if (
+        typeFilter &&
+        !(row.announcement_type ?? "").includes(typeFilter.trim())
+      )
+        return false;
       if (from && row.published_at && row.published_at < from) return false;
       if (to && row.published_at && row.published_at > `${to}T23:59:59Z`) return false;
       return true;
@@ -42,7 +48,7 @@ export default function NewsAnnouncementsPage() {
       <PageHeader
         icon={Megaphone}
         title="重大公告"
-        description="TW MOPS + US SEC EDGAR（依股票查詢）"
+        description="台股重大訊息 · TWSE 每日公告（依股票查詢）"
       />
 
       <div className="grid gap-3 sm:grid-cols-4">
@@ -61,7 +67,7 @@ export default function NewsAnnouncementsPage() {
             id="ann-type"
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            placeholder="例:法說會 / 8-K"
+            placeholder="例:第51款 / 第20款"
           />
         </div>
         <div className="flex flex-col gap-1">

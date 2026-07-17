@@ -140,7 +140,12 @@ class MarketService:
     # ── institutional（TW only）─────────────────────────
     async def get_institutional(
         self, *, target_date: date_type | None = None, market: str = "TW", limit: int = 100
-    ) -> tuple[date_type | None, list]:
+    ) -> tuple[date_type | None, list, dict[str, int] | None]:
+        """回 (日期, top-N rows, 全市場淨額合計)。
+
+        rows 依 foreign_net desc 截斷（供表格/Top 榜）；totals 由後端對全母體 SUM，
+        頁面 KPI 合計卡必須用 totals，不可拿截斷後的 rows 子集加總（方向會相反）。
+        """
         m = _validate_market(market)
         if m != "TW":
             raise ValidationError(
@@ -153,9 +158,10 @@ class MarketService:
             # 用股價日（可能是今天、法人還沒出）會查到空 → 頁面誤顯示「無資料」。
             target_date = await self.repo.get_latest_institutional_date("TW")
         if target_date is None:
-            return None, []
+            return None, [], None
         rows = await self.repo.get_institutional_for_date(target_date, market=m, limit=limit)
-        return target_date, rows
+        totals = await self.repo.get_institutional_totals(target_date, market=m)
+        return target_date, rows, totals
 
     # ── movers ──────────────────────────────────────────
     async def get_movers(

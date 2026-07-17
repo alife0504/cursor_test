@@ -43,13 +43,17 @@ export default function InstitutionalPage() {
       .slice(0, 10);
   }, [rows]);
 
-  // 三大法人淨額合計（本日，用已載入資料彙總）
+  // 三大法人淨額合計（本日，全市場）——用後端 SUM 全母體的 totals，
+  // 不可拿 rows（依 foreign_net desc 截斷的前 N 檔）加總，否則方向會與市場相反。
   const totals = useMemo(() => {
-    const f = rows.reduce((a, r) => a + Number(r.foreign_net ?? 0), 0);
-    const t = rows.reduce((a, r) => a + Number(r.trust_net ?? 0), 0);
-    const d = rows.reduce((a, r) => a + Number(r.dealer_net ?? 0), 0);
-    return { f, t, d, count: rows.length };
-  }, [rows]);
+    const tt = data?.totals;
+    return {
+      f: Number(tt?.foreign_net ?? 0),
+      t: Number(tt?.trust_net ?? 0),
+      d: Number(tt?.dealer_net ?? 0),
+      count: Number(tt?.count ?? 0),
+    };
+  }, [data?.totals]);
   const netAccent = (n: number): "bull" | "bear" | undefined =>
     n > 0 ? "bull" : n < 0 ? "bear" : undefined;
 
@@ -183,7 +187,10 @@ export default function InstitutionalPage() {
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-sm font-medium">全部個股(本日)</h3>
+        <h3 className="text-sm font-medium">
+          個股明細 · 外資買超排序（前 {rows.length} 檔
+          {totals.count > rows.length ? ` / 共 ${totals.count} 檔` : ""}）
+        </h3>
         <DataTable
           columns={columns}
           data={rows}

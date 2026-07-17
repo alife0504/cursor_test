@@ -340,9 +340,18 @@ export interface InstitutionalRow {
   dealer_net?: string | null;
 }
 
+// 全市場三大法人淨額合計（後端對全母體 SUM，不受 rows 的 limit 截斷影響）
+export interface InstitutionalTotals {
+  foreign_net: number;
+  trust_net: number;
+  dealer_net: number;
+  count: number;
+}
+
 export interface InstitutionalResponse {
   date: string | null;
   rows: InstitutionalRow[];
+  totals: InstitutionalTotals | null;
 }
 
 // Screener row（對應 backend/schemas/screener.py ScreenerRow）
