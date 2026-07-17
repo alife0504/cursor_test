@@ -36,6 +36,10 @@ from app.models.stock import StockList
 from app.models.tw_specific import InstitutionalTrading, MarginTrading
 from app.repos.base import BaseRepository
 
+# 多列 upsert 每塊列數 —— asyncpg 單語句參數上限 32767；margin 11 欄/列、
+# institutional 12 欄/列，取 1,000 列/塊（≤12,000 參數）遠低於上限。
+_UPSERT_CHUNK = 1000
+
 # 把使用者輸入的 market code 映射到 stock_list.market 集合
 _MARKET_GROUPS: dict[str, tuple[str, ...]] = {
     "TW": ("TWSE", "TPEX"),
@@ -214,6 +218,33 @@ class MarketRepository(BaseRepository):
         "short_quota",
     )
 
+    async def _chunked_upsert(
+        self,
+        model: Any,
+        clean: list[dict[str, Any]],
+        value_cols: tuple[str, ...],
+        *,
+        commit: bool,
+    ) -> int:
+        """多列 upsert（PK=(symbol,date)）並分塊送出。
+
+        asyncpg 單條語句參數上限 32767；全市場 bulk（~2,200 檔 × 多日）一次送會爆
+        （margin 每列 11 欄 → >2,900 列即超限）。以 1,000 列/塊切分，遠低於上限。
+        """
+        if not clean:
+            return 0
+        for i in range(0, len(clean), _UPSERT_CHUNK):
+            chunk = clean[i : i + _UPSERT_CHUNK]
+            stmt = pg_insert(model).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["symbol", "date"],
+                set_={c: getattr(stmt.excluded, c) for c in (*value_cols, "source")},
+            )
+            await self.session.execute(stmt)
+        if commit:
+            await self.session.commit()
+        return len(clean)
+
     async def upsert_margin(
         self, rows: list[dict[str, Any]], *, source: str | None = None, commit: bool = False
     ) -> int:
@@ -228,17 +259,7 @@ class MarketRepository(BaseRepository):
             for c in self._MARGIN_COLS:
                 entry[c] = int(r.get(c) or 0)
             clean.append(entry)
-        if not clean:
-            return 0
-        stmt = pg_insert(MarginTrading).values(clean)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol", "date"],
-            set_={c: getattr(stmt.excluded, c) for c in (*self._MARGIN_COLS, "source")},
-        )
-        await self.session.execute(stmt)
-        if commit:
-            await self.session.commit()
-        return len(clean)
+        return await self._chunked_upsert(MarginTrading, clean, self._MARGIN_COLS, commit=commit)
 
     async def upsert_institutional(
         self, rows: list[dict[str, Any]], *, source: str | None = None, commit: bool = False
@@ -258,17 +279,9 @@ class MarketRepository(BaseRepository):
             for c in self._INST_COLS:
                 entry[c] = int(r.get(c) or 0)
             clean.append(entry)
-        if not clean:
-            return 0
-        stmt = pg_insert(InstitutionalTrading).values(clean)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol", "date"],
-            set_={c: getattr(stmt.excluded, c) for c in (*self._INST_COLS, "source")},
+        return await self._chunked_upsert(
+            InstitutionalTrading, clean, self._INST_COLS, commit=commit
         )
-        await self.session.execute(stmt)
-        if commit:
-            await self.session.commit()
-        return len(clean)
 
     async def get_latest_institutional_date(self, market: str) -> date_type | None:
         """三大法人最近一筆 date（依 market）。與 get_latest_trading_date 分開——
