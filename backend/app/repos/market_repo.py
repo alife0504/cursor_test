@@ -233,6 +233,15 @@ class MarketRepository(BaseRepository):
             await self.session.commit()
         return len(clean)
 
+    async def get_active_symbols(self, market: str) -> set[str]:
+        """回某 market 所有 is_active 的 symbol 集合（給即時漲跌家數過濾用）。"""
+        markets = _market_filter(market)
+        stmt = select(StockList.symbol).where(
+            StockList.market.in_(markets), StockList.is_active.is_(True)
+        )
+        result = await self.session.execute(stmt)
+        return {r[0] for r in result.all()}
+
     async def get_names_for(self, symbols: list[str]) -> dict[str, str]:
         """批次取股票中文名（symbol → name）。查無者不會出現在結果中。"""
         if not symbols:

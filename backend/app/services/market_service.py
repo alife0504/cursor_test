@@ -179,6 +179,81 @@ class MarketService:
             )
         return await self.repo.get_movers(m, mt, limit=limit)
 
+    # ── 即時大盤 / 漲跌榜（盤中；由 FinMind 全市場快照計算，僅 TW）──────────
+    async def _active_realtime_stock_quotes(self) -> tuple[list[dict[str, Any]], str | None] | None:
+        """取得「is_active 台股」的即時報價 list + as_of；即時不可用時回 None。
+
+        全市場快照含 ETF/指數/權證，這裡只留 stock_list 的 active 台股（與盤後家數口徑一致），
+        且過濾掉沒有漲跌幅的（未成交）。
+        """
+        from app.core.config import settings
+        from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
+
+        snap = await FinMindRealtimeClient(settings).fetch_all_stock_quotes()
+        if not snap.get("available"):
+            return None
+        active = await self.repo.get_active_symbols("TW")
+        quotes = [
+            q
+            for q in snap.get("quotes", [])
+            if q.get("symbol") in active and q.get("change_rate") is not None
+        ]
+        return quotes, snap.get("as_of")
+
+    async def get_realtime_overview(self) -> dict[str, Any] | None:
+        """即時大盤：由快照算漲跌家數 + 總量。即時不可用時回 None（caller 退回盤後）。"""
+        got = await self._active_realtime_stock_quotes()
+        if got is None:
+            return None
+        quotes, as_of = got
+        adv = dec = unc = 0
+        vol = 0
+        for q in quotes:
+            cr = q["change_rate"]
+            if cr > 0:
+                adv += 1
+            elif cr < 0:
+                dec += 1
+            else:
+                unc += 1
+            vol += int(q.get("total_volume") or 0)
+        return {
+            "advance_count": adv,
+            "decline_count": dec,
+            "unchanged_count": unc,
+            "total_volume": vol,
+            "as_of": as_of,
+            "realtime": True,
+        }
+
+    async def get_realtime_movers(self, *, mover_type: str = "gainers", limit: int = 10) -> Any:
+        """即時漲跌 / 成交量榜；即時不可用時回 None（caller 退回盤後）。"""
+        mt = (mover_type or "gainers").lower()
+        if mt not in ("gainers", "losers", "volume"):
+            raise ValidationError(message_zh="type 必須是 gainers / losers / volume", field="type")
+        limit = max(1, min(limit, 100))
+        got = await self._active_realtime_stock_quotes()
+        if got is None:
+            return None
+        quotes, _ = got
+
+        if mt == "volume":
+            ranked = sorted(quotes, key=lambda q: q.get("total_volume") or 0, reverse=True)
+        else:
+            ranked = sorted(quotes, key=lambda q: q["change_rate"], reverse=(mt == "gainers"))
+        top = ranked[:limit]
+        names = await self.repo.get_names_for([q["symbol"] for q in top])
+        return [
+            {
+                "symbol": q["symbol"],
+                "name": names.get(q["symbol"]),
+                "close": str(q["price"]) if q.get("price") is not None else None,
+                "change_pct": str(q["change_rate"]),
+                "volume": int(q.get("total_volume") or 0),
+            }
+            for q in top
+        ]
+
     # ── calendar（真實：法定申報期限 + 除權息）──────────────
     async def get_calendar(
         self,

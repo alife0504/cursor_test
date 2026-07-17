@@ -159,4 +159,30 @@ async def get_realtime_futures(
     return envelope_success(payload, trace_id=_trace_id(request))
 
 
+@router.get("/realtime/overview", summary="即時大盤（漲跌家數/總量，盤中；由快照計算）")
+async def get_realtime_overview(
+    request: Request,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """即時漲跌家數 + 總成交量（僅 TW）。即時不可用（收盤/未開通）時 data=null，前端退回盤後。"""
+    service = MarketService(session)
+    payload = await service.get_realtime_overview()
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
+@router.get("/realtime/movers", summary="即時漲跌 / 成交量榜（盤中；由快照計算）")
+async def get_realtime_movers(
+    request: Request,
+    type: str = Query(default="gainers", max_length=10),
+    limit: int = Query(default=10, ge=1, le=100),
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """即時漲跌榜（僅 TW）。即時不可用時 data=null，前端退回盤後。"""
+    service = MarketService(session)
+    payload = await service.get_realtime_movers(mover_type=type, limit=limit)
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
 __all__ = ["router"]

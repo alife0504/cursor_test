@@ -319,6 +319,20 @@ class FinMindRealtimeClient:
         records = [r for r in res["data"] if str(r.get("stock_id", "")).upper() in want]
         return self._ok([self._normalize_stock(r) for r in records], cached=bool(res.get("cached")))
 
+    async def fetch_all_stock_quotes(self) -> dict[str, Any]:
+        """整份全市場個股即時快照（含 ETF / 指數 / 權證，由 caller 依需要過濾）。
+
+        給「即時漲跌家數 / 漲跌榜」用：與個股/指數共用同一份快取，不額外花額度。
+        """
+        if not self.settings.FINMIND_REALTIME_ENABLED:
+            return _unavailable(Reason.DISABLED)
+        res = await self._fetch_all_cached(STOCK_SNAPSHOT_URL, _CACHE_KEY_STOCK)
+        if not res.get("ok"):
+            return res
+        return self._ok(
+            [self._normalize_stock(r) for r in res["data"]], cached=bool(res.get("cached"))
+        )
+
     async def fetch_index_snapshot(self) -> dict[str, Any]:
         """大盤指數即時報價（加權 TAIEX / 櫃買 TPEX）。
 
