@@ -181,6 +181,120 @@ class DataPipelineService:
         )
         return n
 
+    async def sync_announcements_twse(self) -> int:
+        """官方重大訊息（TWSE OpenAPI t187ap04_L，當日全市場）。
+
+        MOPS 被 WAF 擋、無免費歷史替代，故改抓 TWSE 每日重大訊息、逐日累積（只有當日，
+        無法回補過去）。ROC 日期/時間需轉西元。以 (symbol, published_at, title) 去重。
+        """
+        from datetime import datetime as _dt
+
+        from app.core.http_client import get_async_client, request_with_retry
+        from app.repos.news_repo import AnnouncementRepository
+
+        url = "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
+        try:
+            async with get_async_client(name="twse_openapi") as client:
+                resp = await request_with_retry(
+                    client, "GET", url, source_name="twse_openapi", raise_on_4xx=False
+                )
+            rows = resp.json() if resp.status_code == 200 else []
+        except Exception as exc:
+            logger.warning("data_pipeline.sync_announcements_twse.fetch_failed", error=str(exc))
+            return 0
+        if not isinstance(rows, list):
+            return 0
+
+        items: list[dict[str, Any]] = []
+        for r in rows:
+            symbol = (r.get("公司代號") or "").strip()
+            title = (r.get("主旨 ") or r.get("主旨") or "").strip()
+            if not symbol or not title:
+                continue
+            pub = _parse_roc_datetime(r.get("發言日期"), r.get("發言時間"))
+            if pub is None:
+                continue
+            items.append(
+                {
+                    "symbol": symbol,
+                    "market": "TWSE",
+                    "title": title,
+                    "content": (r.get("說明 ") or r.get("說明") or "").strip() or None,
+                    "announcement_type": (r.get("符合條款 ") or r.get("符合條款") or "").strip()
+                    or None,
+                    "published_at": pub,
+                    "extra_meta": {"source": "twse_openapi", "fact_date": r.get("事實發生日")},
+                }
+            )
+        if not items:
+            return 0
+        _ = _dt  # 保留 import 供型別參考
+        n = await AnnouncementRepository(self.session).upsert_many(items, commit=True)
+        logger.info("data_pipeline.sync_announcements_twse.done", fetched=len(items), written=n)
+        return n
+
+    async def sync_margin(self, symbol: str, start: date, end: date) -> int:
+        """融資融券 — TW only。按日期合併涵蓋（同 institutional）。"""
+        self._ensure_tw_only(symbol, "融資融券")
+        sources = self._sources_for(DataKind.MARGIN, market="TWSE")
+        if not sources:
+            raise ValueError("DataPipelineService: 無 MARGIN source 註冊")
+
+        merged: dict[Any, dict[str, Any]] = {}
+        by_source: dict[str, list[dict[str, Any]]] = {}
+        for src in sources:
+            if merged and max(merged) >= end:
+                break
+            try:
+                df = await src.fetch_margin(symbol, start, end)
+            except Exception:
+                logger.warning(
+                    "data_pipeline.sync_margin.source_failed",
+                    symbol=symbol,
+                    source=src.name,
+                    exc_info=True,
+                )
+                continue
+            if df is None or df.empty:
+                continue
+            for r in df.to_dict(orient="records"):
+                d = r.get("date")
+                if d is None or d in merged:
+                    continue
+                r["symbol"] = symbol
+                merged[d] = r
+                by_source.setdefault(src.name, []).append(r)
+
+        if not merged:
+            return 0
+        n = 0
+        for name, batch in by_source.items():
+            n += await self.market_repo.upsert_margin(batch, source=name, commit=True)
+        logger.info("data_pipeline.sync_margin.done", symbol=symbol, written=n)
+        return n
+
+    async def sync_company_info(self, symbol: str) -> int:
+        """公司基本資料 — TW only。FinMind 只提供產業別/名稱（無資本額/員工數），填可得者。"""
+        self._ensure_tw_only(symbol, "公司基本資料")
+        sources = self._sources_for(DataKind.COMPANY_INFO, market="TWSE")
+        if not sources:
+            raise ValueError("DataPipelineService: 無 COMPANY_INFO source 註冊")
+        fb = DataSourceFallback(sources)
+        info = await fb.fetch_company_info(symbol)
+        if not info or not info.get("symbol"):
+            return 0
+        n = await self.stock_repo.upsert_stock_info(
+            {
+                "symbol": info["symbol"],
+                "full_name": info.get("name"),
+                "sector": info.get("industry"),
+                "sub_industry": info.get("type"),
+            },
+            commit=True,
+        )
+        logger.info("data_pipeline.sync_company_info.done", symbol=symbol, written=n)
+        return n
+
     async def sync_news_bulk_tw(self, *, days_back: int = 3) -> int:
         """全市場台股新聞（FinMind TaiwanStockNews，一次抓全部，取代 MOPS/稀疏 RSS）。
 
@@ -542,6 +656,26 @@ def _decumulate_cashflow_rows(rows: list[dict[str, Any]]) -> None:
                     continue
                 prev_val = prev.get(col) if prev is not None else None
                 cur[col] = (cur[col] - prev_val) if prev_val is not None else None
+
+
+def _parse_roc_datetime(roc_date: Any, roc_time: Any) -> datetime | None:
+    """TWSE ROC 日期 '1150715' + 時間 '70004'/'070004' → tz-aware datetime（UTC 存）。
+
+    ROC 年 = 西元 − 1911。時間為 HMMSS/HHMMSS（不足補零）。解析失敗回 None。
+    """
+    ds = str(roc_date or "").strip()
+    if len(ds) < 7 or not ds.isdigit():
+        return None
+    try:
+        year = int(ds[:3]) + 1911
+        month = int(ds[3:5])
+        day = int(ds[5:7])
+        ts = str(roc_time or "0").strip().zfill(6)
+        hh, mm, ss = int(ts[-6:-4] or 0), int(ts[-4:-2] or 0), int(ts[-2:] or 0)
+        # 台北時間 → 以 UTC 存（台北 = UTC+8）
+        return datetime(year, month, day, hh, mm, ss, tzinfo=UTC) - timedelta(hours=8)
+    except (ValueError, TypeError):
+        return None
 
 
 def _try_parse_date(v: Any) -> date | None:

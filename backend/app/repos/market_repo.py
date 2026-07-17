@@ -33,7 +33,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.price import StockPrice
 from app.models.stock import StockList
-from app.models.tw_specific import InstitutionalTrading
+from app.models.tw_specific import InstitutionalTrading, MarginTrading
 from app.repos.base import BaseRepository
 
 # 把使用者輸入的 market code 映射到 stock_list.market 集合
@@ -202,6 +202,43 @@ class MarketRepository(BaseRepository):
         "dealer_sell",
         "dealer_net",
     )
+
+    _MARGIN_COLS = (
+        "margin_buy",
+        "margin_sell",
+        "margin_balance",
+        "margin_quota",
+        "short_buy",
+        "short_sell",
+        "short_balance",
+        "short_quota",
+    )
+
+    async def upsert_margin(
+        self, rows: list[dict[str, Any]], *, source: str | None = None, commit: bool = False
+    ) -> int:
+        """融資融券每日一列 upsert。PK=(symbol, date)。"""
+        if not rows:
+            return 0
+        clean: list[dict[str, Any]] = []
+        for r in rows:
+            if not r.get("symbol") or r.get("date") is None:
+                continue
+            entry = {"symbol": r["symbol"], "date": r["date"], "source": source}
+            for c in self._MARGIN_COLS:
+                entry[c] = int(r.get(c) or 0)
+            clean.append(entry)
+        if not clean:
+            return 0
+        stmt = pg_insert(MarginTrading).values(clean)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["symbol", "date"],
+            set_={c: getattr(stmt.excluded, c) for c in (*self._MARGIN_COLS, "source")},
+        )
+        await self.session.execute(stmt)
+        if commit:
+            await self.session.commit()
+        return len(clean)
 
     async def upsert_institutional(
         self, rows: list[dict[str, Any]], *, source: str | None = None, commit: bool = False

@@ -74,6 +74,7 @@ class FinMindLocalSource(BaseDataSource):
         DataKind.INSTITUTIONAL,
         DataKind.FINANCIAL,
         DataKind.MONTHLY_REVENUE,
+        DataKind.MARGIN,
     )
 
     async def _connect(self):
@@ -218,6 +219,26 @@ class FinMindLocalSource(BaseDataSource):
             end,
         )
         return [dict(r) for r in rows]
+
+    async def fetch_margin(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        """融資融券（本地庫），重用 API 源的 normalize（欄位/型別一致）。"""
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        data = await self._query(
+            """
+            SELECT stock_id, date,
+                   "MarginPurchaseBuy", "MarginPurchaseSell", "MarginPurchaseTodayBalance",
+                   "MarginPurchaseLimit", "ShortSaleBuy", "ShortSaleSell",
+                   "ShortSaleTodayBalance", "ShortSaleLimit"
+            FROM bronze.taiwan_stock_margin_purchase_short_sale
+            WHERE stock_id = $1 AND date >= $2 AND date <= $3
+            ORDER BY date
+            """,
+            symbol,
+            start,
+            end,
+        )
+        return FinMindSource._normalize_margin(data)
 
     async def fetch_monthly_revenue(
         self, symbol: str, *, year: int | None = None

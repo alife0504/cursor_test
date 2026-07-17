@@ -17,7 +17,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.logging_config import get_logger
-from app.models.stock import StockList
+from app.models.stock import StockInfo, StockList
 from app.repos.base import BaseRepository
 
 logger = get_logger(__name__)
@@ -127,6 +127,38 @@ class StockRepository(BaseRepository):
         if commit:
             await self.session.commit()
         return len(items)
+
+    _INFO_COLS = (
+        "full_name",
+        "sector",
+        "sub_industry",
+        "description",
+        "address",
+        "website",
+        "phone",
+        "capital",
+        "employees",
+        "fiscal_year_end",
+    )
+
+    async def upsert_stock_info(self, item: dict[str, Any], *, commit: bool = False) -> int:
+        """公司基本資料 upsert（PK=symbol）。只更新有給值的欄位，不把既有值覆蓋成 None。"""
+        if not item.get("symbol"):
+            return 0
+        entry: dict[str, Any] = {"symbol": item["symbol"]}
+        for c in self._INFO_COLS:
+            if item.get(c) is not None:
+                entry[c] = item[c]
+        stmt = pg_insert(StockInfo).values(entry)
+        update_cols = {c: getattr(stmt.excluded, c) for c in entry if c != "symbol"}
+        if update_cols:
+            stmt = stmt.on_conflict_do_update(index_elements=["symbol"], set_=update_cols)
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=["symbol"])
+        await self.session.execute(stmt)
+        if commit:
+            await self.session.commit()
+        return 1
 
 
 __all__ = ["StockRepository"]

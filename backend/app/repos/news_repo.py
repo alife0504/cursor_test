@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
 
 from app.core.logging_config import get_logger
 from app.models.news import Announcement, NewsMetadata
@@ -106,6 +106,55 @@ class AnnouncementRepository(BaseRepository):
         stmt = stmt.order_by(Announcement.published_at.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def upsert_many(self, items: list[dict[str, Any]], *, commit: bool = False) -> int:
+        """重大訊息 upsert。無自然 url → 以 (symbol, published_at, title) 去重
+        （announcements 無 unique constraint，故查存在後只 insert 新的）。
+        """
+        if not items:
+            return 0
+        clean = [
+            it
+            for it in items
+            if it.get("symbol") and it.get("title") and it.get("published_at") is not None
+        ]
+        if not clean:
+            return 0
+        # 查既有 (symbol, published_at, title)
+        seen: set[tuple[str, Any, str]] = set()
+        symbols = list({it["symbol"] for it in clean})
+        existing = await self.session.execute(
+            select(Announcement.symbol, Announcement.published_at, Announcement.title).where(
+                Announcement.symbol.in_(symbols)
+            )
+        )
+        for s, p, t in existing.all():
+            seen.add((s, p, t))
+
+        to_insert = []
+        for it in clean:
+            key = (it["symbol"], it["published_at"], it["title"])
+            if key in seen:
+                continue
+            seen.add(key)
+            to_insert.append(
+                {
+                    "symbol": it["symbol"],
+                    "market": it.get("market", "TWSE"),
+                    "announcement_type": it.get("announcement_type"),
+                    "title": it["title"],
+                    "content": it.get("content"),
+                    "url": it.get("url"),
+                    "published_at": it["published_at"],
+                    "extra_meta": it.get("extra_meta"),
+                }
+            )
+        if not to_insert:
+            return 0
+        await self.session.execute(insert(Announcement), to_insert)
+        if commit:
+            await self.session.commit()
+        return len(to_insert)
 
 
 __all__ = ["AnnouncementRepository", "NewsRepository"]

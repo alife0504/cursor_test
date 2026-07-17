@@ -103,6 +103,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.news_ingest.ingest_tw_news_bulk",
         "schedule": crontab(minute=15),
     },
+    # 官方重大訊息每日 15:20（TWSE 當日全市場，MOPS 替代，逐日累積）
+    "tw-announcements-daily": {
+        "task": "app.workers.tasks.news_ingest.ingest_tw_announcements",
+        "schedule": crontab(hour=15, minute=20, day_of_week="mon-fri"),
+    },
     # US 新聞每 3 小時 10 分
     "us-news-3h": {
         "task": "app.workers.tasks.news_ingest.ingest_us_news",
@@ -117,6 +122,16 @@ celery_app.conf.beat_schedule = {
     "tw-institutional-daily": {
         "task": "app.workers.tasks.financial.sync_institutional_tw",
         "schedule": crontab(hour=15, minute=0, day_of_week="mon-fri"),
+    },
+    # TW 融資融券每日 15:10（盤後）
+    "tw-margin-daily": {
+        "task": "app.workers.tasks.financial.sync_margin_tw",
+        "schedule": crontab(hour=15, minute=10, day_of_week="mon-fri"),
+    },
+    # TW 公司基本資料每週日（靜態資料，變動極慢）
+    "tw-company-info-weekly": {
+        "task": "app.workers.tasks.financial.sync_company_info_tw",
+        "schedule": crontab(hour=4, minute=0, day_of_week="sun"),
     },
     # TW 季報（IS/BS/CF）：財報公告期集中在 3/5/8/11 月中旬前，每週日補一次即可。
     # 先前完全沒有台股財報排程 → financial_statements 只有手動同步過的少數幾檔。

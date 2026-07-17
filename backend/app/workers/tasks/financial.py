@@ -104,6 +104,62 @@ async def _async_institutional_one(symbol: str, days_back: int) -> dict[str, Any
 
 
 @celery_app.task(
+    name="app.workers.tasks.financial.sync_margin_one",
+    autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
+    retry_backoff=2,
+    retry_backoff_max=60,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=120,
+    time_limit=300,
+)
+def sync_margin_one(symbol: str, days_back: int = 30) -> dict[str, Any]:
+    """單股融資融券（TW only）。"""
+    return asyncio.run(_async_margin_one(symbol, days_back))
+
+
+async def _async_margin_one(symbol: str, days_back: int) -> dict[str, Any]:
+    sources = get_tw_sources(settings)
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=days_back)
+    engine, sm = _new_engine_sm()
+    try:
+        async with sm() as session:
+            service = DataPipelineService(sources_by_kind=sources, session=session)
+            n = await service.sync_margin(symbol, start, end)
+        return {"symbol": symbol, "rows": int(n)}
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
+    name="app.workers.tasks.financial.sync_company_info_one",
+    autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
+    retry_backoff=2,
+    retry_backoff_max=60,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=120,
+    time_limit=300,
+)
+def sync_company_info_one(symbol: str) -> dict[str, Any]:
+    """單股公司基本資料（TW only）。"""
+    return asyncio.run(_async_company_info_one(symbol))
+
+
+async def _async_company_info_one(symbol: str) -> dict[str, Any]:
+    sources = get_tw_sources(settings)
+    engine, sm = _new_engine_sm()
+    try:
+        async with sm() as session:
+            service = DataPipelineService(sources_by_kind=sources, session=session)
+            n = await service.sync_company_info(symbol)
+        return {"symbol": symbol, "rows": int(n)}
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
     name="app.workers.tasks.financial.sync_quarterly_financial_one",
     autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
     retry_backoff=2,
@@ -168,6 +224,38 @@ def sync_institutional_tw() -> dict[str, Any]:
             sync_institutional_one.name,
             args_builder=lambda sym: [sym],
             kwargs_builder=lambda _sym: {"days_back": 7},
+        )
+    )
+
+
+@celery_app.task(
+    name="app.workers.tasks.financial.sync_margin_tw",
+    soft_time_limit=120,
+    time_limit=180,
+)
+def sync_margin_tw() -> dict[str, Any]:
+    """fan-out：對所有 active TW 股票排融資融券抓取。"""
+    return asyncio.run(
+        _fan_out_tw(
+            sync_margin_one.name,
+            args_builder=lambda sym: [sym],
+            kwargs_builder=lambda _sym: {"days_back": 7},
+        )
+    )
+
+
+@celery_app.task(
+    name="app.workers.tasks.financial.sync_company_info_tw",
+    soft_time_limit=120,
+    time_limit=180,
+)
+def sync_company_info_tw() -> dict[str, Any]:
+    """fan-out：對所有 active TW 股票排公司基本資料抓取（靜態資料，每週一次即可）。"""
+    return asyncio.run(
+        _fan_out_tw(
+            sync_company_info_one.name,
+            args_builder=lambda sym: [sym],
+            kwargs_builder=lambda _sym: {},
         )
     )
 
@@ -292,8 +380,12 @@ async def _fan_out_generic(
 
 
 __all__ = [
+    "sync_company_info_one",
+    "sync_company_info_tw",
     "sync_institutional_one",
     "sync_institutional_tw",
+    "sync_margin_one",
+    "sync_margin_tw",
     "sync_monthly_revenue",
     "sync_monthly_revenue_one",
     "sync_quarterly_financial_one",
