@@ -15,6 +15,7 @@ import {
   useMarketOverview,
   useRealtimeFutures,
   useRealtimeIndex,
+  useRealtimeOverview,
 } from "@/hooks/useMarket";
 import type {
   IndexQuote,
@@ -106,12 +107,12 @@ function buildIndexCards(
   const futuresCard: IndexCardData =
     fut && fut.price != null
       ? {
-          name: "台指期",
+          name: "台指全",
           value: fut.price,
           changePct: fut.change_rate ?? null,
           subtitle: liveLabel(rtFutures?.as_of),
         }
-      : { name: "台指期", value: null, changePct: null, subtitle: unavailableLabel(rtFutures) };
+      : { name: "台指全", value: null, changePct: null, subtitle: unavailableLabel(rtFutures) };
 
   return [
     indexCard("TAIEX", "加權指數"),
@@ -121,22 +122,29 @@ function buildIndexCards(
 }
 
 // 市場總覽
-//   - TW：加權、櫃買、台指期（盤中即時，每 5 秒更新）；US：S&P / NASDAQ / Dow（盤後）
+//   - TW：加權、櫃買、台指全（台指全全日即時、加權/櫃買盤中即時，每 5 秒更新）；US：S&P / NASDAQ / Dow（盤後）
 //   - 漲跌家數 pie（紅漲綠跌）
 //   - 漲幅 / 跌幅 / 成交量榜
 export default function MarketOverviewPage() {
   const [market, setMarket] = useState<"TW" | "US">("TW");
   const { data, isLoading, error, refetch } = useMarketOverview(market);
-  // 盤中即時：加權/櫃買 + 台指期。僅 TW 啟用；收盤後 hook 自動停止輪詢。
+  // 加權/櫃買盤中即時（收盤停輪詢）；台指全全日即時。僅 TW 啟用。
   const isTW = market === "TW";
   const rtIndex = useRealtimeIndex(isTW);
-  const rtFutures = useRealtimeFutures(["TXF"], isTW);
+  // 台指全：全日即時更新（allDay=true），不受日/夜盤時段限制
+  const rtFutures = useRealtimeFutures(["TXF"], isTW, true);
+  // 即時漲跌家數 / 總量（盤中；不可用時退回盤後 useMarketOverview）
+  const rtOverview = useRealtimeOverview(isTW);
 
   const indexes = buildIndexCards(market, data?.indices ?? [], rtIndex.data, rtFutures.data);
 
-  const adv = (data?.advance_count as number | undefined) ?? 0;
-  const dec = (data?.decline_count as number | undefined) ?? 0;
-  const unc = (data?.unchanged_count as number | undefined) ?? 0;
+  // 盤中有即時大盤就用即時值，否則用盤後
+  const rt = rtOverview.data ?? null;
+  const adv = rt?.advance_count ?? (data?.advance_count as number | undefined) ?? 0;
+  const dec = rt?.decline_count ?? (data?.decline_count as number | undefined) ?? 0;
+  const unc = rt?.unchanged_count ?? (data?.unchanged_count as number | undefined) ?? 0;
+  const totalVolume = rt?.total_volume ?? data?.total_volume ?? null;
+  const breadthLive = rt != null;
   // 紅漲綠跌 token：bull/bear hsl
   const pieData = [
     { name: "上漲", value: adv, fill: "hsl(var(--bull))" },
@@ -186,7 +194,12 @@ export default function MarketOverviewPage() {
           <PieChart data={pieData} />
         </ChartContainer>
         <div className="rounded-lg border bg-card p-4">
-          <h3 className="mb-2 text-sm font-medium">市場摘要</h3>
+          <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
+            市場摘要
+            {breadthLive ? (
+              <span className="num text-[10px] font-normal text-bull/80">即時</span>
+            ) : null}
+          </h3>
           <dl className="space-y-1.5 text-sm">
             <div className="flex justify-between">
               <dt className="text-muted-foreground">上漲家數</dt>
@@ -202,7 +215,7 @@ export default function MarketOverviewPage() {
             </div>
             <div className="flex justify-between border-t pt-1.5">
               <dt className="text-muted-foreground">總成交量</dt>
-              <dd className="num font-medium">{data?.total_volume ?? "—"}</dd>
+              <dd className="num font-medium">{totalVolume ?? "—"}</dd>
             </div>
           </dl>
         </div>

@@ -7,10 +7,10 @@ import { useMemo } from "react";
 import { DataTable } from "@/components/common/DataTable";
 import { NumberFormat } from "@/components/common/NumberFormat";
 import { PriceDelta } from "@/components/common/PriceDelta";
-import { useMarketMovers } from "@/hooks/useMarket";
+import { useMarketMovers, useRealtimeMovers } from "@/hooks/useMarket";
 import type { MoverRow } from "@/lib/api-types";
 
-// Phase 17 § B:漲幅 / 跌幅 / 成交量榜
+// Phase 17 § B:漲幅 / 跌幅 / 成交量榜（TW 盤中即時、收盤退回盤後）
 type MoverType = "gainers" | "losers" | "volume";
 
 interface MoversTableProps {
@@ -20,7 +20,11 @@ interface MoversTableProps {
 }
 
 export function MoversTable({ type, market, limit = 10 }: MoversTableProps) {
-  const { data, isLoading } = useMarketMovers(type, market, limit);
+  const eod = useMarketMovers(type, market, limit);
+  // 盤中即時榜（僅 TW；不可用時 data=null → 退回盤後）
+  const rt = useRealtimeMovers(type, limit, market === "TW");
+  const data = rt.data ?? eod.data;
+  const isLoading = eod.isLoading && rt.isLoading;
 
   const columns = useMemo<ColumnDef<MoverRow>[]>(
     () => [

@@ -8,7 +8,7 @@ import { PriceDelta } from "@/components/common/PriceDelta";
 import { Sparkline } from "@/components/common/Sparkline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useMarketOverview } from "@/hooks/useMarket";
+import { useMarketOverview, useRealtimeIndex } from "@/hooks/useMarket";
 import { useOhlcv } from "@/hooks/useStocks";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,15 @@ export function MarketIndexMiniChart() {
 
   const overview = useMarketOverview("TW");
   const ohlcv = useOhlcv({ symbol: "TAIEX", start, end });
+  // 盤中即時加權指數（收盤後自動停輪詢，退回盤後/OHLCV 推導值）
+  const rtIndex = useRealtimeIndex();
+  const rtTaiex = rtIndex.data?.available
+    ? rtIndex.data.quotes?.find((q) => q.symbol === "TAIEX")
+    : undefined;
+  const liveAt =
+    rtTaiex?.price != null && rtIndex.data?.as_of
+      ? rtIndex.data.as_of.slice(11, 19)
+      : null;
 
   const idxObj = (overview.data?.index ?? null) as Record<string, unknown> | null;
 
@@ -50,16 +59,23 @@ export function MarketIndexMiniChart() {
     idxObj?.change_pct ??
     null) as string | number | null;
   const seriesClose = series.length ? series[series.length - 1] : null;
+  // 優先序：盤中即時 > 後端盤後 close > OHLCV 序列末值
   const idxClose: string | number | null =
-    backendClose ??
-    (seriesClose !== null
-      ? seriesClose.toLocaleString("en-US", { maximumFractionDigits: 2 })
-      : null);
+    rtTaiex?.price != null
+      ? Number(rtTaiex.price).toLocaleString("en-US", {
+          maximumFractionDigits: 2,
+        })
+      : (backendClose ??
+        (seriesClose !== null
+          ? seriesClose.toLocaleString("en-US", { maximumFractionDigits: 2 })
+          : null));
   const idxChange: string | number | null =
-    backendChange ??
-    (series.length >= 2 && series[0] !== 0
-      ? ((series[series.length - 1] - series[0]) / series[0]) * 100
-      : null);
+    rtTaiex?.change_rate != null
+      ? Number(rtTaiex.change_rate)
+      : (backendChange ??
+        (series.length >= 2 && series[0] !== 0
+          ? ((series[series.length - 1] - series[0]) / series[0]) * 100
+          : null));
 
   const tone =
     idxChange !== null && Number(idxChange) > 0
@@ -98,7 +114,12 @@ export function MarketIndexMiniChart() {
     <div className="flex flex-col gap-3">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <p className="text-xs text-muted-foreground">加權指數</p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            加權指數
+            {liveAt ? (
+              <span className="num text-[10px] text-bull/80">即時 · {liveAt}</span>
+            ) : null}
+          </p>
           <p className="num text-2xl font-bold leading-tight">
             {idxClose !== null && idxClose !== undefined
               ? String(idxClose)

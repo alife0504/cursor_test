@@ -7,6 +7,7 @@ import type {
   CalendarEvent,
   MarketOverview,
   MoverRow,
+  RealtimeOverview,
   RealtimeSnapshot,
 } from "@/lib/api-types";
 
@@ -45,6 +46,7 @@ export function useRealtimeIndex(enabled = true) {
     enabled,
     staleTime: REALTIME_POLL_MS - 1_000,
     refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
         "/market/realtime/index",
@@ -62,6 +64,7 @@ export function useRealtimeStock(symbols: string[], enabled = true) {
     enabled: enabled && symbols.length > 0,
     staleTime: REALTIME_POLL_MS - 1_000,
     refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
         "/market/realtime/stock",
@@ -101,20 +104,66 @@ export function isTwFuturesOpen(now: Date = new Date()): boolean {
   return false;
 }
 
-/** 即時期貨報價。contract=台指期 TXF；盤中每 5 秒更新，收盤停止輪詢。 */
-export function useRealtimeFutures(ids: string[] = ["TXF"], enabled = true) {
+/** 即時期貨報價。contract=台指期 TXF。
+ *  allDay=false → 只在日盤/夜盤時段輪詢；allDay=true → 全日每 5 秒輪詢（台指全）。 */
+export function useRealtimeFutures(
+  ids: string[] = ["TXF"],
+  enabled = true,
+  allDay = false,
+) {
   const key = ids.join(",");
   return useQuery({
     queryKey: ["market", "realtime", "futures", key],
     enabled: enabled && ids.length > 0,
     staleTime: REALTIME_POLL_MS - 1_000,
-    refetchInterval: () => (isTwFuturesOpen() ? REALTIME_POLL_MS : false),
+    refetchInterval: () =>
+      allDay || isTwFuturesOpen() ? REALTIME_POLL_MS : false,
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
         "/market/realtime/futures",
         { params: { ids: key } },
       );
       return res.data.data;
+    },
+  });
+}
+
+/** 即時大盤（漲跌家數/總量）。僅 TW；盤中每 5 秒，收盤停輪詢。data 為 null 表即時不可用。 */
+export function useRealtimeOverview(enabled = true) {
+  return useQuery({
+    queryKey: ["market", "realtime", "overview"],
+    enabled,
+    staleTime: REALTIME_POLL_MS - 1_000,
+    refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchIntervalInBackground: true,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<RealtimeOverview | null>>(
+        "/market/realtime/overview",
+      );
+      return res.data.data ?? null;
+    },
+  });
+}
+
+/** 即時漲跌 / 成交量榜。僅 TW；盤中每 5 秒。data 為 null 表即時不可用。 */
+export function useRealtimeMovers(
+  type: "gainers" | "losers" | "volume" = "gainers",
+  limit = 10,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["market", "realtime", "movers", { type, limit }],
+    enabled,
+    staleTime: REALTIME_POLL_MS - 1_000,
+    refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchIntervalInBackground: true,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<MoverRow[] | null>>(
+        "/market/realtime/movers",
+        { params: { type, limit } },
+      );
+      return res.data.data ?? null;
     },
   });
 }

@@ -300,6 +300,17 @@ export interface RealtimeQuote {
   [k: string]: unknown;
 }
 
+// 即時大盤（對應 backend market_service.get_realtime_overview）
+export interface RealtimeOverview {
+  advance_count: number;
+  decline_count: number;
+  unchanged_count: number;
+  total_volume: number | string;
+  as_of?: string | null;
+  realtime?: boolean;
+  [k: string]: unknown;
+}
+
 export interface RealtimeSnapshot {
   available: boolean;
   /** available=false 時的原因碼：disabled / tier_insufficient / quota_exceeded / empty … */
