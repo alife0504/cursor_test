@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 interface IndexCardProps {
   name: string;
   value?: string | number | null;
+  /** 漲跌點數（對前一交易日收盤的絕對變化）。與 changePct 並列顯示。 */
+  change?: string | number | null;
   changePct?: string | number | null;
   /** 卡片右上角小標（如「即時 13:25:01」或「收盤」）。固定佔一行高，讓多張卡片對齊。 */
   subtitle?: string | null;
@@ -23,21 +25,28 @@ function fmtValue(v: string | number | null | undefined): string {
   });
 }
 
+/** 轉數字；非有限值一律回 null（讓呼叫端統一用 null 判斷有無）。 */
+function toNum(v: string | number | null | undefined): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function IndexCard({
   name,
   value,
+  change,
   changePct,
   subtitle,
   className,
 }: IndexCardProps) {
-  const num =
-    changePct === null || changePct === undefined ? null : Number(changePct);
+  const num = toNum(changePct);
+  const chg = toNum(change);
+  // 方向以「有值者」判定：優先用漲跌%，缺就用點數（兩者同號，任一即可定紅綠）
+  const dir = num ?? chg;
   const tone: "bull" | "bear" | "flat" =
-    num === null || !Number.isFinite(num) || num === 0
-      ? "flat"
-      : num > 0
-        ? "bull"
-        : "bear";
+    dir === null || dir === 0 ? "flat" : dir > 0 ? "bull" : "bear";
+  const sign = tone === "bull" ? "+" : tone === "bear" ? "−" : "";
 
   return (
     <Card className={cn("card-hover", className)}>
@@ -54,7 +63,7 @@ export function IndexCard({
       </CardHeader>
       <CardContent>
         <p className="num text-2xl font-bold leading-tight">{fmtValue(value)}</p>
-        {num !== null && Number.isFinite(num) ? (
+        {dir !== null ? (
           <p
             data-tone={tone}
             className={cn(
@@ -71,8 +80,23 @@ export function IndexCard({
             ) : (
               <Minus className="h-3.5 w-3.5" />
             )}
-            {tone === "bull" ? "+" : tone === "bear" ? "−" : ""}
-            {Math.abs(num).toFixed(2)}%
+            {/* 漲跌「點數」在前、百分比在括號內——使用者要能一眼看出漲跌多少點 */}
+            {chg !== null ? (
+              <span>
+                {sign}
+                {Math.abs(chg).toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            ) : null}
+            {num !== null ? (
+              <span className={cn(chg !== null && "text-[0.92em] opacity-90")}>
+                {chg !== null ? "(" : ""}
+                {sign}
+                {Math.abs(num).toFixed(2)}%{chg !== null ? ")" : ""}
+              </span>
+            ) : null}
           </p>
         ) : null}
       </CardContent>

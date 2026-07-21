@@ -26,6 +26,8 @@ import type {
 interface IndexCardData {
   name: string;
   value: string | number | null;
+  /** 漲跌點數（對前一交易日收盤）。即時來源給 change，盤後來源給 change。 */
+  change: string | number | null;
   changePct: string | number | null;
   subtitle: string | null;
 }
@@ -81,6 +83,7 @@ function buildIndexCards(
     return eod.map((q) => ({
       name: q.name,
       value: q.close ?? null,
+      change: q.change ?? null,
       changePct: q.change_pct ?? null,
       subtitle: "收盤",
     }));
@@ -97,6 +100,7 @@ function buildIndexCards(
       return {
         name,
         value: rt.price,
+        change: rt.change ?? null,
         changePct: rt.change_rate ?? null,
         subtitle: liveLabel(rtIndex?.as_of),
       };
@@ -105,6 +109,7 @@ function buildIndexCards(
     return {
       name,
       value: q?.close ?? null,
+      change: q?.change ?? null,
       changePct: q?.change_pct ?? null,
       subtitle: q?.close != null ? "收盤" : unavailableLabel(rtIndex),
     };
@@ -116,10 +121,17 @@ function buildIndexCards(
       ? {
           name: "台指全",
           value: fut.price,
+          change: fut.change ?? null,
           changePct: fut.change_rate ?? null,
           subtitle: liveLabel(rtFutures?.as_of),
         }
-      : { name: "台指全", value: null, changePct: null, subtitle: unavailableLabel(rtFutures) };
+      : {
+          name: "台指全",
+          value: null,
+          change: null,
+          changePct: null,
+          subtitle: unavailableLabel(rtFutures),
+        };
 
   return [
     indexCard("TAIEX", "加權指數"),
@@ -191,6 +203,7 @@ export default function MarketOverviewPage() {
               key={i.name}
               name={i.name}
               value={i.value}
+              change={i.change}
               changePct={i.changePct}
               subtitle={i.subtitle}
             />
