@@ -31,9 +31,14 @@ FUTURES_SNAPSHOT_URL = "https://api.finmindtrade.com/api/v4/taiwan_futures_snaps
 
 # 全市場快照快取秒數。
 # 設計要點：一律「不帶 data_id 抓全部」再本地過濾，並把整份快照快取數秒 → 上游用量與
-# 「開了幾個頁面、查了幾檔股票」完全脫鉤，固定為 3600/TTL 次/小時（TTL=5 → 720/hr），
-# 遠低於 Sponsor 的 6000/hr。若改成逐檔查詢，多開幾個分頁輪詢就會吃爆額度。
-SNAPSHOT_CACHE_TTL_S = 5
+# 「開了幾個頁面、查了幾檔股票」完全脫鉤，上限 3600/TTL 次/小時，遠低於 Sponsor 的
+# 6000/hr。若改成逐檔查詢，多開幾個分頁輪詢就會吃爆額度。
+#
+# ⚠️ TTL 必須**小於**前端輪詢間隔（REALTIME_POLL_MS=5s）。原本 TTL=5 與輪詢同為 5 秒，
+# 剛好卡在邊界：約一半的輪詢會在快取到期前抵達而拿到上一輪的舊資料 → 使用者感受到的
+# 更新變成「10 秒才動一次」。取 2 秒可確保每次 5 秒輪詢都拿到新資料；上限
+# 3600/2=1800 次/小時/快取鍵（僅 stock、futures 兩個鍵），仍遠低於配額。
+SNAPSHOT_CACHE_TTL_S = 2
 _CACHE_KEY_STOCK = "cache:realtime:tw:stock:all"
 _CACHE_KEY_FUTURES = "cache:realtime:tw:futures:all"
 
@@ -256,12 +261,17 @@ class FinMindRealtimeClient:
     def _ok(quotes: list[dict[str, Any]], *, cached: bool = False) -> dict[str, Any]:
         if not quotes:
             return _unavailable(Reason.EMPTY)
+        # as_of 取「所有報價中最新的 tick 時間」，不可用 quotes[0]：
+        # 上游回傳順序不保證，第一筆常是幾乎沒成交的冷門標的/遠月契約（實測台指期第一筆
+        # 是 TXFJ6，總量 1、時間停在 15:02），拿它當 as_of 會讓畫面「即時時間」永遠不動，
+        # 看起來像沒同步——即使近月契約其實每秒都在跳。時間為 ISO 樣式字串，字典序＝時序。
+        times = [t for t in (q.get("time") for q in quotes) if t]
         return {
             "available": True,
             "reason": None,
             "message": None,
             "detail": None,
-            "as_of": quotes[0].get("time"),
+            "as_of": max(times) if times else None,
             "cached": cached,
             "quotes": quotes,
         }

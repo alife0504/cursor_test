@@ -47,6 +47,11 @@ export function useRealtimeIndex(enabled = true) {
     staleTime: REALTIME_POLL_MS - 1_000,
     refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
     refetchIntervalInBackground: true,
+    // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
+    // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
+    // 不重抓的話切回來會先看到最多一分鐘前的舊價。
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
         "/market/realtime/index",
@@ -65,6 +70,11 @@ export function useRealtimeStock(symbols: string[], enabled = true) {
     staleTime: REALTIME_POLL_MS - 1_000,
     refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
     refetchIntervalInBackground: true,
+    // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
+    // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
+    // 不重抓的話切回來會先看到最多一分鐘前的舊價。
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
         "/market/realtime/stock",
@@ -119,6 +129,11 @@ export function useRealtimeFutures(
     refetchInterval: () =>
       allDay || isTwFuturesOpen() ? REALTIME_POLL_MS : false,
     refetchIntervalInBackground: true,
+    // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
+    // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
+    // 不重抓的話切回來會先看到最多一分鐘前的舊價。
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
         "/market/realtime/futures",
@@ -137,6 +152,11 @@ export function useRealtimeOverview(enabled = true) {
     staleTime: REALTIME_POLL_MS - 1_000,
     refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
     refetchIntervalInBackground: true,
+    // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
+    // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
+    // 不重抓的話切回來會先看到最多一分鐘前的舊價。
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<RealtimeOverview | null>>(
         "/market/realtime/overview",
@@ -158,6 +178,11 @@ export function useRealtimeMovers(
     staleTime: REALTIME_POLL_MS - 1_000,
     refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
     refetchIntervalInBackground: true,
+    // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
+    // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
+    // 不重抓的話切回來會先看到最多一分鐘前的舊價。
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<MoverRow[] | null>>(
         "/market/realtime/movers",
