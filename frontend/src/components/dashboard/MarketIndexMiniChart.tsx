@@ -8,7 +8,11 @@ import { PriceDelta } from "@/components/common/PriceDelta";
 import { Sparkline } from "@/components/common/Sparkline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useMarketOverview, useRealtimeIndex } from "@/hooks/useMarket";
+import {
+  useMarketOverview,
+  useRealtimeIndex,
+  useRealtimeOverview,
+} from "@/hooks/useMarket";
 import { useOhlcv } from "@/hooks/useStocks";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +34,8 @@ export function MarketIndexMiniChart() {
   const end = isoDate(0);
 
   const overview = useMarketOverview("TW");
+  // 盤中即時漲跌家數（每 5 秒；收盤自動停輪詢、退回盤後值）
+  const rtOverview = useRealtimeOverview(true);
   const ohlcv = useOhlcv({ symbol: "TAIEX", start, end });
   // 盤中即時加權指數（收盤後自動停輪詢，退回盤後/OHLCV 推導值）
   const rtIndex = useRealtimeIndex();
@@ -89,14 +95,20 @@ export function MarketIndexMiniChart() {
         ? "bear"
         : "flat";
 
+  // 漲跌家數：盤中優先用即時層（與 /market/overview 同一份即時快照），取不到才退回盤後。
+  // 原本只讀 overview（零輪詢）→ 盤中進頁後整場不會變，且與市場總覽頁的數字對不起來。
+  const rtBreadth = rtOverview.data;
   // 後端欄位是 advance_count / decline_count / unchanged_count（舊名作 fallback）
-  const adv = (overview.data?.advance_count ??
+  const adv = (rtBreadth?.advance_count ??
+    overview.data?.advance_count ??
     overview.data?.advancers ??
     null) as number | null;
-  const dec = (overview.data?.decline_count ??
+  const dec = (rtBreadth?.decline_count ??
+    overview.data?.decline_count ??
     overview.data?.decliners ??
     null) as number | null;
-  const unc = (overview.data?.unchanged_count ??
+  const unc = (rtBreadth?.unchanged_count ??
+    overview.data?.unchanged_count ??
     overview.data?.unchanged ??
     null) as number | null;
 

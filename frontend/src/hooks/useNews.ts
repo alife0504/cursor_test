@@ -14,6 +14,9 @@ import type {
 //   - 全域 view 採「個股聚合」做法:從 watchlist 拿 symbol → fan-out
 //     單頁如要全域請改自選股 / symbol query
 
+// 新聞 / 公告輪詢間隔：資料來自自家 DB（新聞每小時排程、公告每日），60 秒足夠且極廉價。
+const NEWS_POLL_MS = 60_000;
+
 // ════════════════ Institutional ════════════════
 
 export interface UseInstitutionalParams {
@@ -65,6 +68,10 @@ export function useStockNews({
     queryKey: ["news", "stock", symbol, limit],
     enabled: enabled && Boolean(symbol),
     staleTime: 60_000,
+    // 新聞每小時排程入庫、盤中隨時有新稿。原本零輪詢 → 掛著頁面盯盤永遠不會跳出新新聞。
+    // 打的是自家 DB（非 FinMind），60 秒輪詢成本可忽略；不限盤中（盤後也有新聞）。
+    refetchInterval: NEWS_POLL_MS,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<NewsItem[]>>(
         `/stocks/${encodeURIComponent(symbol)}/news`,
@@ -91,6 +98,9 @@ export function useStockAnnouncements({
     queryKey: ["announcements", "stock", symbol, limit],
     enabled: enabled && Boolean(symbol),
     staleTime: 60_000,
+    // 重大訊息盤中隨時發布；同新聞，原本零輪詢會漏掉。
+    refetchInterval: NEWS_POLL_MS,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<AnnouncementItem[]>>(
         `/stocks/${encodeURIComponent(symbol)}/announcements`,

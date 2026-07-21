@@ -193,11 +193,17 @@ export function useRealtimeMovers(
   });
 }
 
+// 盤後資料的「盤中兜底輪詢」間隔。即時層取不到時（未開通 / tier 不足 / 配額用盡）
+// 畫面會退回這些盤後查詢；它們原本零輪詢 → 盤中整場凍結。給一個較保守的 30 秒輪詢，
+// 讓退回路徑至少會動（盤後資料本來就不會每 5 秒變，30 秒足夠且不浪費）。
+const EOD_FALLBACK_POLL_MS = 30_000;
+
 export function useMarketOverview(market = "TW", enabled = true) {
   return useQuery({
     queryKey: ["market", "overview", market],
     enabled,
     staleTime: 60_000,
+    refetchInterval: () => (isTwMarketOpen() ? EOD_FALLBACK_POLL_MS : false),
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<MarketOverview>>(
         "/market/overview",
@@ -218,6 +224,8 @@ export function useMarketMovers(
     queryKey: ["market", "movers", { type, market, limit }],
     enabled,
     staleTime: 60_000,
+    // 同 useMarketOverview：即時榜取不到時的退回路徑，盤中至少 30 秒動一次
+    refetchInterval: () => (isTwMarketOpen() ? EOD_FALLBACK_POLL_MS : false),
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<MoverRow[]>>("/market/movers", {
         params: { type, market, limit },

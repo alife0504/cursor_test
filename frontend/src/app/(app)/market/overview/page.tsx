@@ -52,9 +52,16 @@ function unavailableLabel(snap?: RealtimeSnapshot): string {
   }
 }
 
-/** 台指期近月：data_id=TXF 回多個月份契約，取成交量最大者（最活躍＝近月）。 */
+/** 台指期近月：data_id=TXF 回多個月份契約 + R1/R2 連續合約。
+ *
+ *  首選 `TXFR1`＝官方「近月連續合約」，結算日會自動換到新契約、零維護（R2=次近月）；
+ *  取不到才退回「當日累計成交量最大者」（近月一定量最大）。
+ *  ⚠️ 不可用 `volume` 挑：那是該筆撮合量，實測每個契約都是 1，等於挑到回傳順序第一筆
+ *  （常是總量 1、時間停在數小時前的死遠月契約）。累計量要看 `total_volume`。 */
 function nearMonthFutures(snap?: RealtimeSnapshot): RealtimeQuote | null {
   if (!snap?.available || !snap.quotes?.length) return null;
+  const r1 = snap.quotes.find((q) => q.symbol === "TXFR1");
+  if (r1) return r1;
   return snap.quotes.reduce((best, q) =>
     (q.total_volume ?? 0) > (best.total_volume ?? 0) ? q : best,
   );
@@ -131,8 +138,10 @@ export default function MarketOverviewPage() {
   // 加權/櫃買盤中即時（收盤停輪詢）；台指全全日即時。僅 TW 啟用。
   const isTW = market === "TW";
   const rtIndex = useRealtimeIndex(isTW);
-  // 台指全：全日即時更新（allDay=true），不受日/夜盤時段限制
-  const rtFutures = useRealtimeFutures(["TXF"], isTW, true);
+  // 台指全：日盤(08:45–13:45) + 夜盤(15:00–翌日05:00) 全時段即時，由 isTwFuturesOpen 判斷。
+  // 不可用 allDay=true —— 那會短路成 24×7 恆真，週末凌晨也每 5 秒空打一次上游（期交所
+  // 根本沒開盤、資料不會變），純燒配額並提高被 ip ban 的風險。
+  const rtFutures = useRealtimeFutures(["TXF"], isTW, false);
   // 即時漲跌家數 / 總量（盤中；不可用時退回盤後 useMarketOverview）
   const rtOverview = useRealtimeOverview(isTW);
 
