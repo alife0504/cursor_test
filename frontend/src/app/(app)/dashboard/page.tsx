@@ -13,6 +13,10 @@ import { MarketIndexMiniChart } from "@/components/dashboard/MarketIndexMiniChar
 import { PendingOrders } from "@/components/dashboard/PendingOrders";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { RecentAnalyses } from "@/components/dashboard/RecentAnalyses";
+import {
+  TodayDate,
+  TodayGreeting,
+} from "@/components/dashboard/TodayGreeting";
 import { TodayAlerts } from "@/components/dashboard/TodayAlerts";
 import { WatchlistMiniCards } from "@/components/dashboard/WatchlistMiniCards";
 import {
@@ -23,40 +27,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-// 台股平台一律以台北時間為準。本頁是 Server Component，new Date() 在容器內執行（UTC），
-// 若不指定時區會顯示 UTC 的日期與時段（台北 07:10 會被算成前一天 23:10 →「晚安」）。
-// 明確指定時區同時可避免 SSR 與瀏覽器端算出不同結果造成的 hydration 不一致。
-const TW_TIMEZONE = "Asia/Taipei";
+// ⚠️ 問候語與今日日期一律由 Client Component（TodayGreeting / TodayDate）在瀏覽器端計算。
+// 過去這裡是在本 Server Component 直接呼叫 new Date()，但 Next.js App Router 會把「沒用到
+// 動態 API」的頁面在 **build 時預渲染並永久快取** → 時間被烤死在打包那一刻（實測建置於
+// 7/21 23:11，隔天 7/22 開啟仍顯示「2026年7月21日星期二」，整整差一天）。
+// 這也是為什麼下面加了 force-dynamic：雙保險，確保本頁不被靜態化。
 
-function TodayString() {
-  return new Date().toLocaleDateString("zh-TW", {
-    timeZone: TW_TIMEZONE,
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  });
-}
-
-function taipeiHour(now: Date = new Date()) {
-  // hourCycle h23 → "00"~"23"（避免 hour12:false 在部分環境把午夜給成 "24"）
-  return Number(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: TW_TIMEZONE,
-      hour: "2-digit",
-      hourCycle: "h23",
-    }).format(now),
-  );
-}
-
-function Greeting() {
-  const h = taipeiHour();
-  if (h < 5) return "夜深了";
-  if (h < 11) return "早安";
-  if (h < 14) return "午安";
-  if (h < 18) return "午後好";
-  return "晚安";
-}
+// 本頁含「當下時間」語意，禁止靜態預渲染（見上方說明）
+export const dynamic = "force-dynamic";
 
 // Dashboard：4-col KPI 牆 + 大盤趨勢 + 今日預警 + 最近分析 + 自選股 + 快速行動
 export default function DashboardPage() {
@@ -74,10 +52,10 @@ export default function DashboardPage() {
             <Sparkles className="h-3 w-3" /> 多 Agent AI 投資分析
           </span>
           <h1 className="text-2xl font-bold tracking-tight md:text-[26px]">
-            {Greeting()}，歡迎回來
+            <TodayGreeting suffix="，歡迎回來" />
           </h1>
           <p className="mt-1 text-sm text-primary-foreground/70">
-            今日 {TodayString()}：訊號、市場概況、待辦一次掌握
+            今日 <TodayDate />：訊號、市場概況、待辦一次掌握
           </p>
         </div>
       </section>
