@@ -18,11 +18,7 @@ import {
   useRealtimeIndex,
   useRealtimeOverview,
 } from "@/hooks/useMarket";
-import type {
-  IndexQuote,
-  RealtimeQuote,
-  RealtimeSnapshot,
-} from "@/lib/api-types";
+import type { IndexQuote, RealtimeSnapshot } from "@/lib/api-types";
 
 interface IndexCardData {
   name: string;

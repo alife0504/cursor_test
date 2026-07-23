@@ -37,8 +37,23 @@ export function nearMonthFutures(
 }
 
 const TW_TIMEZONE = "Asia/Taipei";
-/** 盤中輪詢間隔。後端有 5 秒全市場快照快取，故上游用量與開幾個頁面無關。 */
+/** 盤中輪詢間隔。後端有快照快取（TTL 2 秒），故上游用量與開幾個頁面無關。 */
 export const REALTIME_POLL_MS = 5_000;
+
+/**
+ * 非交易時段的「心跳」間隔。
+ *
+ * ⚠️ 不可在收盤時直接回 false 停掉輪詢：React Query 只在**每次抓取之後**才重新計算
+ * refetchInterval，一旦回 false 就再也不會重算 → 使用者 08:20 開著頁面，08:45 開盤時
+ * 不會自動開始更新，要手動重整或切分頁回來才會醒。改為收盤時仍以 60 秒心跳輪詢：
+ * 成本極低（且後端有快取），但能在開盤那一刻自動升回 5 秒即時。
+ */
+const CLOSED_HEARTBEAT_MS = 60_000;
+
+/** 依交易時段給輪詢間隔：盤中 5 秒、收盤 60 秒心跳（用於自動偵測開盤）。 */
+function sessionInterval(isOpen: boolean): number {
+  return isOpen ? REALTIME_POLL_MS : CLOSED_HEARTBEAT_MS;
+}
 
 /** 台北時間是否為台股盤中（週一~五 09:00–13:30）。收盤後就不該再輪詢。 */
 export function isTwMarketOpen(now: Date = new Date()): boolean {
@@ -59,13 +74,13 @@ export function isTwMarketOpen(now: Date = new Date()): boolean {
   return minutes >= 9 * 60 && minutes <= 13 * 60 + 30;
 }
 
-/** 即時大盤指數（加權 / 櫃買）。盤中每 5 秒更新，收盤後只抓一次不再輪詢。 */
+/** 即時大盤指數（加權 / 櫃買）。盤中每 5 秒更新；收盤改 60 秒心跳（開盤自動升回 5 秒）。 */
 export function useRealtimeIndex(enabled = true) {
   return useQuery({
     queryKey: ["market", "realtime", "index"],
     enabled,
     staleTime: REALTIME_POLL_MS - 1_000,
-    refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchInterval: () => sessionInterval(isTwMarketOpen()),
     refetchIntervalInBackground: true,
     // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
     // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
@@ -88,7 +103,7 @@ export function useRealtimeStock(symbols: string[], enabled = true) {
     queryKey: ["market", "realtime", "stock", key],
     enabled: enabled && symbols.length > 0,
     staleTime: REALTIME_POLL_MS - 1_000,
-    refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchInterval: () => sessionInterval(isTwMarketOpen()),
     refetchIntervalInBackground: true,
     // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
     // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
@@ -134,8 +149,9 @@ export function isTwFuturesOpen(now: Date = new Date()): boolean {
   return false;
 }
 
-/** 即時期貨報價。contract=台指期 TXF。
- *  allDay=false → 只在日盤/夜盤時段輪詢；allDay=true → 全日每 5 秒輪詢（台指全）。 */
+/** 即時期貨報價（台指全，contract=台指期 TXF）。
+ *  日盤 08:45–13:45 ＋夜盤 15:00–翌日 05:00 每 5 秒；非交易時段 60 秒心跳，
+ *  開盤瞬間自動升回 5 秒。allDay=true 則一律 5 秒（除錯用，正常請維持 false）。 */
 export function useRealtimeFutures(
   ids: string[] = ["TXF"],
   enabled = true,
@@ -146,8 +162,7 @@ export function useRealtimeFutures(
     queryKey: ["market", "realtime", "futures", key],
     enabled: enabled && ids.length > 0,
     staleTime: REALTIME_POLL_MS - 1_000,
-    refetchInterval: () =>
-      allDay || isTwFuturesOpen() ? REALTIME_POLL_MS : false,
+    refetchInterval: () => sessionInterval(allDay || isTwFuturesOpen()),
     refetchIntervalInBackground: true,
     // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
     // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
@@ -164,13 +179,13 @@ export function useRealtimeFutures(
   });
 }
 
-/** 即時大盤（漲跌家數/總量）。僅 TW；盤中每 5 秒，收盤停輪詢。data 為 null 表即時不可用。 */
+/** 即時大盤（漲跌家數/總量）。僅 TW；盤中每 5 秒、收盤 60 秒心跳。data 為 null 表即時不可用。 */
 export function useRealtimeOverview(enabled = true) {
   return useQuery({
     queryKey: ["market", "realtime", "overview"],
     enabled,
     staleTime: REALTIME_POLL_MS - 1_000,
-    refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchInterval: () => sessionInterval(isTwMarketOpen()),
     refetchIntervalInBackground: true,
     // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
     // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
@@ -196,7 +211,7 @@ export function useRealtimeMovers(
     queryKey: ["market", "realtime", "movers", { type, limit }],
     enabled,
     staleTime: REALTIME_POLL_MS - 1_000,
-    refetchInterval: () => (isTwMarketOpen() ? REALTIME_POLL_MS : false),
+    refetchInterval: () => sessionInterval(isTwMarketOpen()),
     refetchIntervalInBackground: true,
     // 開啟頁面／切回分頁一律重抓最新：全域 refetchOnWindowFocus=false（避免非即時查詢
     // 請求風暴），但即時報價必須覆寫——瀏覽器會把隱藏分頁的計時器節流到約每分鐘一次，
