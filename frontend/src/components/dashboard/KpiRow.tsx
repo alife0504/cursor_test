@@ -11,7 +11,12 @@ import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/common/ErrorState";
 import { KpiCard } from "@/components/common/KpiCard";
 import { KpiSkeleton } from "@/components/common/LoadingSkeleton";
-import { useMarketOverview, useRealtimeIndex } from "@/hooks/useMarket";
+import {
+  nearMonthFutures,
+  useMarketOverview,
+  useRealtimeFutures,
+  useRealtimeIndex,
+} from "@/hooks/useMarket";
 import { useOrders } from "@/hooks/useOrders";
 import { useMyQuota } from "@/hooks/useQuota";
 import { useOhlcv } from "@/hooks/useStocks";
@@ -74,12 +79,13 @@ export function KpiRow() {
   const market = useMarketOverview("TW");
   // 盤中即時大盤（每 5 秒；收盤後自動停止輪詢）
   const realtime = useRealtimeIndex();
+  // 台指全（TXF 近月）：日盤 08:45–13:45 ＋夜盤 15:00–翌日 05:00 全時段即時
+  const rtFutures = useRealtimeFutures(["TXF"], true, false);
   const quota = useMyQuota();
   const orders = useOrders({ status: "PENDING", limit: 1 });
 
   // 嘗試取大盤 OHLCV 給 sparkline（後端可能未 seed → graceful fallback）
   const twseOhlcv = useOhlcv({ symbol: "TAIEX", start, end });
-  const tpexOhlcv = useOhlcv({ symbol: "TPEX", start, end });
 
   const isLoading = market.isLoading || quota.isLoading;
 
@@ -103,21 +109,17 @@ export function KpiRow() {
   }
 
   // 後端 /market/overview 回 indices（複數陣列 IndexQuote[]）；攤平成 deriveIndexValue
-  // 需要的 {twse_*, tpex_*}。原本讀單數 market.data?.index 恆為 null（欄位名打錯）→
+  // 需要的 {twse_*}。原本讀單數 market.data?.index 恆為 null（欄位名打錯）→
   // 後端從 stock_prices 算好的指數報價從未被採用、只能靠 OHLCV 序列墊底。
   const indices = market.data?.indices ?? [];
   const findQuote = (sym: string) => indices.find((q) => q.symbol === sym);
   const taiexQ = findQuote("TAIEX");
-  const tpexQ = findQuote("TPEX");
   const idxObj: Record<string, unknown> = {
     twse_close: taiexQ?.close ?? null,
     twse_change_pct: taiexQ?.change_pct ?? null,
-    tpex_close: tpexQ?.close ?? null,
-    tpex_change_pct: tpexQ?.change_pct ?? null,
   };
 
   const twseSpark = closeSeries(twseOhlcv.data);
-  const tpexSpark = closeSeries(tpexOhlcv.data);
 
   // 後端有報價就用，否則從指數 OHLCV 序列推導（修正 v1.0.1「永遠是 —」的接線缺口）
   const twse = deriveIndexValue(
@@ -125,7 +127,6 @@ export function KpiRow() {
     idxObj?.twse_change_pct ?? idxObj?.change_pct,
     twseSpark,
   );
-  const tpex = deriveIndexValue(idxObj?.tpex_close, idxObj?.tpex_change_pct, tpexSpark);
 
   // 盤中有即時報價就蓋掉盤後值（每 5 秒更新）；未開通/收盤/取不到時自動退回盤後值。
   const rtQuotes = realtime.data?.available ? (realtime.data.quotes ?? []) : [];
@@ -145,11 +146,21 @@ export function KpiRow() {
   };
 
   const twseV = merge(twse, "TAIEX");
-  const tpexV = merge(tpex, "TPEX");
   const twseClose = twseV.close;
   const twseChange = twseV.change;
-  const tpexClose = tpexV.close;
-  const tpexChange = tpexV.change;
+
+  // 台指全（TXF 近月連續合約）。期貨無盤後 OHLCV 序列，故無 sparkline、也無退回值：
+  // 取不到即顯示「—」並在小標說明狀態。
+  const futQuote = nearMonthFutures(rtFutures.data);
+  const futClose =
+    futQuote?.price != null
+      ? Number(futQuote.price).toLocaleString("en-US", {
+          maximumFractionDigits: 2,
+        })
+      : null;
+  const futChange =
+    futQuote?.change_rate != null ? Number(futQuote.change_rate) : null;
+  const futAt = rtFutures.data?.as_of?.slice(11, 19) ?? null;
 
   // 即時時間標記（只取 HH:MM:SS）
   const liveAt = realtime.data?.as_of?.slice(11, 19) ?? null;
@@ -190,21 +201,20 @@ export function KpiRow() {
         footer="前往市場總覽 →"
       />
       <KpiCard
-        title="櫃買指數"
-        value={tpexClose !== null ? String(tpexClose) : "—"}
-        delta={tpexChange}
+        title="台指全"
+        value={futClose !== null ? String(futClose) : "—"}
+        delta={futChange}
         deltaMode="raw"
-        spark={tpexSpark}
         icon={TrendingUp}
         subtitle={
-          tpexClose !== null
-            ? liveSubtitle(tpexV.live, "近 14 日走勢")
-            : "指數資料待接入"
+          futClose !== null && futAt
+            ? `即時 · ${futAt}`
+            : "非交易時段 / 即時未開通"
         }
         accent={
-          tpexChange !== null && Number(tpexChange) > 0
+          futChange !== null && futChange > 0
             ? "bull"
-            : tpexChange !== null && Number(tpexChange) < 0
+            : futChange !== null && futChange < 0
               ? "bear"
               : undefined
         }

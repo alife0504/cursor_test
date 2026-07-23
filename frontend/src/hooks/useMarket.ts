@@ -8,6 +8,7 @@ import type {
   MarketOverview,
   MoverRow,
   RealtimeOverview,
+  RealtimeQuote,
   RealtimeSnapshot,
 } from "@/lib/api-types";
 
@@ -15,6 +16,25 @@ import type {
 //   - useMarketOverview(market)
 //   - useMarketMovers(type, market, limit)
 //   - useRealtimeIndex() / useRealtimeStock(symbols) — 盤中即時報價（輪詢）
+
+/** 台指期近月：data_id=TXF 回多個月份契約 + R1/R2 連續合約。
+ *
+ *  首選 `TXFR1`＝官方「近月連續合約」，結算日會自動換到新契約、零維護（R2=次近月）；
+ *  取不到才退回「當日累計成交量最大者」（近月一定量最大）。
+ *  ⚠️ 不可用 `volume` 挑：那是該筆撮合量，實測每個契約都是 1，等於挑到回傳順序第一筆
+ *  （常是總量 1、時間停在數小時前的死遠月契約）。累計量要看 `total_volume`。
+ *
+ *  市場總覽與儀表板共用，避免兩處各自實作而走樣。 */
+export function nearMonthFutures(
+  snap?: RealtimeSnapshot,
+): RealtimeQuote | null {
+  if (!snap?.available || !snap.quotes?.length) return null;
+  const r1 = snap.quotes.find((q) => q.symbol === "TXFR1");
+  if (r1) return r1;
+  return snap.quotes.reduce((best, q) =>
+    (q.total_volume ?? 0) > (best.total_volume ?? 0) ? q : best,
+  );
+}
 
 const TW_TIMEZONE = "Asia/Taipei";
 /** 盤中輪詢間隔。後端有 5 秒全市場快照快取，故上游用量與開幾個頁面無關。 */
