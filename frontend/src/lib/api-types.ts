@@ -519,7 +519,7 @@ export interface DLQItem {
 // 對齊 backend/app/services/market_service.py get_calendar（真實資料，非 mock）
 //   filing_deadline：法定申報期限（依證交法 §36 推算，全市場共通 → 無 symbol）
 //   ex_dividend    ：除權息（FinMind 本地庫真實資料）
-export type CalendarEventType = "filing_deadline" | "ex_dividend";
+export type CalendarEventType = "filing_deadline" | "ex_dividend" | "us_econ";
 
 export interface CalendarEvent {
   /** 法定申報期限為全市場事件，無個股代號 → 可能為 null */

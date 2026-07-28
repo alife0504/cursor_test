@@ -16,16 +16,50 @@ import { cn } from "@/lib/utils";
 //   - 兩類真實事件：法定申報期限（依證交法 §36 推算）+ 除權息（FinMind 本地庫）
 //   - 刻意不做「股東會 / 法說會」：FinMind 無此 dataset，不顯示勝過顯示假資料
 
-type EventType = "filing_deadline" | "ex_dividend";
-
-const TYPE_LABEL: Record<EventType, string> = {
+const TYPE_LABEL: Record<string, string> = {
   filing_deadline: "法定申報期限",
   ex_dividend: "除權息",
+  us_econ: "美國數據",
 };
-const TYPE_COLOR: Record<EventType, string> = {
+const TYPE_COLOR: Record<string, string> = {
   filing_deadline: "bg-info/15 text-info",
   ex_dividend: "bg-bull-muted text-bull",
+  us_econ: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
 };
+
+/** 單一格內的事件顯示：除權息若很多家 → 只顯示 1 家 + 「其餘 N 家 ▾」可展開。 */
+function DayEvents({ events }: { events: CalendarEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const exDiv = events.filter((e) => e.event_type === "ex_dividend");
+  const others = events.filter((e) => e.event_type !== "ex_dividend");
+
+  const pill = (e: CalendarEvent, i: number) => (
+    <div
+      key={`${e.event_type}-${e.symbol ?? ""}-${i}`}
+      className={cn("truncate rounded px-1 py-0.5 text-[10px]", TYPE_COLOR[e.event_type] ?? "bg-muted")}
+      title={`${e.title}（${TYPE_LABEL[e.event_type] ?? e.event_type}）`}
+    >
+      {e.symbol ? `${e.symbol} ${e.name ?? ""}` : e.title}
+    </div>
+  );
+
+  const shownExDiv = open ? exDiv : exDiv.slice(0, 1);
+  return (
+    <div className="mt-1 space-y-1">
+      {others.map((e, i) => pill(e, i))}
+      {shownExDiv.map((e, i) => pill(e, i))}
+      {exDiv.length > 1 ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="w-full truncate rounded bg-bull-muted/60 px-1 py-0.5 text-left text-[10px] text-bull hover:bg-bull-muted"
+        >
+          {open ? "收合 ▴" : `其餘 ${exDiv.length - 1} 家 ▾`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function monthRange(year: number, month: number): { from: string; to: string } {
   const last = new Date(year, month + 1, 0).getDate();
@@ -52,6 +86,7 @@ export default function MarketCalendarPage() {
       total: events.length,
       filing: events.filter((e) => e.event_type === "filing_deadline").length,
       exDiv: events.filter((e) => e.event_type === "ex_dividend").length,
+      usEcon: events.filter((e) => e.event_type === "us_econ").length,
     }),
     [events],
   );
@@ -82,11 +117,11 @@ export default function MarketCalendarPage() {
       <PageHeader
         icon={CalendarDays}
         title="財報日曆"
-        description="法定申報期限與除權息時程（真實資料）"
+        description="法定申報期限、除權息、美國重大數據（台北時間）"
       />
 
       {/* 本月事件摘要 KPI 帶 */}
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           title="本月事件"
           value={counts.total}
@@ -107,6 +142,13 @@ export default function MarketCalendarPage() {
           subtitle="配息配股"
           icon={Banknote}
           accent="bull"
+        />
+        <KpiCard
+          title="美國數據"
+          value={counts.usEcon}
+          subtitle="FOMC / 非農 / ISM"
+          icon={CalendarDays}
+          accent="primary"
         />
       </section>
 
@@ -149,21 +191,7 @@ export default function MarketCalendarPage() {
                   <div className="text-right text-xs text-muted-foreground tabular-nums">
                     {cell.day}
                   </div>
-                  <div className="mt-1 space-y-1">
-                    {cell.events.map((e, i) => (
-                      <div
-                        key={i}
-                        className={cn(
-                          "truncate rounded px-1 py-0.5 text-[10px]",
-                          TYPE_COLOR[e.event_type],
-                        )}
-                        title={`${e.title}（${TYPE_LABEL[e.event_type]}）`}
-                      >
-                        {/* 法定申報期限是全市場事件、無個股代號 → 直接顯示標題 */}
-                        {e.symbol ? `${e.symbol} ${e.name ?? ""}` : e.title}
-                      </div>
-                    ))}
-                  </div>
+                  <DayEvents events={cell.events} />
                 </>
               ) : null}
             </div>

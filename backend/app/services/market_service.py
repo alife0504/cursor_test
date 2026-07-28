@@ -358,11 +358,11 @@ class MarketService:
         to_date: date_type,
         market: str | None = None,
     ) -> list[dict[str, Any]]:
-        """財報日曆（真實資料，非 mock）。目前提供兩類事件：
+        """財報日曆（真實資料，非 mock）。提供的事件：
 
-        1. **法定申報期限**（event_type='filing_deadline'）：依證交法 §36 推算，全市場共通，
-           由法規決定故永遠正確、不需外部資料源。
+        1. **法定申報期限**（event_type='filing_deadline'）：依證交法 §36 推算（含月營收/季報截止）。
         2. **除權息**（event_type='ex_dividend'）：來自 FinMind 本地庫的真實決議資料。
+        3. **美國重大數據**（event_type='us_econ'）：FOMC/非農/ISM 等能精確定日的排程（台北時間）。
 
         刻意不提供「股東會 / 法說會」：FinMind 無此 dataset，與其顯示假資料不如不顯示。
         """
@@ -376,8 +376,11 @@ class MarketService:
             # 目前僅台股有法定期限/除權息來源；美股待接
             return []
 
+        from app.domain.us_econ_calendar import us_econ_events
+
         events: list[dict[str, Any]] = _tw_filing_deadlines(from_date, to_date)
         events.extend(await self._tw_ex_dividend_events(from_date, to_date))
+        events.extend(us_econ_events(from_date, to_date))
         events.sort(key=lambda e: (e["event_date"], e.get("symbol") or ""))
         return events
 
