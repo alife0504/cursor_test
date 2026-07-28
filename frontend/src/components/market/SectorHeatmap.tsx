@@ -36,8 +36,9 @@ export function SectorHeatmap({
 
   const industries = useMemo(() => {
     const list = data?.industries ?? [];
-    // 帶高／格寬以「成交值」為權重（兩種模式一致 → 切換時格子不跳，只換配色/標籤）
-    return list.filter((i) => i.value > 0 && i.stocks.length > 0);
+    // 直欄並排（產業當欄、股票欄內垂直疊）；欄寬／格高以成交值為權重（兩模式一致 →
+    // 切換時格子不跳，只換配色/標籤）。取前 14 大產業，避免太多欄擠到看不清。
+    return list.filter((i) => i.value > 0 && i.stocks.length > 0).slice(0, 14);
   }, [data]);
 
   const liveLabel =
@@ -83,36 +84,33 @@ export function SectorHeatmap({
             尚無板塊資料
           </div>
         ) : (
-          <div className="flex flex-col gap-[3px]" style={{ height: 460 }}>
+          <div className="flex gap-[3px] overflow-x-auto" style={{ height: 480 }}>
             {industries.map((ind) => (
               <div
                 key={ind.name}
-                className="flex min-h-[30px] flex-col overflow-hidden"
+                className="flex min-w-[58px] flex-col overflow-hidden"
                 style={{ flex: ind.value }}
               >
-                <div className="flex items-center justify-between gap-2 px-0.5 pb-0.5 text-[11px] font-medium text-muted-foreground">
+                <div className="flex flex-col px-0.5 pb-0.5 text-[11px] font-medium text-muted-foreground">
                   <span className="truncate">{ind.name}</span>
-                  <span className="num shrink-0 tabular-nums">
+                  <span className="num shrink-0 tabular-nums text-[10px] text-muted-foreground/80">
                     {mode === "flow"
                       ? `${ind.flow_total > 0 ? "+" : ind.flow_total < 0 ? "−" : ""}${Math.abs(ind.flow_total).toFixed(1)}億`
                       : fmtYi(ind.value)}
                   </span>
                 </div>
-                <div className="flex min-h-0 flex-1 gap-[2px]">
+                <div className="flex min-h-0 flex-1 flex-col gap-[2px]">
                   {ind.stocks.map((s) => {
                     const v = mode === "chg" ? s.chg : s.flow;
                     return (
                       <div
                         key={s.symbol}
-                        className="flex min-w-0 flex-col justify-center overflow-hidden rounded-[5px] px-1.5 py-1 text-white"
+                        className="flex min-h-0 flex-col justify-center overflow-hidden rounded-[5px] px-1.5 py-0.5 text-white"
                         style={{ flex: s.value, background: heatColor(v, mode) }}
                         title={`${s.symbol} ${s.name}｜漲跌 ${fmtMetric(s.chg, "chg")}｜資金流 ${fmtMetric(s.flow, "flow")}｜成交值 ${fmtYi(s.value)}`}
                       >
                         <div className="truncate text-[11px] font-bold leading-tight">
-                          {s.symbol}
-                        </div>
-                        <div className="truncate text-[9px] leading-tight opacity-90">
-                          {s.name}
+                          {s.symbol} <span className="text-[9px] font-normal opacity-90">{s.name}</span>
                         </div>
                         <div className="num truncate text-[11px] font-bold leading-tight tabular-nums">
                           {fmtMetric(v, mode)}
