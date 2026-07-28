@@ -12,6 +12,11 @@ type Mode = "chg" | "flow";
 // 巨頭（如台積電）再大也不會把同欄小格壓成看不見的細條。
 const TOP_N = 12;
 const MIN_TILE_H = 44;
+// 最多顯示幾大產業。欄寬＝成交值比例（flex-grow），需要留白給 grow 才能讓大產業真的更寬；
+// 欄數太多會全部卡在 min-width、爆版橫向捲動、變成等寬窄條（就是「擠在一起」）。
+// 10 欄在 ~960px 容器有足夠留白 → 半導體等大產業明顯更寬，treemap 比例才讀得出來。
+const MAX_INDUSTRIES = 10;
+const MIN_COL_W = 66;
 
 /** 熱力圖配色（紅漲綠跌）。chg：%，±3% 到滿色；flow：億，±30 億到滿色。 */
 function heatColor(v: number, mode: Mode): string {
@@ -42,8 +47,8 @@ export function SectorHeatmap({
   const industries = useMemo(() => {
     const list = data?.industries ?? [];
     // 直欄並排（產業當欄、股票欄內垂直疊）；欄寬／格高以成交值為權重（兩模式一致 →
-    // 切換時格子不跳，只換配色/標籤）。取前 14 大產業，避免太多欄擠到看不清。
-    return list.filter((i) => i.value > 0 && i.stocks.length > 0).slice(0, 14);
+    // 切換時格子不跳，只換配色/標籤）。取前 N 大產業，欄少才寬、比例才讀得出來。
+    return list.filter((i) => i.value > 0 && i.stocks.length > 0).slice(0, MAX_INDUSTRIES);
   }, [data]);
 
   // 板塊圖總高＝隨「最擠的那一欄檔數」往下延伸，讓每格都有 ~64px 呼吸空間、且不低於地板。
@@ -100,8 +105,8 @@ export function SectorHeatmap({
             {industries.map((ind) => (
               <div
                 key={ind.name}
-                className="flex min-w-[72px] flex-col overflow-hidden"
-                style={{ flex: ind.value }}
+                className="flex flex-col overflow-hidden"
+                style={{ flex: ind.value, minWidth: MIN_COL_W }}
               >
                 <div className="flex items-baseline justify-between gap-1 px-1 pb-1 text-[12px] font-semibold text-foreground/90">
                   <span className="truncate">{ind.name}</span>
