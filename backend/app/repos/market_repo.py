@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from datetime import date as date_type
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -82,6 +83,9 @@ class MarketRepository(BaseRepository):
           rn=1 補回這些檔（退用其前一交易日），也與板塊圖 get_eod_change_rows 同母體。
         """
         markets = _market_filter(market)
+        # 日期下界在 Python 算好當參數傳：SQLAlchemy text() 的 :param 綁定會和 PostgreSQL
+        # 的 ::date cast 衝突（`:as_of::date` 會被誤解析成參數）。故不在 SQL 用 ::。
+        from_date = as_of - timedelta(days=20)
         rows = await self.session.execute(
             text(
                 """
@@ -94,7 +98,7 @@ class MarketRepository(BaseRepository):
                     FROM stock_prices sp
                     JOIN stock_list sl ON sl.symbol = sp.symbol
                     WHERE sl.is_active AND sl.market = ANY(:mk)
-                      AND sp.date >= (:as_of::date - 20) AND sp.date <= :as_of
+                      AND sp.date >= :from_date AND sp.date <= :as_of
                 ),
                 d AS (
                     SELECT close, prev, volume,
@@ -115,6 +119,7 @@ class MarketRepository(BaseRepository):
             {
                 "mk": list(markets),
                 "as_of": as_of,
+                "from_date": from_date,
                 "lu_lo": 9.9,
                 "lim_hi": 10.5,
                 "ld_hi": -9.9,
