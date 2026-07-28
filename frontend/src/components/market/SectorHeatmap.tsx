@@ -8,6 +8,11 @@ import type { HeatmapResponse } from "@/lib/api-types";
 
 type Mode = "chg" | "flow";
 
+// 每產業最多顯示檔數；每格最低高度（px）——設地板保證「名稱＋代號＋漲跌%」都看得清楚，
+// 巨頭（如台積電）再大也不會把同欄小格壓成看不見的細條。
+const TOP_N = 12;
+const MIN_TILE_H = 44;
+
 /** 熱力圖配色（紅漲綠跌）。chg：%，±3% 到滿色；flow：億，±30 億到滿色。 */
 function heatColor(v: number, mode: Mode): string {
   const scale = mode === "chg" ? 3 : 30;
@@ -40,6 +45,13 @@ export function SectorHeatmap({
     // 切換時格子不跳，只換配色/標籤）。取前 14 大產業，避免太多欄擠到看不清。
     return list.filter((i) => i.value > 0 && i.stocks.length > 0).slice(0, 14);
   }, [data]);
+
+  // 板塊圖總高＝隨「最擠的那一欄檔數」往下延伸，讓每格都有 ~64px 呼吸空間、且不低於地板。
+  // 這樣值小的個股也能完整顯示名稱與漲跌%，而非被壓成細條。
+  const boardH = useMemo(() => {
+    const maxTiles = industries.reduce((m, i) => Math.max(m, Math.min(i.stocks.length, TOP_N)), 1);
+    return Math.min(1120, Math.max(560, maxTiles * 64 + 8));
+  }, [industries]);
 
   const liveLabel =
     mode === "flow"
@@ -84,34 +96,34 @@ export function SectorHeatmap({
             尚無板塊資料
           </div>
         ) : (
-          <div className="flex gap-[3px] overflow-x-auto" style={{ height: 480 }}>
+          <div className="flex gap-[4px] overflow-x-auto" style={{ height: boardH }}>
             {industries.map((ind) => (
               <div
                 key={ind.name}
-                className="flex min-w-[58px] flex-col overflow-hidden"
+                className="flex min-w-[72px] flex-col overflow-hidden"
                 style={{ flex: ind.value }}
               >
-                <div className="flex flex-col px-0.5 pb-0.5 text-[11px] font-medium text-muted-foreground">
+                <div className="flex items-baseline justify-between gap-1 px-1 pb-1 text-[12px] font-semibold text-foreground/90">
                   <span className="truncate">{ind.name}</span>
-                  <span className="num shrink-0 tabular-nums text-[10px] text-muted-foreground/80">
+                  <span className="num shrink-0 tabular-nums text-[10px] font-normal text-muted-foreground">
                     {mode === "flow"
                       ? `${ind.flow_total > 0 ? "+" : ind.flow_total < 0 ? "−" : ""}${Math.abs(ind.flow_total).toFixed(1)}億`
                       : fmtYi(ind.value)}
                   </span>
                 </div>
-                <div className="flex min-h-0 flex-1 flex-col gap-[2px]">
-                  {ind.stocks.slice(0, 12).map((s) => {
+                <div className="flex min-h-0 flex-1 flex-col gap-[3px]">
+                  {ind.stocks.slice(0, TOP_N).map((s) => {
                     const v = mode === "chg" ? s.chg : s.flow;
                     return (
                       <div
                         key={s.symbol}
-                        className="flex min-h-0 flex-col justify-center overflow-hidden rounded-[5px] px-1.5 py-1 text-white"
-                        style={{ flex: s.value, background: heatColor(v, mode) }}
+                        className="flex min-h-0 flex-col justify-center overflow-hidden rounded-md px-2 py-1 text-white"
+                        style={{ flex: s.value, minHeight: MIN_TILE_H, background: heatColor(v, mode) }}
                         title={`${s.symbol} ${s.name}｜漲跌 ${fmtMetric(s.chg, "chg")}｜資金流 ${fmtMetric(s.flow, "flow")}｜成交值 ${fmtYi(s.value)}`}
                       >
-                        {/* 完整中文名稱（FinMind），格子夠高就整名顯示、太小則自動裁切+滑鼠停留看全部 */}
-                        <div className="text-[12px] font-bold leading-tight">{s.name}</div>
-                        <div className="flex items-center justify-between gap-1 text-[10px] leading-tight opacity-95">
+                        {/* 完整中文名稱（FinMind）；min-height 地板保證整名＋代號＋漲跌%都放得下 */}
+                        <div className="truncate text-[13px] font-bold leading-tight">{s.name}</div>
+                        <div className="mt-0.5 flex items-center justify-between gap-1 text-[11px] leading-tight opacity-95">
                           <span className="num tabular-nums">{s.symbol}</span>
                           <span className="num font-bold tabular-nums">{fmtMetric(v, mode)}</span>
                         </div>
