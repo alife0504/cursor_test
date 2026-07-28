@@ -1,16 +1,20 @@
 "use client";
 
-/** 漲跌家數圓餅 ＋ 市場摘要（合併精簡卡）：甜甜圈在上、家數在右、摘要在下。 */
+/** 漲跌家數圓餅 ＋ 市場摘要（合併精簡卡）：甜甜圈在上、家數在右、漲停/跌停與摘要在下。 */
 export function MarketBreadthCard({
   adv,
   dec,
   unc,
+  limitUp,
+  limitDown,
   totalVolume,
   live,
 }: {
   adv: number;
   dec: number;
   unc: number;
+  limitUp: number;
+  limitDown: number;
   totalVolume: number | null;
   live: boolean;
 }) {
@@ -67,14 +71,29 @@ export function MarketBreadthCard({
         </dl>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-dashed pt-3">
-        <div>
+      {/* 漲停 / 跌停 ＋ 摘要：2×2；漲停紅、跌停綠，醒目呈現「幾家」 */}
+      <div className="grid grid-cols-2 gap-2 border-t border-dashed pt-3">
+        <div className="rounded-md bg-muted/40 px-2.5 py-2">
+          <div className="text-[11px] text-muted-foreground">漲停</div>
+          <div className="num text-lg font-bold leading-tight tabular-nums text-bull">
+            {limitUp.toLocaleString()}
+            <span className="ml-0.5 text-xs font-normal text-muted-foreground">家</span>
+          </div>
+        </div>
+        <div className="rounded-md bg-muted/40 px-2.5 py-2">
+          <div className="text-[11px] text-muted-foreground">跌停</div>
+          <div className="num text-lg font-bold leading-tight tabular-nums text-bear">
+            {limitDown.toLocaleString()}
+            <span className="ml-0.5 text-xs font-normal text-muted-foreground">家</span>
+          </div>
+        </div>
+        <div className="px-2.5">
           <div className="text-[11px] text-muted-foreground">總成交量</div>
           <div className="num text-sm font-bold tabular-nums">
             {totalVolume != null ? `${(totalVolume / 1e8).toFixed(1)} 億股` : "—"}
           </div>
         </div>
-        <div>
+        <div className="px-2.5">
           <div className="text-[11px] text-muted-foreground">漲 / 跌 家數比</div>
           <div className="num text-sm font-bold tabular-nums">
             {dec > 0 ? (adv / dec).toFixed(2) : "—"}

@@ -88,6 +88,8 @@ class MarketService:
                 "advance_count": 0,
                 "decline_count": 0,
                 "unchanged_count": 0,
+                "limit_up_count": 0,
+                "limit_down_count": 0,
                 "total_volume": 0,
             }
         else:
@@ -99,6 +101,8 @@ class MarketService:
                 "advance_count": int(agg.get("advance") or 0),
                 "decline_count": int(agg.get("decline") or 0),
                 "unchanged_count": int(agg.get("unchanged") or 0),
+                "limit_up_count": int(agg.get("limit_up") or 0),
+                "limit_down_count": int(agg.get("limit_down") or 0),
                 "total_volume": int(agg.get("volume") or 0),
             }
 
@@ -225,7 +229,7 @@ class MarketService:
         if got is None:
             return None
         quotes, as_of = got
-        adv = dec = unc = 0
+        adv = dec = unc = lu = ld = 0
         vol = 0
         for q in quotes:
             cr = q["change_rate"]
@@ -235,11 +239,19 @@ class MarketService:
                 dec += 1
             else:
                 unc += 1
+            # 漲停/跌停：漲跌幅 ±9.9%～±10.5%（台股 ±10%，tick 取整實際約 9.7～10%；
+            # 上界排除除權息參考價調整等異常）。與 get_overview_aggregates 同一判定。
+            if 9.9 <= cr <= 10.5:
+                lu += 1
+            elif -10.5 <= cr <= -9.9:
+                ld += 1
             vol += int(q.get("total_volume") or 0)
         return {
             "advance_count": adv,
             "decline_count": dec,
             "unchanged_count": unc,
+            "limit_up_count": lu,
+            "limit_down_count": ld,
             "total_volume": vol,
             "as_of": as_of,
             "realtime": True,

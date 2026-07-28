@@ -196,6 +196,14 @@ export default function MarketOverviewPage() {
   const adv = rt?.advance_count ?? (data?.advance_count as number | undefined) ?? 0;
   const dec = rt?.decline_count ?? (data?.decline_count as number | undefined) ?? 0;
   const unc = rt?.unchanged_count ?? (data?.unchanged_count as number | undefined) ?? 0;
+  const limitUp =
+    (rt?.limit_up_count as number | undefined) ??
+    (data?.limit_up_count as number | undefined) ??
+    0;
+  const limitDown =
+    (rt?.limit_down_count as number | undefined) ??
+    (data?.limit_down_count as number | undefined) ??
+    0;
   const totalVolumeRaw = rt?.total_volume ?? data?.total_volume ?? null;
   const totalVolume =
     totalVolumeRaw != null && totalVolumeRaw !== "" ? Number(totalVolumeRaw) : null;
@@ -252,6 +260,8 @@ export default function MarketOverviewPage() {
           adv={adv}
           dec={dec}
           unc={unc}
+          limitUp={limitUp}
+          limitDown={limitDown}
           totalVolume={totalVolume}
           live={breadthLive}
         />

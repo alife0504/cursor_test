@@ -20,10 +20,8 @@ from typing import Any, ClassVar
 from sqlalchemy import (
     Date,
     Numeric,
-    Result,
     String,
     and_,
-    case,
     cast,
     func,
     literal,
@@ -70,47 +68,75 @@ class MarketRepository(BaseRepository):
 
     # ── 大盤 overview ──────────────────────────────────────
     async def get_overview_aggregates(self, market: str, as_of: date_type) -> dict[str, Any]:
-        """從 stock_prices 計算「漲家數 / 跌家數 / 平盤 / 總成交量」。
+        """從 stock_prices 計算「漲/跌/平家數、漲停/跌停家數、總成交量」（對前一日收盤）。
 
         定義：
-        - 漲：close > 前一日 close（用 LAG window function）— 為簡化，本實作直接用 OPEN<CLOSE 替代
-          （沒前一日資料就視為平盤）。P17 真正接上 trading_calendar 後可改 LAG。
-        - 簡化版讓 stock_list 為空時也回 0 而非 SQL error。
-
-        本實作刻意保持簡單可審查；複雜邏輯放 service。
+        - 漲/跌/平：close 對「前一交易日 close」（LAG）比較。原本用 open<close 只是簡化；
+          漲停/跌停必須對前一日收盤才算得出，故一併改為 LAG 基準（也與盤中即時 change_rate 一致）。
+        - 漲停/跌停：當日漲跌幅落在 ±9.9%～±10.5% 視為漲停/跌停。台股漲跌幅上限 ±10%，因跳動
+          單位（tick）取整實際約 9.7～10%；上界 10.5% 用來排除除權息參考價調整等 >10% 的異常值
+          （實測 2026-07-28 當日排掉 30 筆 <−10.5% 的非跌停）。
+        - 只計 active 標的：權證已於 stock_list 停用，不濾會被灌爆。
+        - 母體用「每檔最近交易日（rn=1，≤ as_of）」而非「當日 as_of」：最新交易日資料常尚未
+          載完（實測 2026-07-28 只有 1899 檔、前幾日 ~2372），用當日會漏掉數百檔、家數被截；
+          rn=1 補回這些檔（退用其前一交易日），也與板塊圖 get_eod_change_rows 同母體。
         """
         markets = _market_filter(market)
-        advance_expr = func.sum(case((StockPrice.close > StockPrice.open, 1), else_=0))
-        decline_expr = func.sum(case((StockPrice.close < StockPrice.open, 1), else_=0))
-        unchanged_expr = func.sum(case((StockPrice.close == StockPrice.open, 1), else_=0))
-        volume_expr = func.coalesce(func.sum(StockPrice.volume), 0)
-
-        stmt = (
-            select(
-                advance_expr.label("advance"),
-                decline_expr.label("decline"),
-                unchanged_expr.label("unchanged"),
-                volume_expr.label("volume"),
-            )
-            .join(StockList, StockList.symbol == StockPrice.symbol)
-            .where(
-                and_(
-                    StockList.market.in_(markets),
-                    # 只計 active 標的：權證已於 stock_list 停用。不濾的話漲跌家數會被權證
-                    # 灌爆（實測 2026-07-15 當日 367 筆中有 300 筆是權證 = 81.7%）。
-                    StockList.is_active.is_(True),
-                    StockPrice.date == as_of,
+        rows = await self.session.execute(
+            text(
+                """
+                WITH w AS (
+                    SELECT sp.symbol, sp.date, sp.close, sp.volume,
+                           LAG(sp.close) OVER (PARTITION BY sp.symbol ORDER BY sp.date) AS prev,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY sp.symbol ORDER BY sp.date DESC
+                           ) AS rn
+                    FROM stock_prices sp
+                    JOIN stock_list sl ON sl.symbol = sp.symbol
+                    WHERE sl.is_active AND sl.market = ANY(:mk)
+                      AND sp.date >= (:as_of::date - 20) AND sp.date <= :as_of
+                ),
+                d AS (
+                    SELECT close, prev, volume,
+                           (close - prev) / prev * 100.0 AS pct
+                    FROM w
+                    WHERE rn = 1 AND prev IS NOT NULL AND prev > 0
                 )
-            )
+                SELECT
+                    COUNT(*) FILTER (WHERE close > prev)                        AS advance,
+                    COUNT(*) FILTER (WHERE close < prev)                        AS decline,
+                    COUNT(*) FILTER (WHERE close = prev)                        AS unchanged,
+                    COUNT(*) FILTER (WHERE pct >= :lu_lo AND pct <= :lim_hi)    AS limit_up,
+                    COUNT(*) FILTER (WHERE pct <= :ld_hi AND pct >= :lim_lo)    AS limit_down,
+                    COALESCE(SUM(volume), 0)                                    AS volume
+                FROM d
+                """
+            ),
+            {
+                "mk": list(markets),
+                "as_of": as_of,
+                "lu_lo": 9.9,
+                "lim_hi": 10.5,
+                "ld_hi": -9.9,
+                "lim_lo": -10.5,
+            },
         )
-        result: Result[Any] = await self.session.execute(stmt)
-        row = result.one_or_none()
+        row = rows.one_or_none()
         if row is None:
-            return {"advance": 0, "decline": 0, "unchanged": 0, "volume": 0}
+            return {
+                "advance": 0,
+                "decline": 0,
+                "unchanged": 0,
+                "limit_up": 0,
+                "limit_down": 0,
+                "volume": 0,
+            }
         return {
             "advance": int(row.advance or 0),
             "decline": int(row.decline or 0),
             "unchanged": int(row.unchanged or 0),
+            "limit_up": int(row.limit_up or 0),
+            "limit_down": int(row.limit_down or 0),
             "volume": int(row.volume or 0),
         }
 

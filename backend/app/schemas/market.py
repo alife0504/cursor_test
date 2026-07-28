@@ -44,6 +44,8 @@ class MarketOverview(BaseSchema):
     advance_count: int = Field(default=0, description="上漲家數")
     decline_count: int = Field(default=0, description="下跌家數")
     unchanged_count: int = Field(default=0, description="平盤家數")
+    limit_up_count: int = Field(default=0, description="漲停家數（漲幅約 ≥9.9%）")
+    limit_down_count: int = Field(default=0, description="跌停家數（跌幅約 ≤−9.9%）")
     total_volume: int = Field(default=0, description="市場總成交量")
 
 
