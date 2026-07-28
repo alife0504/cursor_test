@@ -142,13 +142,34 @@ export function SectorHeatmap({
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t px-4 py-2 text-[11px] text-muted-foreground">
-        <span>
-          {mode === "chg"
-            ? "格子大小＝成交值 · 顏色＝漲跌%"
-            : "格子大小＝成交值 · 顏色＝三大法人當日淨額（紅買超 / 綠賣超）"}
-        </span>
-        <span className="ml-auto">{liveLabel}</span>
+      {/* 圖例：flex-wrap → 寬度夠一行、太窄自動往下折。大小＝成交值、顏色＝漲跌/資金流。 */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t px-4 py-2.5 text-[11px] text-muted-foreground">
+        {/* 大小圖例：小→大方塊，示意「面積＝成交值」 */}
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-end gap-[3px]" aria-hidden>
+            <span className="inline-block shrink-0 rounded-[2px] bg-muted-foreground/40" style={{ width: 7, height: 7 }} />
+            <span className="inline-block shrink-0 rounded-[2px] bg-muted-foreground/40" style={{ width: 10, height: 10 }} />
+            <span className="inline-block shrink-0 rounded-[2px] bg-muted-foreground/50" style={{ width: 13, height: 13 }} />
+          </span>
+          <span className="shrink-0">格子越大＝成交值越高（資金越集中）</span>
+        </div>
+
+        {/* 顏色圖例：綠→灰→紅漸層條，標籤隨模式切換 */}
+        <div className="flex items-center gap-1.5">
+          <span className="shrink-0">{mode === "chg" ? "跌" : "賣超"}</span>
+          <span
+            className="inline-block h-2.5 w-24 shrink-0 rounded-full"
+            style={{
+              background: `linear-gradient(90deg, ${heatColor(mode === "chg" ? -3 : -30, mode)}, rgba(148,161,178,.35), ${heatColor(mode === "chg" ? 3 : 30, mode)})`,
+            }}
+          />
+          <span className="shrink-0">{mode === "chg" ? "漲" : "買超"}</span>
+          <span className="shrink-0 text-muted-foreground/70">
+            {mode === "chg" ? "（±3% 到最濃）" : "（±30 億到最濃）"}
+          </span>
+        </div>
+
+        <span className="ml-auto shrink-0">{liveLabel}</span>
       </div>
     </section>
   );
