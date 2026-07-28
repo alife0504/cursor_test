@@ -56,8 +56,15 @@ async def get_institutional(
     used_date, rows, totals = await service.get_institutional(
         target_date=target_date, market=market, limit=limit, order=order, by=by
     )
-    # 批次取股票中文名（symbol → name）供表格顯示
-    names = await service.repo.get_names_for([r.symbol for r in rows])
+    # 批次取股票中文名 + 最新收盤（金額＝淨股數×收盤）
+    syms = [r.symbol for r in rows]
+    names = await service.repo.get_names_for(syms)
+    closes = await service.repo.get_latest_closes(syms)
+
+    def _amt(net: int, sym: str) -> int | None:
+        c = closes.get(sym)
+        return int(net * c) if c is not None else None
+
     items = [
         InstitutionalRow(
             symbol=r.symbol,
@@ -72,6 +79,9 @@ async def get_institutional(
             dealer_buy=r.dealer_buy,
             dealer_sell=r.dealer_sell,
             dealer_net=r.dealer_net,
+            foreign_amount=_amt(r.foreign_net, r.symbol),
+            trust_amount=_amt(r.trust_net, r.symbol),
+            dealer_amount=_amt(r.dealer_net, r.symbol),
         ).model_dump(mode="json")
         for r in rows
     ]

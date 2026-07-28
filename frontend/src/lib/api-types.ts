@@ -359,6 +359,10 @@ export interface InstitutionalRow {
   dealer_buy?: string | null;
   dealer_sell?: string | null;
   dealer_net?: string | null;
+  // 淨額金額（元）＝ 淨股數 × 最新收盤，供「金額(億)」顯示
+  foreign_amount?: number | null;
+  trust_amount?: number | null;
+  dealer_amount?: number | null;
 }
 
 // 全市場三大法人淨額合計（後端對全母體 SUM，不受 rows 的 limit 截斷影響）
@@ -367,6 +371,9 @@ export interface InstitutionalTotals {
   trust_net: number;
   dealer_net: number;
   count: number;
+  foreign_amount?: number;
+  trust_amount?: number;
+  dealer_amount?: number;
 }
 
 export interface InstitutionalResponse {

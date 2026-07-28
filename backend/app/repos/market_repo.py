@@ -215,36 +215,64 @@ class MarketRepository(BaseRepository):
     async def get_institutional_totals(
         self, target_date: date_type, *, market: str = "TW"
     ) -> dict[str, int]:
-        """當日全市場三大法人淨額合計 + 有資料檔數（不受 list 的 limit 截斷影響）。
+        """當日全市場三大法人淨額合計（股數）+ 淨額金額（元，淨股數×最新收盤）+ 有資料檔數。
 
-        頁面「外資/投信/自營商淨額合計」KPI 需要當日『整個市場』的總額；若拿 list 回的
-        top-N（依 foreign_net desc 截斷）子集在前端加總，得到的是「買超最大的 N 檔」之和，
-        方向會與市場實際淨額相反（實測把市場淨賣超顯示成淨買超）。此處直接對全母體 SUM。
+        頁面 KPI 需要當日『整個市場』的總額；不可拿 list 回的 top-N 子集加總（方向會相反）。
+        *_net = 股數合計；*_amount = 金額合計（元）＝ Σ(淨股數 × 最新收盤)，供「金額(億)」顯示。
         """
         markets = _market_filter(market)
-        stmt = (
-            select(
-                func.coalesce(func.sum(InstitutionalTrading.foreign_net), 0),
-                func.coalesce(func.sum(InstitutionalTrading.trust_net), 0),
-                func.coalesce(func.sum(InstitutionalTrading.dealer_net), 0),
-                func.count(),
-            )
-            .join(StockList, StockList.symbol == InstitutionalTrading.symbol)
-            .where(
-                and_(
-                    StockList.market.in_(markets),
-                    StockList.is_active.is_(True),
-                    InstitutionalTrading.date == target_date,
+        rows = await self.session.execute(
+            text(
+                """
+                WITH lp AS (
+                    SELECT DISTINCT ON (symbol) symbol, close
+                    FROM stock_prices WHERE date >= (CURRENT_DATE - 20)
+                    ORDER BY symbol, date DESC
                 )
-            )
+                SELECT
+                    COALESCE(SUM(it.foreign_net), 0)                       AS f_net,
+                    COALESCE(SUM(it.trust_net), 0)                         AS t_net,
+                    COALESCE(SUM(it.dealer_net), 0)                        AS d_net,
+                    COUNT(*)                                              AS cnt,
+                    COALESCE(SUM(it.foreign_net * COALESCE(lp.close,0)),0) AS f_amt,
+                    COALESCE(SUM(it.trust_net   * COALESCE(lp.close,0)),0) AS t_amt,
+                    COALESCE(SUM(it.dealer_net  * COALESCE(lp.close,0)),0) AS d_amt
+                FROM institutional_trading it
+                JOIN stock_list sl ON sl.symbol = it.symbol
+                    AND sl.is_active AND sl.market = ANY(:mk)
+                LEFT JOIN lp ON lp.symbol = it.symbol
+                WHERE it.date = :d
+                """
+            ),
+            {"mk": list(markets), "d": target_date},
         )
-        row = (await self.session.execute(stmt)).one()
+        r = rows.one()
         return {
-            "foreign_net": int(row[0] or 0),
-            "trust_net": int(row[1] or 0),
-            "dealer_net": int(row[2] or 0),
-            "count": int(row[3] or 0),
+            "foreign_net": int(r.f_net or 0),
+            "trust_net": int(r.t_net or 0),
+            "dealer_net": int(r.d_net or 0),
+            "count": int(r.cnt or 0),
+            "foreign_amount": int(r.f_amt or 0),
+            "trust_amount": int(r.t_amt or 0),
+            "dealer_amount": int(r.d_amt or 0),
         }
+
+    async def get_latest_closes(self, symbols: list[str]) -> dict[str, float]:
+        """批次取每檔最新收盤（近 20 天內），供三大法人「金額(億)」= 淨股數×收盤 計算。"""
+        if not symbols:
+            return {}
+        rows = await self.session.execute(
+            text(
+                """
+                SELECT DISTINCT ON (symbol) symbol, close
+                FROM stock_prices
+                WHERE symbol = ANY(:syms) AND date >= (CURRENT_DATE - 20)
+                ORDER BY symbol, date DESC
+                """
+            ),
+            {"syms": list(set(symbols))},
+        )
+        return {r.symbol: float(r.close) for r in rows.all() if r.close is not None}
 
     _INST_COLS = (
         "foreign_buy",

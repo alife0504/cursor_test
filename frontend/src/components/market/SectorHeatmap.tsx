@@ -100,20 +100,20 @@ export function SectorHeatmap({
                   </span>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col gap-[2px]">
-                  {ind.stocks.map((s) => {
+                  {ind.stocks.slice(0, 12).map((s) => {
                     const v = mode === "chg" ? s.chg : s.flow;
                     return (
                       <div
                         key={s.symbol}
-                        className="flex min-h-0 flex-col justify-center overflow-hidden rounded-[5px] px-1.5 py-0.5 text-white"
+                        className="flex min-h-0 flex-col justify-center overflow-hidden rounded-[5px] px-1.5 py-1 text-white"
                         style={{ flex: s.value, background: heatColor(v, mode) }}
                         title={`${s.symbol} ${s.name}｜漲跌 ${fmtMetric(s.chg, "chg")}｜資金流 ${fmtMetric(s.flow, "flow")}｜成交值 ${fmtYi(s.value)}`}
                       >
-                        <div className="truncate text-[11px] font-bold leading-tight">
-                          {s.symbol} <span className="text-[9px] font-normal opacity-90">{s.name}</span>
-                        </div>
-                        <div className="num truncate text-[11px] font-bold leading-tight tabular-nums">
-                          {fmtMetric(v, mode)}
+                        {/* 完整中文名稱（FinMind），格子夠高就整名顯示、太小則自動裁切+滑鼠停留看全部 */}
+                        <div className="text-[12px] font-bold leading-tight">{s.name}</div>
+                        <div className="flex items-center justify-between gap-1 text-[10px] leading-tight opacity-95">
+                          <span className="num tabular-nums">{s.symbol}</span>
+                          <span className="num font-bold tabular-nums">{fmtMetric(v, mode)}</span>
                         </div>
                       </div>
                     );

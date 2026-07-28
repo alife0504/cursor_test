@@ -62,6 +62,10 @@ class InstitutionalRow(BaseSchema):
     dealer_buy: int
     dealer_sell: int
     dealer_net: int
+    # 淨額金額（元）＝ 淨股數 × 最新收盤，供前端「金額(億)」顯示
+    foreign_amount: int | None = None
+    trust_amount: int | None = None
+    dealer_amount: int | None = None
 
 
 class MoverRow(BaseSchema):

@@ -7,12 +7,12 @@ import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
 import { KpiCard } from "@/components/common/KpiCard";
-import { NumberFormat } from "@/components/common/NumberFormat";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useInstitutional } from "@/hooks/useNews";
 import type { InstitutionalRow } from "@/lib/api-types";
+import { cn } from "@/lib/utils";
 
 // Phase 17 § C:三大法人(TW only)
 
@@ -25,8 +25,37 @@ function compactNet(n: number): string {
   return `${sign}${abs.toLocaleString()}`;
 }
 
+// 顯示單位：張（股數÷1000）或 金額（億元＝淨股數×收盤）。使用者要兩種都能看 → 切換。
+type Unit = "shares" | "amount";
+const toLots = (shares: number) => Math.round(shares / 1000);
+
+/** 表格格子：依單位把（淨股數, 金額元）格式化。張＝÷1000；金額＝÷1e8（億）。 */
+function fmtByUnit(
+  net?: number | string | null,
+  amount?: number | string | null,
+  unit: Unit = "shares",
+): string {
+  if (unit === "amount") {
+    if (amount == null || amount === "") return "—";
+    const yi = Number(amount) / 1e8;
+    return `${yi > 0 ? "+" : yi < 0 ? "−" : ""}${Math.abs(yi).toFixed(2)}`;
+  }
+  if (net == null || net === "") return "—";
+  const lots = toLots(Number(net));
+  return `${lots > 0 ? "+" : lots < 0 ? "−" : ""}${Math.abs(lots).toLocaleString("en-US")}`;
+}
+
+/** KPI 合計：張 → compactNet(張數)；金額 → compactNet(元)（會格式成 億/萬）。 */
+function kpiText(net: number, amount: number, unit: Unit): string {
+  return unit === "amount" ? compactNet(amount) : `${compactNet(toLots(net))} 張`;
+}
+
+/** 欄位標題加單位。 */
+const unitCol = (label: string, unit: Unit) => `${label}(${unit === "amount" ? "億" : "張"})`;
+
 export default function InstitutionalPage() {
   const [date, setDate] = useState<string>("");
+  const [unit, setUnit] = useState<Unit>("shares"); // 張 ↔ 金額(億)
   const common = { market: "TW" as const, date: date || null, limit: 10 };
   // 6 個榜：外資 / 投信 / 自營商，各買超（desc）與賣超（asc）。totals 取自第一個查詢。
   const foreignBuy = useInstitutional({ ...common, by: "foreign", order: "buy" });
@@ -46,6 +75,9 @@ export default function InstitutionalPage() {
       f: Number(tt?.foreign_net ?? 0),
       t: Number(tt?.trust_net ?? 0),
       d: Number(tt?.dealer_net ?? 0),
+      fAmt: Number(tt?.foreign_amount ?? 0),
+      tAmt: Number(tt?.trust_amount ?? 0),
+      dAmt: Number(tt?.dealer_amount ?? 0),
       count: Number(tt?.count ?? 0),
     };
   }, [foreignBuy.data?.totals]);
@@ -86,51 +118,36 @@ export default function InstitutionalPage() {
       },
       {
         accessorKey: "foreign_net",
-        header: "外資買賣超",
+        header: unitCol("外資買賣超", unit),
         meta: { align: "right" },
         cell: ({ row }) => (
-          <NumberFormat
-            value={row.original.foreign_net ?? null}
-            className={
-              Number(row.original.foreign_net ?? 0) >= 0
-                ? "text-bull"
-                : "text-bear"
-            }
-          />
+          <span className={Number(row.original.foreign_net ?? 0) >= 0 ? "text-bull" : "text-bear"}>
+            {fmtByUnit(row.original.foreign_net, row.original.foreign_amount, unit)}
+          </span>
         ),
       },
       {
         accessorKey: "trust_net",
-        header: "投信買賣超",
+        header: unitCol("投信買賣超", unit),
         meta: { align: "right" },
         cell: ({ row }) => (
-          <NumberFormat
-            value={row.original.trust_net ?? null}
-            className={
-              Number(row.original.trust_net ?? 0) >= 0
-                ? "text-bull"
-                : "text-bear"
-            }
-          />
+          <span className={Number(row.original.trust_net ?? 0) >= 0 ? "text-bull" : "text-bear"}>
+            {fmtByUnit(row.original.trust_net, row.original.trust_amount, unit)}
+          </span>
         ),
       },
       {
         accessorKey: "dealer_net",
-        header: "自營商買賣超",
+        header: unitCol("自營商買賣超", unit),
         meta: { align: "right" },
         cell: ({ row }) => (
-          <NumberFormat
-            value={row.original.dealer_net ?? null}
-            className={
-              Number(row.original.dealer_net ?? 0) >= 0
-                ? "text-bull"
-                : "text-bear"
-            }
-          />
+          <span className={Number(row.original.dealer_net ?? 0) >= 0 ? "text-bull" : "text-bear"}>
+            {fmtByUnit(row.original.dealer_net, row.original.dealer_amount, unit)}
+          </span>
         ),
       },
     ],
-    [],
+    [unit],
   );
 
   return (
@@ -145,17 +162,45 @@ export default function InstitutionalPage() {
           </>
         }
         actions={
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="inst-date" className="text-xs">
-              日期（留空為最新）
-            </Label>
-            <Input
-              id="inst-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-44"
-            />
+          <div className="flex items-end gap-3">
+            {/* 張 ↔ 金額(億) 切換 */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">顯示單位</span>
+              <div className="inline-flex rounded-md border bg-muted/50 p-0.5">
+                {(
+                  [
+                    ["shares", "張"],
+                    ["amount", "金額(億)"],
+                  ] as const
+                ).map(([u, label]) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setUnit(u)}
+                    className={cn(
+                      "rounded px-2.5 py-1 text-xs transition-colors",
+                      unit === u
+                        ? "bg-card font-semibold text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="inst-date" className="text-xs">
+                日期（留空為最新）
+              </Label>
+              <Input
+                id="inst-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-44"
+              />
+            </div>
           </div>
         }
       />
@@ -164,21 +209,21 @@ export default function InstitutionalPage() {
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           title="外資淨額合計"
-          value={compactNet(totals.f)}
+          value={kpiText(totals.f, totals.fAmt, unit)}
           subtitle="紅買超 · 綠賣超"
           icon={Globe}
           accent={netAccent(totals.f)}
         />
         <KpiCard
           title="投信淨額合計"
-          value={compactNet(totals.t)}
+          value={kpiText(totals.t, totals.tAmt, unit)}
           subtitle="紅買超 · 綠賣超"
           icon={Building2}
           accent={netAccent(totals.t)}
         />
         <KpiCard
           title="自營商淨額合計"
-          value={compactNet(totals.d)}
+          value={kpiText(totals.d, totals.dAmt, unit)}
           subtitle="紅買超 · 綠賣超"
           icon={Briefcase}
           accent={netAccent(totals.d)}
