@@ -246,29 +246,24 @@ export default function MarketOverviewPage() {
         )}
       </section>
 
-      {/* 家數圓餅＋摘要（左，精簡）｜ 板塊熱力圖（右，大面積）—— 僅 TW 有熱力圖 */}
-      {isTW ? (
-        <section className="grid gap-3 lg:grid-cols-[minmax(280px,34%)_1fr]">
-          <MarketBreadthCard
-            adv={adv}
-            dec={dec}
-            unc={unc}
-            totalVolume={totalVolume}
-            live={breadthLive}
-          />
-          <SectorHeatmap data={heatmap.data} isLoading={heatmap.isLoading} />
-        </section>
-      ) : (
-        <section>
-          <MarketBreadthCard
-            adv={adv}
-            dec={dec}
-            unc={unc}
-            totalVolume={totalVolume}
-            live={breadthLive}
-          />
-        </section>
-      )}
+      {/* 漲跌家數分佈：自己佔一行，右側預留空白（之後可放其他資料） */}
+      <section className="grid gap-3 lg:grid-cols-3">
+        <MarketBreadthCard
+          adv={adv}
+          dec={dec}
+          unc={unc}
+          totalVolume={totalVolume}
+          live={breadthLive}
+        />
+        {isTW ? (
+          <div className="hidden rounded-lg border border-dashed bg-muted/20 lg:col-span-2 lg:flex lg:items-center lg:justify-center">
+            <span className="text-xs text-muted-foreground">此區塊預留 · 之後可放其他資料</span>
+          </div>
+        ) : null}
+      </section>
+
+      {/* 市場板塊圖：獨立一整行、不被壓縮（僅 TW） */}
+      {isTW ? <SectorHeatmap data={heatmap.data} isLoading={heatmap.isLoading} /> : null}
 
       <section className="grid gap-3 lg:grid-cols-3">
         <div className="space-y-2">
