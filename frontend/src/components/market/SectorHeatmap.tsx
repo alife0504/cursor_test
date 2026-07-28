@@ -17,6 +17,11 @@ const MIN_TILE_H = 44;
 // 10 欄在 ~960px 容器有足夠留白 → 半導體等大產業明顯更寬，treemap 比例才讀得出來。
 const MAX_INDUSTRIES = 10;
 const MIN_COL_W = 66;
+// 面積權重壓縮：台積電等成交值極大的個股（接近全市場一大塊）會照真實比例霸佔整張圖，
+// 又寬又長。用 0.6 次方壓縮 → 保留「越大＝成交越熱」的大小順序，但讓巨頭不過度膨脹、
+// 中小格更好讀。純視覺；tooltip 與數字標籤仍顯示「真實成交值」。
+const SIZE_EXP = 0.6;
+const sizeWeight = (v: number) => (v > 0 ? v ** SIZE_EXP : 0);
 
 /** 熱力圖配色（紅漲綠跌）。chg：%，±3% 到滿色；flow：億，±30 億到滿色。 */
 function heatColor(v: number, mode: Mode): string {
@@ -106,15 +111,26 @@ export function SectorHeatmap({
               <div
                 key={ind.name}
                 className="flex flex-col overflow-hidden"
-                style={{ flex: ind.value, minWidth: MIN_COL_W }}
+                style={{ flex: sizeWeight(ind.value), minWidth: MIN_COL_W }}
               >
-                <div className="flex items-baseline justify-between gap-1 px-1 pb-1 text-[12px] font-semibold text-foreground/90">
-                  <span className="truncate">{ind.name}</span>
-                  <span className="num shrink-0 tabular-nums text-[10px] font-normal text-muted-foreground">
+                <div className="px-1 pb-1" title={ind.name} style={{ minHeight: 34 }}>
+                  {/* 產業名獨立整行、最多折兩行完整顯示（不再被成交值擠成一個字）；hover 看全名 */}
+                  <div
+                    className="break-all text-[11px] font-semibold leading-[1.15] text-foreground/90"
+                    style={{
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {ind.name}
+                  </div>
+                  <div className="num tabular-nums text-[9.5px] text-muted-foreground">
                     {mode === "flow"
                       ? `${ind.flow_total > 0 ? "+" : ind.flow_total < 0 ? "−" : ""}${Math.abs(ind.flow_total).toFixed(1)}億`
                       : fmtYi(ind.value)}
-                  </span>
+                  </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col gap-[3px]">
                   {ind.stocks.slice(0, TOP_N).map((s) => {
@@ -123,7 +139,7 @@ export function SectorHeatmap({
                       <div
                         key={s.symbol}
                         className="flex min-h-0 flex-col justify-center overflow-hidden rounded-md px-2 py-1 text-white"
-                        style={{ flex: s.value, minHeight: MIN_TILE_H, background: heatColor(v, mode) }}
+                        style={{ flex: sizeWeight(s.value), minHeight: MIN_TILE_H, background: heatColor(v, mode) }}
                         title={`${s.symbol} ${s.name}｜漲跌 ${fmtMetric(s.chg, "chg")}｜資金流 ${fmtMetric(s.flow, "flow")}｜成交值 ${fmtYi(s.value)}`}
                       >
                         {/* 完整中文名稱（FinMind）；min-height 地板保證整名＋代號＋漲跌%都放得下 */}
