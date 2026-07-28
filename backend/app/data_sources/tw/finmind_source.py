@@ -162,6 +162,65 @@ class FinMindSource(BaseDataSource):
         )
         return self._normalize_margin(data)
 
+    async def fetch_all_institutional(self, start: date, end: date) -> list[dict[str, Any]]:
+        """全市場三大法人（TaiwanStockInstitutionalInvestorsBuySell，不帶 data_id → 單日全市場）。
+
+        取代逐檔 fan-out（會 IP ban）＋修 twse_openapi fallback 存 0 的 bug：一次抓全市場、
+        標準定義聚合（外資=外資及陸資+外資自營商、自營=自行+避險、投信=投信），回每檔一列
+        upsert dict（symbol/date/{foreign,trust,dealer}_{buy,sell,net}，單位股數）。
+        """
+        from collections import defaultdict
+        from datetime import timedelta
+
+        def _grp(n: str | None) -> str | None:
+            nl = (n or "").lower()
+            if nl.startswith("foreign"):  # Foreign_Investor + Foreign_Dealer_Self → 外資
+                return "foreign"
+            if "trust" in nl:
+                return "trust"
+            if "dealer" in nl:  # Dealer_self + Dealer_Hedging + Dealer → 自營商
+                return "dealer"
+            return None
+
+        acc: dict[tuple[str, date], dict[str, int]] = defaultdict(
+            lambda: {f"{g}_{s}": 0 for g in ("foreign", "trust", "dealer") for s in ("buy", "sell")}
+        )
+        day = start
+        while day <= end:
+            try:
+                data = await self._call(
+                    dataset="TaiwanStockInstitutionalInvestorsBuySell",
+                    start_date=day.isoformat(),
+                )
+            except (AuthError, RateLimitError, ExternalServiceError):
+                data = []
+            for r in data:
+                sid = r.get("stock_id")
+                g = _grp(r.get("name"))
+                d = r.get("date")
+                if not sid or not d or g is None:
+                    continue
+                try:
+                    d_obj = date.fromisoformat(str(d)[:10])
+                except ValueError:
+                    continue
+                a = acc[(sid, d_obj)]
+                try:
+                    a[f"{g}_buy"] += int(float(r.get("buy") or 0))
+                    a[f"{g}_sell"] += int(float(r.get("sell") or 0))
+                except (ValueError, TypeError):
+                    pass
+            day += timedelta(days=1)
+
+        out: list[dict[str, Any]] = []
+        for (sid, d_obj), a in acc.items():
+            row: dict[str, Any] = {"symbol": sid, "date": d_obj}
+            for g in ("foreign", "trust", "dealer"):
+                b, s = a[f"{g}_buy"], a[f"{g}_sell"]
+                row[f"{g}_buy"], row[f"{g}_sell"], row[f"{g}_net"] = b, s, b - s
+            out.append(row)
+        return out
+
     async def fetch_all_per(self, start: date, end: date) -> list[dict[str, Any]]:
         """全市場本益比 / 殖利率 / 淨值比（TaiwanStockPER，不帶 data_id → 單日全市場）。
 

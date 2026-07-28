@@ -218,7 +218,12 @@ def sync_monthly_revenue() -> dict[str, Any]:
     time_limit=180,
 )
 def sync_institutional_tw() -> dict[str, Any]:
-    """fan-out：對所有 active TW 股票排三大法人抓取。"""
+    """fan-out：對所有 active TW 股票排三大法人抓取。
+
+    ⚠️ 已停用於 beat 排程 —— 同 margin，逐檔 fan-out 有 IP ban 風險；且 finmind 沒涵蓋的
+    個股會落到 twse_openapi，那條路徑沒把 T86 欄位對映 → 存成 0/0/0（頁面顯示錯）。
+    改用 sync_institutional_bulk_tw（每日一請求抓全市場、標準定義聚合）。保留供手動補洞。
+    """
     return asyncio.run(
         _fan_out_tw(
             sync_institutional_one.name,
@@ -226,6 +231,34 @@ def sync_institutional_tw() -> dict[str, Any]:
             kwargs_builder=lambda _sym: {"days_back": 7},
         )
     )
+
+
+@celery_app.task(
+    name="app.workers.tasks.financial.sync_institutional_bulk_tw",
+    autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
+    retry_backoff=2,
+    retry_backoff_max=120,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=300,
+    time_limit=420,
+)
+def sync_institutional_bulk_tw(days_back: int = 10) -> dict[str, Any]:
+    """全市場三大法人（FinMind 不帶 data_id → 單日回整個市場）。取代逐檔 fan-out。"""
+    return asyncio.run(_async_institutional_bulk(days_back))
+
+
+async def _async_institutional_bulk(days_back: int) -> dict[str, Any]:
+    sources = get_tw_sources(settings)
+    engine, sm = _new_engine_sm()
+    try:
+        async with sm() as session:
+            service = DataPipelineService(sources_by_kind=sources, session=session)
+            written = await service.sync_institutional_bulk(days_back=days_back)
+        logger.info("financial.institutional_bulk.done written=%d", written)
+        return {"written": int(written)}
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(
@@ -441,6 +474,7 @@ async def _fan_out_generic(
 __all__ = [
     "sync_company_info_one",
     "sync_company_info_tw",
+    "sync_institutional_bulk_tw",
     "sync_institutional_one",
     "sync_institutional_tw",
     "sync_margin_bulk_tw",

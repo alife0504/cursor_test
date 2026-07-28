@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type ApiEnvelope } from "@/lib/api";
 import type {
   CalendarEvent,
+  HeatmapResponse,
   MarketOverview,
   MoverRow,
   RealtimeOverview,
@@ -224,6 +225,46 @@ export function useRealtimeMovers(
         { params: { type, limit } },
       );
       return res.data.data ?? null;
+    },
+  });
+}
+
+// 海外指數輪詢間隔。yfinance 本來就延遲 ~15 分，60 秒輪詢已遠比資料更新頻繁；
+// 不看台股時段（海外市場各有各的交易時間，且期貨近 24 小時）。
+const FOREIGN_POLL_MS = 60_000;
+
+/** 海外指數延遲報價（道瓊期貨/那斯達克期貨/費半/韓國/日經）。60 秒輪詢、開頁必抓最新。 */
+export function useRealtimeForeign(enabled = true) {
+  return useQuery({
+    queryKey: ["market", "realtime", "foreign"],
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: FOREIGN_POLL_MS,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<RealtimeSnapshot>>(
+        "/market/realtime/foreign",
+      );
+      return res.data.data;
+    },
+  });
+}
+
+/** 板塊熱力圖（產業→個股；每檔含即時漲跌%＋資金流億）。盤中 5 秒、收盤 60 秒心跳。 */
+export function useHeatmap(enabled = true) {
+  return useQuery({
+    queryKey: ["market", "heatmap"],
+    enabled,
+    staleTime: REALTIME_POLL_MS - 1_000,
+    refetchInterval: () => sessionInterval(isTwMarketOpen()),
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<HeatmapResponse>>("/market/heatmap");
+      return res.data.data;
     },
   });
 }

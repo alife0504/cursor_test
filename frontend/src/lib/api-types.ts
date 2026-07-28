@@ -325,6 +325,26 @@ export interface RealtimeSnapshot {
 }
 
 // ════════════════ Phase 17 ════════════════
+// 板塊熱力圖（對應 backend market_service.get_heatmap）
+export interface HeatmapStock {
+  symbol: string;
+  name: string;
+  chg: number; // 即時漲跌%
+  flow: number; // 資金流（億，三大法人當日淨額金額）
+  value: number; // 成交值（格子大小）
+}
+export interface HeatmapIndustry {
+  name: string;
+  value: number; // 產業成交值
+  flow_total: number; // 產業資金流合計（億）
+  stocks: HeatmapStock[];
+}
+export interface HeatmapResponse {
+  realtime: boolean;
+  as_of: string | null;
+  industries: HeatmapIndustry[];
+}
+
 // 三大法人 row（對應 backend/schemas/market.py InstitutionalRow）
 export interface InstitutionalRow {
   symbol: string;

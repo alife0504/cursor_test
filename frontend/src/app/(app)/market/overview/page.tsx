@@ -3,20 +3,23 @@
 import { TrendingUp } from "lucide-react";
 import { useState } from "react";
 
-import { ChartContainer } from "@/components/common/ChartContainer";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
-import { PieChart } from "@/components/common/PieChart";
 import { IndexCard } from "@/components/market/IndexCard";
+import { MarketBreadthCard } from "@/components/market/MarketBreadthCard";
 import { MarketSwitcher } from "@/components/market/MarketSwitcher";
 import { MoversTable } from "@/components/market/MoversTable";
+import { SectorHeatmap } from "@/components/market/SectorHeatmap";
 import {
   nearMonthFutures,
+  useHeatmap,
   useMarketOverview,
+  useRealtimeForeign,
   useRealtimeFutures,
   useRealtimeIndex,
   useRealtimeOverview,
+  useRealtimeStock,
 } from "@/hooks/useMarket";
 import type { IndexQuote, RealtimeSnapshot } from "@/lib/api-types";
 
@@ -53,15 +56,33 @@ function unavailableLabel(snap?: RealtimeSnapshot): string {
 
 // 台指期近月契約挑選邏輯移至 hooks/useMarket 的 nearMonthFutures（與儀表板共用）
 
+/** as_of（UTC iso）→「延遲 · HH:MM」台北時間；海外 yfinance 延遲 ~15 分。 */
+function delayLabel(asOf?: string | null): string {
+  if (!asOf) return "延遲報價";
+  const d = new Date(asOf);
+  if (Number.isNaN(d.getTime())) return "延遲報價";
+  const hm = d.toLocaleTimeString("zh-TW", {
+    timeZone: "Asia/Taipei",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  return `延遲 · ${hm}`;
+}
+
 /**
- * 組出指數卡片：TW → 加權 / 櫃買 / 台指期（盤中即時覆蓋盤後值）；其他市場 → 盤後 indices。
- * 即時取不到（收盤 / 未開通 / 非交易時段）時自動退回盤後值，並在小標註明狀態。
+ * 組出指數卡片。
+ * TW → 8 張：加權 / 台指全 / 道瓊期貨 / 那斯達克期貨 / 費半 / 韓國 / 日經 / 台積電。
+ *   台股 3 張（加權/台指全/台積電）真 5 秒即時；海外 5 張 yfinance 延遲（卡片標「延遲·時間」）。
+ * US → 盤後 indices（維持原樣）。
  */
 function buildIndexCards(
   market: "TW" | "US",
   eod: IndexQuote[],
   rtIndex?: RealtimeSnapshot,
   rtFutures?: RealtimeSnapshot,
+  rtForeign?: RealtimeSnapshot,
+  rtTsmc?: RealtimeSnapshot,
 ): IndexCardData[] {
   if (market !== "TW") {
     return eod.map((q) => ({
@@ -78,6 +99,7 @@ function buildIndexCards(
     rtIndex?.available ? (rtIndex.quotes ?? []).map((q) => [q.symbol, q]) : [],
   );
 
+  // 台股指數（加權）：即時覆蓋盤後
   const indexCard = (symbol: string, name: string): IndexCardData => {
     const rt = rtBy.get(symbol);
     if (rt && rt.price != null) {
@@ -99,28 +121,43 @@ function buildIndexCards(
     };
   };
 
+  // 台指全（近月期貨）
   const fut = nearMonthFutures(rtFutures);
-  const futuresCard: IndexCardData =
-    fut && fut.price != null
-      ? {
-          name: "台指全",
-          value: fut.price,
-          change: fut.change ?? null,
-          changePct: fut.change_rate ?? null,
-          subtitle: liveLabel(rtFutures?.as_of),
-        }
-      : {
-          name: "台指全",
-          value: null,
-          change: null,
-          changePct: null,
-          subtitle: unavailableLabel(rtFutures),
-        };
+  const futuresCard: IndexCardData = fut?.price != null
+    ? { name: "台指全", value: fut.price, change: fut.change ?? null, changePct: fut.change_rate ?? null, subtitle: liveLabel(rtFutures?.as_of) }
+    : { name: "台指全", value: null, change: null, changePct: null, subtitle: unavailableLabel(rtFutures) };
+
+  // 海外指數（yfinance 延遲）：以 yfinance 代碼取值
+  const fBy = new Map((rtForeign?.quotes ?? []).map((q) => [q.symbol, q]));
+  const foreignCard = (symbol: string, fallbackName: string): IndexCardData => {
+    const q = fBy.get(symbol);
+    if (q && q.price != null) {
+      return {
+        name: q.name ?? fallbackName,
+        value: q.price,
+        change: q.change ?? null,
+        changePct: q.change_rate ?? null,
+        subtitle: delayLabel(rtForeign?.as_of),
+      };
+    }
+    return { name: fallbackName, value: null, change: null, changePct: null, subtitle: "延遲報價" };
+  };
+
+  // 台積電（即時個股）
+  const tsmc = (rtTsmc?.quotes ?? []).find((q) => q.symbol === "2330");
+  const tsmcCard: IndexCardData = tsmc?.price != null
+    ? { name: "台積電", value: tsmc.price, change: tsmc.change ?? null, changePct: tsmc.change_rate ?? null, subtitle: liveLabel(rtTsmc?.as_of) }
+    : { name: "台積電", value: null, change: null, changePct: null, subtitle: unavailableLabel(rtTsmc) };
 
   return [
     indexCard("TAIEX", "加權指數"),
-    indexCard("TPEX", "櫃買指數"),
     futuresCard,
+    foreignCard("YM=F", "道瓊期貨"),
+    foreignCard("NQ=F", "那斯達克期貨"),
+    foreignCard("^SOX", "費城半導體"),
+    foreignCard("^KS11", "韓國 KOSPI"),
+    foreignCard("^N225", "日經 225"),
+    tsmcCard,
   ];
 }
 
@@ -140,22 +177,29 @@ export default function MarketOverviewPage() {
   const rtFutures = useRealtimeFutures(["TXF"], isTW, false);
   // 即時漲跌家數 / 總量（盤中；不可用時退回盤後 useMarketOverview）
   const rtOverview = useRealtimeOverview(isTW);
+  // 海外指數（延遲）、台積電（即時個股）、板塊熱力圖 —— 僅 TW
+  const rtForeign = useRealtimeForeign(isTW);
+  const rtTsmc = useRealtimeStock(["2330"], isTW);
+  const heatmap = useHeatmap(isTW);
 
-  const indexes = buildIndexCards(market, data?.indices ?? [], rtIndex.data, rtFutures.data);
+  const indexes = buildIndexCards(
+    market,
+    data?.indices ?? [],
+    rtIndex.data,
+    rtFutures.data,
+    rtForeign.data,
+    rtTsmc.data,
+  );
 
   // 盤中有即時大盤就用即時值，否則用盤後
   const rt = rtOverview.data ?? null;
   const adv = rt?.advance_count ?? (data?.advance_count as number | undefined) ?? 0;
   const dec = rt?.decline_count ?? (data?.decline_count as number | undefined) ?? 0;
   const unc = rt?.unchanged_count ?? (data?.unchanged_count as number | undefined) ?? 0;
-  const totalVolume = rt?.total_volume ?? data?.total_volume ?? null;
+  const totalVolumeRaw = rt?.total_volume ?? data?.total_volume ?? null;
+  const totalVolume =
+    totalVolumeRaw != null && totalVolumeRaw !== "" ? Number(totalVolumeRaw) : null;
   const breadthLive = rt != null;
-  // 紅漲綠跌 token：bull/bear hsl
-  const pieData = [
-    { name: "上漲", value: adv, fill: "hsl(var(--bull))" },
-    { name: "下跌", value: dec, fill: "hsl(var(--bear))" },
-    { name: "平盤", value: unc, fill: "hsl(var(--flat))" },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
@@ -178,8 +222,15 @@ export default function MarketOverviewPage() {
         />
       ) : (
         <>
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {isLoading ? (
+      {/* 8 張指數卡 4×2（台股即時＋海外延遲） */}
+      <section
+        className={
+          isTW
+            ? "grid gap-3 grid-cols-2 lg:grid-cols-4"
+            : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        }
+      >
+        {isLoading && indexes.every((i) => i.value == null) ? (
           <LoadingSkeleton rows={3} />
         ) : (
           indexes.map((i) => (
@@ -195,37 +246,29 @@ export default function MarketOverviewPage() {
         )}
       </section>
 
-      <section className="grid gap-3 lg:grid-cols-2">
-        <ChartContainer title="漲跌家數分佈" height={260}>
-          <PieChart data={pieData} />
-        </ChartContainer>
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
-            市場摘要
-            {breadthLive ? (
-              <span className="num text-[10px] font-normal text-bull/80">即時</span>
-            ) : null}
-          </h3>
-          <dl className="space-y-1.5 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">上漲家數</dt>
-              <dd className="num font-medium text-bull">{adv}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">下跌家數</dt>
-              <dd className="num font-medium text-bear">{dec}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">平盤家數</dt>
-              <dd className="num font-medium text-flat">{unc}</dd>
-            </div>
-            <div className="flex justify-between border-t pt-1.5">
-              <dt className="text-muted-foreground">總成交量</dt>
-              <dd className="num font-medium">{totalVolume ?? "—"}</dd>
-            </div>
-          </dl>
-        </div>
-      </section>
+      {/* 家數圓餅＋摘要（左，精簡）｜ 板塊熱力圖（右，大面積）—— 僅 TW 有熱力圖 */}
+      {isTW ? (
+        <section className="grid gap-3 lg:grid-cols-[minmax(280px,34%)_1fr]">
+          <MarketBreadthCard
+            adv={adv}
+            dec={dec}
+            unc={unc}
+            totalVolume={totalVolume}
+            live={breadthLive}
+          />
+          <SectorHeatmap data={heatmap.data} isLoading={heatmap.isLoading} />
+        </section>
+      ) : (
+        <section>
+          <MarketBreadthCard
+            adv={adv}
+            dec={dec}
+            unc={unc}
+            totalVolume={totalVolume}
+            live={breadthLive}
+          />
+        </section>
+      )}
 
       <section className="grid gap-3 lg:grid-cols-3">
         <div className="space-y-2">

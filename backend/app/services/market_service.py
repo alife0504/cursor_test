@@ -245,6 +245,83 @@ class MarketService:
             "realtime": True,
         }
 
+    async def get_heatmap(
+        self, *, top_per_industry: int = 18, max_industries: int = 28
+    ) -> dict[str, Any]:
+        """板塊熱力圖：產業分組、格子=個股。每檔同時回 chg(即時漲跌%) 與 flow(資金流億)，
+        大小用成交值；前端切換配色/標籤免重抓、格子不會跳。
+
+        chg 來源：盤中用 FinMind 即時快照、收盤後退回 EOD(對前一交易日)。
+        flow 來源：三大法人當日淨買賣超金額(億)＝淨股數×最新收盤（盤後才有、日內不變）。
+        """
+        industry_map = await self.repo.get_industry_map("TW")  # {sym: {industry, name}}
+        realtime = False
+        as_of = None
+
+        got = await self._active_realtime_stock_quotes()
+        if got is not None:
+            quotes, as_of = got
+            realtime = True
+            base = [
+                {
+                    "symbol": q["symbol"],
+                    "chg": round(float(q["change_rate"]), 2),
+                    "value": float(q.get("total_amount") or q.get("amount") or 0),
+                }
+                for q in quotes
+            ]
+        else:
+            base = [
+                {"symbol": r["symbol"], "chg": r["metric"], "value": r["value"]}
+                for r in await self.repo.get_eod_change_rows("TW")
+            ]
+
+        flow_map = {r["symbol"]: r["metric"] for r in await self.repo.get_flow_rows("TW")}
+
+        groups: dict[str, dict[str, Any]] = {}
+        for r in base:
+            info = industry_map.get(r["symbol"])
+            if not info:
+                continue
+            g = groups.setdefault(
+                info["industry"],
+                {"name": info["industry"], "value": 0.0, "flow_total": 0.0, "stocks": []},
+            )
+            flow = flow_map.get(r["symbol"], 0.0)
+            g["stocks"].append(
+                {
+                    "symbol": r["symbol"],
+                    "name": info["name"],
+                    "chg": r["chg"],
+                    "flow": flow,
+                    "value": r["value"],
+                }
+            )
+            g["value"] += r["value"]
+            g["flow_total"] += flow
+
+        industries = []
+        for g in groups.values():
+            g["stocks"].sort(key=lambda s: s["value"], reverse=True)
+            g["stocks"] = g["stocks"][:top_per_industry]
+            industries.append(g)
+        industries.sort(key=lambda x: x["value"], reverse=True)
+        industries = industries[:max_industries]
+
+        return {
+            "realtime": realtime,
+            "as_of": as_of,
+            "industries": [
+                {
+                    "name": g["name"],
+                    "value": round(g["value"], 0),
+                    "flow_total": round(g["flow_total"], 2),
+                    "stocks": g["stocks"],
+                }
+                for g in industries
+            ],
+        }
+
     async def get_realtime_movers(self, *, mover_type: str = "gainers", limit: int = 10) -> Any:
         """即時漲跌 / 成交量榜；即時不可用時回 None（caller 退回盤後）。"""
         mt = (mover_type or "gainers").lower()

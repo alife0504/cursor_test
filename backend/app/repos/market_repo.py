@@ -28,6 +28,7 @@ from sqlalchemy import (
     func,
     literal,
     select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -363,6 +364,113 @@ class MarketRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return {r.symbol: r.name for r in result.all() if r.name}
+
+    # ── 板塊熱力圖 ──────────────────────────────────────────
+    async def get_industry_map(self, market: str = "TW") -> dict[str, dict[str, str]]:
+        """active 台股的 symbol → {industry, name}。產業別取 stock_info.sector（TWSE 產業分類）。
+
+        排除 ETF/受益證券類（非產業），讓熱力圖聚焦真實產業板塊。
+        """
+        markets = _market_filter(market)
+        rows = await self.session.execute(
+            text(
+                """
+                SELECT si.symbol, si.sector, sl.name
+                FROM stock_info si
+                JOIN stock_list sl ON sl.symbol = si.symbol
+                WHERE sl.is_active AND sl.market = ANY(:mk)
+                  AND si.sector IS NOT NULL
+                  AND si.sector NOT LIKE '%ETF%'
+                  AND si.sector NOT LIKE '%ETN%'
+                  AND si.sector NOT LIKE '%受益證券%'
+                  AND si.sector NOT LIKE '%指數股票型%'
+                """
+            ),
+            {"mk": list(markets)},
+        )
+        return {r[0]: {"industry": r[1], "name": r[2] or r[0]} for r in rows.all()}
+
+    async def get_eod_change_rows(self, market: str = "TW") -> list[dict[str, Any]]:
+        """盤後熱力圖用：每檔最新交易日 漲跌%(對前一交易日收盤) + 成交值(turnover)。
+
+        即時快照不可用（收盤/未開通）時的 chg 模式資料來源。用 LAG 取前一日收盤。
+        """
+        markets = _market_filter(market)
+        rows = await self.session.execute(
+            text(
+                """
+                WITH w AS (
+                    SELECT sp.symbol, sp.date, sp.close, sp.turnover,
+                           LAG(sp.close) OVER (PARTITION BY sp.symbol ORDER BY sp.date) AS prev_close,
+                           ROW_NUMBER() OVER (PARTITION BY sp.symbol ORDER BY sp.date DESC) AS rn
+                    FROM stock_prices sp
+                    JOIN stock_list sl ON sl.symbol = sp.symbol
+                    WHERE sl.is_active AND sl.market = ANY(:mk)
+                      AND sp.date >= (CURRENT_DATE - 20)
+                )
+                SELECT symbol, close, prev_close, turnover
+                FROM w WHERE rn = 1 AND prev_close IS NOT NULL AND prev_close <> 0
+                """
+            ),
+            {"mk": list(markets)},
+        )
+        out: list[dict[str, Any]] = []
+        for r in rows.all():
+            close = float(r.close) if r.close is not None else None
+            prev = float(r.prev_close)
+            if close is None:
+                continue
+            out.append(
+                {
+                    "symbol": r.symbol,
+                    "metric": round((close - prev) / prev * 100, 2),
+                    "value": float(r.turnover or 0),
+                }
+            )
+        return out
+
+    async def get_flow_rows(self, market: str = "TW") -> list[dict[str, Any]]:
+        """資金流模式：每檔 三大法人當日淨買賣超「金額」(億) = 淨股數 × 最新收盤 / 1e8。
+
+        institutional 的 *_net 是股數；乘最新收盤估算金額。value(格子大小) 用成交值。
+        """
+        markets = _market_filter(market)
+        rows = await self.session.execute(
+            text(
+                """
+                WITH lp AS (
+                    SELECT DISTINCT ON (symbol) symbol, close, turnover
+                    FROM stock_prices
+                    WHERE date >= (CURRENT_DATE - 20)
+                    ORDER BY symbol, date DESC
+                ),
+                li AS (  -- 每檔各自最近一日三大法人（近日部分覆蓋 → 不可用全域 max(date)，
+                         -- 否則只到前一日的個股會被漏掉、資金流誤顯示為 0）
+                    SELECT DISTINCT ON (symbol) symbol, foreign_net, trust_net, dealer_net
+                    FROM institutional_trading
+                    WHERE date >= (CURRENT_DATE - 10)
+                    ORDER BY symbol, date DESC
+                )
+                SELECT li.symbol,
+                       (li.foreign_net + li.trust_net + li.dealer_net)::numeric
+                           * COALESCE(lp.close, 0) / 100000000.0 AS flow_yi,
+                       COALESCE(lp.turnover, 0) AS turnover
+                FROM li
+                JOIN stock_list sl ON sl.symbol = li.symbol
+                    AND sl.is_active AND sl.market = ANY(:mk)
+                LEFT JOIN lp ON lp.symbol = li.symbol
+                """
+            ),
+            {"mk": list(markets)},
+        )
+        return [
+            {
+                "symbol": r.symbol,
+                "metric": round(float(r.flow_yi or 0), 2),
+                "value": float(r.turnover or 0),
+            }
+            for r in rows.all()
+        ]
 
     # ── 漲跌幅 / 成交量排行 ────────────────────────────────
     async def get_movers(

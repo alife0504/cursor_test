@@ -298,6 +298,31 @@ class DataPipelineService:
         logger.info("data_pipeline.sync_margin_bulk.done", fetched=len(rows), written=n)
         return n
 
+    async def sync_institutional_bulk(self, *, days_back: int = 10) -> int:
+        """全市場三大法人（FinMind 不帶 data_id → 單日回整個市場，逐日查）。
+
+        取代逐檔 fan-out（IP ban 風險，同 margin），並修 twse_openapi fallback 存 0 的 bug：
+        原本 finmind 沒涵蓋的個股落到 twse_openapi，但那條路徑沒把 T86 中文欄位對映成
+        foreign_net/... → 存成 0/0/0，頁面顯示錯。改用 finmind 全市場 bulk 一次覆蓋所有股票。
+        """
+        from app.core.config import settings
+        from app.data_sources.tw.finmind_source import FinMindSource
+
+        end = datetime.now(UTC).date()
+        start = end - timedelta(days=days_back)
+        rows = await FinMindSource(settings).fetch_all_institutional(start, end)
+        if not rows:
+            return 0
+        active = set(await self.market_repo.get_active_symbols("TWSE")) | set(
+            await self.market_repo.get_active_symbols("TPEX")
+        )
+        batch = [r for r in rows if r.get("symbol") in active]
+        if not batch:
+            return 0
+        n = await self.market_repo.upsert_institutional(batch, source="finmind", commit=True)
+        logger.info("data_pipeline.sync_institutional_bulk.done", fetched=len(rows), written=n)
+        return n
+
     async def sync_company_info(self, symbol: str) -> int:
         """公司基本資料 — TW only。FinMind 只提供產業別/名稱（無資本額/員工數），填可得者。"""
         self._ensure_tw_only(symbol, "公司基本資料")

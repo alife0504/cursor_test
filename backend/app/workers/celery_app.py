@@ -118,9 +118,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.financial.sync_monthly_revenue",
         "schedule": crontab(hour=9, minute=0, day_of_month=11),
     },
-    # TW 三大法人每日 15:00（盤後 1.5 小時）
+    # TW 三大法人每日 15:00（盤後 1.5 小時）—— bulk 全市場（逐檔 fan-out 有 IP ban 風險，
+    # 且 finmind 未涵蓋者落 twse_openapi 會存 0；bulk 一次抓全市場、標準定義聚合）。
     "tw-institutional-daily": {
-        "task": "app.workers.tasks.financial.sync_institutional_tw",
+        "task": "app.workers.tasks.financial.sync_institutional_bulk_tw",
         "schedule": crontab(hour=15, minute=0, day_of_week="mon-fri"),
     },
     # TW 融資融券每日 21:30 —— bulk 全市場，每日一請求（逐檔 fan-out 會 IP ban）。

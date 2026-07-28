@@ -170,6 +170,33 @@ async def get_realtime_futures(
     return envelope_success(payload, trace_id=_trace_id(request))
 
 
+@router.get("/realtime/foreign", summary="海外指數延遲報價（道瓊期貨/那斯達克期貨/費半/韓國/日經）")
+async def get_realtime_foreign(
+    request: Request,
+    _user: User = Depends(get_current_user),
+):
+    """海外 5 指數（yfinance，延遲 ~15 分）。FinMind 無海外即時，故獨立此端點；台股仍走
+    FinMind 真即時。回傳形狀對齊其他 realtime 端點，前端 IndexCard 同一路徑消化。"""
+    from app.data_sources.foreign_realtime import ForeignRealtimeClient
+
+    client = ForeignRealtimeClient(settings)
+    payload = await client.fetch_all()
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
+@router.get("/heatmap", summary="市場板塊熱力圖（產業→個股；即時漲跌＋資金流）")
+async def get_heatmap(
+    request: Request,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """產業分組的 treemap 資料。每檔同時回 chg(即時漲跌%)＋flow(資金流億)＋value(成交值)，
+    前端切換配色免重抓。chg 盤中即時、收盤退 EOD；flow 為三大法人當日淨額(盤後)。"""
+    service = MarketService(session)
+    payload = await service.get_heatmap()
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
 @router.get("/realtime/overview", summary="即時大盤（漲跌家數/總量，盤中；由快照計算）")
 async def get_realtime_overview(
     request: Request,
