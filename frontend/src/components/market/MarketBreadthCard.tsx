@@ -24,7 +24,6 @@ export function MarketBreadthCard({
   const advLen = seg(adv);
   const decLen = seg(dec);
   const uncLen = seg(unc);
-  const advPct = total > 0 ? Math.round((adv / total) * 100) : 0;
 
   const rows: [string, number, string][] = [
     ["上漲", adv, "var(--bull, #e0384b)"],
@@ -59,15 +58,18 @@ export function MarketBreadthCard({
 
         <dl className="flex flex-1 flex-col gap-2.5">
           {rows.map(([label, n, color]) => (
-            <div key={label} className="flex items-center gap-2 text-sm">
-              <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: color }} />
-              <dt className="text-muted-foreground">{label}</dt>
-              <dd className="num ml-auto font-semibold tabular-nums">{n.toLocaleString()}</dd>
+            <div key={label} className="flex items-center gap-2">
+              {/* 色卡（辨識用）＋較小的標籤字 */}
+              <span
+                className="h-3 w-3 shrink-0 rounded-[3px] ring-1 ring-black/5"
+                style={{ background: color }}
+              />
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd className="num ml-auto text-sm font-semibold tabular-nums">
+                {n.toLocaleString()}
+              </dd>
             </div>
           ))}
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-            上漲占 <span className="num font-medium text-bull">{advPct}%</span>
-          </div>
         </dl>
       </div>
 

@@ -302,6 +302,27 @@ export interface RealtimeQuote {
   [k: string]: unknown;
 }
 
+// 盤中即時走勢（對應 backend market_service.get_intraday）
+export interface IntradayPoint {
+  time: string;
+  price: number;
+}
+export interface IntradayResponse {
+  symbol: string;
+  as_of?: string | null;
+  series: IntradayPoint[];
+  current: number | null;
+  change: number | null;
+  change_rate: number | null;
+  prev_close: number | null;
+  high: number | null;
+  low: number | null;
+  limit_up: number | null;
+  limit_down: number | null;
+  has_limit: boolean;
+  [k: string]: unknown;
+}
+
 // 即時大盤（對應 backend market_service.get_realtime_overview）
 export interface RealtimeOverview {
   advance_count: number;

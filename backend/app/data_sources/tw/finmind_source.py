@@ -362,6 +362,53 @@ class FinMindSource(BaseDataSource):
         data = await self._call(**params)
         return [self._normalize_monthly_revenue(row) for row in data]
 
+    # ── 盤中即時走勢序列（供市場總覽的即時走勢圖）────────────
+    async def fetch_index_intraday(self, target_date: date) -> list[dict[str, Any]]:
+        """加權指數盤中 5 秒序列（TaiwanVariousIndicators5Seconds，Free）。單日一請求。
+
+        回 [{"time": "HH:MM:SS", "price": float}]（依時間排序）。
+        """
+        data = await self._call(
+            dataset="TaiwanVariousIndicators5Seconds",
+            start_date=target_date.isoformat(),
+        )
+        out: list[dict[str, Any]] = []
+        for r in data:
+            ts, px = r.get("date"), r.get("TAIEX")
+            if ts is None or px is None:
+                continue
+            out.append({"time": str(ts)[11:19], "price": float(px)})
+        out.sort(key=lambda x: x["time"])
+        return out
+
+    async def fetch_futures_intraday(self, target_date: date) -> list[dict[str, Any]]:
+        """台指期盤中逐筆（TaiwanFuturesTick，data_id=TX＝台指期商品碼；需 Sponsor）。
+
+        取「筆數最多的合約月」（＝主力／近月），只留日盤（08:45 起，與加權指數同時段對齊），
+        回 [{"time": "HH:MM:SS", "price": float}]。降採樣交給 service。
+        """
+        from collections import Counter
+
+        data = await self._call(
+            dataset="TaiwanFuturesTick",
+            data_id="TX",
+            start_date=target_date.isoformat(),
+        )
+        if not data:
+            return []
+        cd = Counter(r.get("contract_date") for r in data if r.get("contract_date"))
+        front = cd.most_common(1)[0][0] if cd else None
+        out: list[dict[str, Any]] = []
+        for r in data:
+            if r.get("contract_date") != front or r.get("price") is None:
+                continue
+            t = str(r.get("date"))[11:19]
+            if t < "08:45:00":  # 只留日盤，與加權指數 09:00–13:30 對齊
+                continue
+            out.append({"time": t, "price": float(r["price"])})
+        out.sort(key=lambda x: x["time"])
+        return out
+
     # ── 內部：統一呼叫 + 鑑別錯誤 ────────────────────────
 
     async def _call(self, **params: Any) -> list[dict[str, Any]]:

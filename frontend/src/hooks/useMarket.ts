@@ -6,6 +6,7 @@ import { api, type ApiEnvelope } from "@/lib/api";
 import type {
   CalendarEvent,
   HeatmapResponse,
+  IntradayResponse,
   MarketOverview,
   MoverRow,
   RealtimeOverview,
@@ -264,6 +265,26 @@ export function useHeatmap(enabled = true) {
     refetchOnMount: "always",
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<HeatmapResponse>>("/market/heatmap");
+      return res.data.data;
+    },
+  });
+}
+
+// 盤中即時走勢（加權指數 5 秒序列 / 台指全逐筆）。加權用日盤時段、台指全用期貨時段判斷輪詢。
+export function useIntraday(symbol: "TAIEX" | "TXF", enabled = true) {
+  return useQuery({
+    queryKey: ["market", "intraday", symbol],
+    enabled,
+    staleTime: REALTIME_POLL_MS - 1_000,
+    refetchInterval: () =>
+      sessionInterval(symbol === "TXF" ? isTwFuturesOpen() : isTwMarketOpen()),
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<IntradayResponse>>(
+        `/market/intraday?symbol=${symbol}`,
+      );
       return res.data.data;
     },
   });

@@ -207,6 +207,19 @@ async def get_heatmap(
     return envelope_success(payload, trace_id=_trace_id(request))
 
 
+@router.get("/intraday", summary="盤中即時走勢序列 + 水位（加權指數 / 台指全）")
+async def get_intraday(
+    request: Request,
+    symbol: str = Query(default="TAIEX", max_length=10, description="TAIEX（加權指數）或 TXF（台指全）"),
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+):
+    """盤中走勢線（加權＝FinMind 5 秒序列、台指全＝逐筆降採樣）＋平盤/漲停/跌停/最高/最低/當下。"""
+    service = MarketService(session)
+    payload = await service.get_intraday(symbol)
+    return envelope_success(payload, trace_id=_trace_id(request))
+
+
 @router.get("/realtime/overview", summary="即時大盤（漲跌家數/總量，盤中；由快照計算）")
 async def get_realtime_overview(
     request: Request,

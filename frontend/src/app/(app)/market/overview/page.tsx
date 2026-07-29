@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { IndexCard } from "@/components/market/IndexCard";
+import { IntradayChart } from "@/components/market/IntradayChart";
 import { MarketBreadthCard } from "@/components/market/MarketBreadthCard";
 import { MarketSwitcher } from "@/components/market/MarketSwitcher";
 import { MoversTable } from "@/components/market/MoversTable";
@@ -14,6 +15,7 @@ import { SectorHeatmap } from "@/components/market/SectorHeatmap";
 import {
   nearMonthFutures,
   useHeatmap,
+  useIntraday,
   useMarketOverview,
   useRealtimeForeign,
   useRealtimeFutures,
@@ -181,6 +183,9 @@ export default function MarketOverviewPage() {
   const rtForeign = useRealtimeForeign(isTW);
   const rtTsmc = useRealtimeStock(["2330"], isTW);
   const heatmap = useHeatmap(isTW);
+  // 盤中即時走勢（加權指數 5 秒序列 / 台指全逐筆）—— 放在漲跌家數分佈右側
+  const intradayTaiex = useIntraday("TAIEX", isTW);
+  const intradayTxf = useIntraday("TXF", isTW);
 
   const indexes = buildIndexCards(
     market,
@@ -254,7 +259,7 @@ export default function MarketOverviewPage() {
         )}
       </section>
 
-      {/* 漲跌家數分佈：自己佔一行，右側預留空白（之後可放其他資料） */}
+      {/* 漲跌家數分佈（左）＋ 加權指數／台指全即時走勢圖（右，佔較大空間、非等寬） */}
       <section className="grid gap-3 lg:grid-cols-3">
         <MarketBreadthCard
           adv={adv}
@@ -266,8 +271,9 @@ export default function MarketOverviewPage() {
           live={breadthLive}
         />
         {isTW ? (
-          <div className="hidden rounded-lg border border-dashed bg-muted/20 lg:col-span-2 lg:flex lg:items-center lg:justify-center">
-            <span className="text-xs text-muted-foreground">此區塊預留 · 之後可放其他資料</span>
+          <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
+            <IntradayChart name="加權指數" data={intradayTaiex.data} isLoading={intradayTaiex.isLoading} />
+            <IntradayChart name="台指全" data={intradayTxf.data} isLoading={intradayTxf.isLoading} />
           </div>
         ) : null}
       </section>
