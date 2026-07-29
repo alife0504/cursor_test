@@ -24,6 +24,8 @@ interface KpiCardProps {
   value: ReactNode;
   /** 漲跌幅或變化值（用 PriceDelta 顯示） */
   delta?: number | string | null;
+  /** 漲跌點數（deltaMode="both" 時與 delta 並陳；PriceDelta 的 delta 欄位） */
+  deltaPts?: number | string | null;
   deltaMode?: "pct" | "raw" | "abs" | "both";
   deltaSuffix?: string;
   /** sparkline 數列 */
@@ -47,6 +49,7 @@ export function KpiCard({
   title,
   value,
   delta,
+  deltaPts,
   deltaMode = "raw",
   deltaSuffix,
   spark,
@@ -111,6 +114,7 @@ export function KpiCard({
           {delta !== undefined && delta !== null ? (
             <PriceDelta
               value={delta}
+              delta={deltaPts}
               mode={deltaMode}
               suffix={deltaSuffix}
               showIcon

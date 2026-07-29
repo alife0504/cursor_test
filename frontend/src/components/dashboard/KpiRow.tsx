@@ -131,23 +131,30 @@ export function KpiRow() {
   // 盤中有即時報價就蓋掉盤後值（每 5 秒更新）；未開通/收盤/取不到時自動退回盤後值。
   const rtQuotes = realtime.data?.available ? (realtime.data.quotes ?? []) : [];
   const rtOf = (sym: string) => rtQuotes.find((q) => q.symbol === sym);
+  const toNum = (v: unknown) => (v != null && v !== "" ? Number(v) : null);
+  // 盤後漲跌「點數」：後端 indices 的 change（對前一交易日收盤的絕對變化）
+  const twseEodPts = toNum(taiexQ?.change);
   const merge = (
     eod: { close: string | null; change: number | string | null },
+    eodPts: number | null,
     sym: string,
   ) => {
     const rt = rtOf(sym);
-    if (rt?.price == null) return { ...eod, live: false };
+    if (rt?.price == null) return { ...eod, changePts: eodPts, live: false };
     return {
       close: Number(rt.price).toLocaleString("en-US", { maximumFractionDigits: 2 }),
-      // delta 語意是「漲跌%」，故用 change_rate 而非 change（點數）
+      // change＝漲跌%（change_rate）、changePts＝漲跌點數（change_price）—— 兩者都要，
+      // 讓儀表板卡片能「點數在前、%在括號」呈現（與市場總覽 IndexCard 一致）。
       change: rt.change_rate != null ? Number(rt.change_rate) : eod.change,
+      changePts: rt.change != null ? Number(rt.change) : eodPts,
       live: true,
     };
   };
 
-  const twseV = merge(twse, "TAIEX");
+  const twseV = merge(twse, twseEodPts, "TAIEX");
   const twseClose = twseV.close;
   const twseChange = twseV.change;
+  const twseChangePts = twseV.changePts;
 
   // 台指全（TXF 近月連續合約）。期貨無盤後 OHLCV 序列，故無 sparkline、也無退回值：
   // 取不到即顯示「—」並在小標說明狀態。
@@ -160,6 +167,8 @@ export function KpiRow() {
       : null;
   const futChange =
     futQuote?.change_rate != null ? Number(futQuote.change_rate) : null;
+  // 台指全漲跌點數（change_price）
+  const futChangePts = futQuote?.change != null ? Number(futQuote.change) : null;
   const futAt = rtFutures.data?.as_of?.slice(11, 19) ?? null;
 
   // 即時時間標記（只取 HH:MM:SS）
@@ -182,7 +191,8 @@ export function KpiRow() {
         title="加權指數"
         value={twseClose !== null ? String(twseClose) : "—"}
         delta={twseChange}
-        deltaMode="raw"
+        deltaPts={twseChangePts}
+        deltaMode="both"
         spark={twseSpark}
         icon={TrendingUp}
         subtitle={
@@ -204,7 +214,8 @@ export function KpiRow() {
         title="台指全"
         value={futClose !== null ? String(futClose) : "—"}
         delta={futChange}
-        deltaMode="raw"
+        deltaPts={futChangePts}
+        deltaMode="both"
         icon={TrendingUp}
         subtitle={
           futClose !== null && futAt

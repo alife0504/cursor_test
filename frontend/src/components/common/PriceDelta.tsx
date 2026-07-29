@@ -54,10 +54,53 @@ export function PriceDelta({
   const deltaN = toNumber(delta);
   const t = tone(raw);
 
-  const sufDefault = mode === "pct" || mode === "raw" || mode === "both" ? "%" : "";
+  // "both"：漲跌「點數」在前（醒目）、百分比在括號內——與市場總覽 IndexCard 一致，
+  // 讓人一眼看出漲跌幾點，而非只有百分比。value=百分比、delta=點數。
+  if (mode === "both") {
+    const bt = tone(deltaN ?? raw);
+    const sgn = (n: number | null) => (n === null ? "" : n > 0 ? "+" : n < 0 ? "−" : "");
+    const pctDec = decimals ?? 2;
+    const ptsTxt =
+      deltaN === null
+        ? "—"
+        : `${showSign ? sgn(deltaN) : ""}${prefix}${Math.abs(deltaN).toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}${suffix ?? ""}`;
+    return (
+      <span
+        data-tone={bt}
+        className={cn(
+          "inline-flex items-center gap-1 num text-sm font-medium",
+          bt === "bull" && "text-bull",
+          bt === "bear" && "text-bear",
+          bt === "flat" && "text-flat",
+          className,
+        )}
+      >
+        {showIcon ? (
+          bt === "bull" ? (
+            <TrendingUp className="h-3.5 w-3.5" aria-hidden />
+          ) : bt === "bear" ? (
+            <TrendingDown className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Minus className="h-3.5 w-3.5" aria-hidden />
+          )
+        ) : null}
+        <span>{ptsTxt}</span>
+        {raw !== null ? (
+          <span className="text-[0.92em] opacity-90">
+            ({sgn(raw)}
+            {Math.abs(raw).toFixed(pctDec)}%)
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+
+  const sufDefault = mode === "pct" || mode === "raw" ? "%" : "";
   const sf = suffix ?? sufDefault;
-  const dec =
-    decimals ?? (mode === "pct" || mode === "raw" || mode === "both" ? 2 : 0);
+  const dec = decimals ?? (mode === "pct" || mode === "raw" ? 2 : 0);
 
   const displayN =
     raw === null ? null : mode === "pct" ? raw * 100 : raw;
@@ -91,12 +134,6 @@ export function PriceDelta({
         {showSign ? sign : ""}
         {numTxt}
       </span>
-      {mode === "both" && deltaN !== null ? (
-        <span className="text-xs text-muted-foreground">
-          ({deltaN > 0 ? "+" : deltaN < 0 ? "−" : ""}
-          {Math.abs(deltaN).toFixed(dec)})
-        </span>
-      ) : null}
     </span>
   );
 }

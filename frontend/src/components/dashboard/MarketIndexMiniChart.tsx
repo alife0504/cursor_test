@@ -87,6 +87,16 @@ export function MarketIndexMiniChart() {
         (series.length >= 2 && series[0] !== 0
           ? ((series[series.length - 1] - series[0]) / series[0]) * 100
           : null));
+  // 漲跌「點數」，來源優先序對齊 idxChange：即時 change_price > 後端 indices change >
+  // OHLCV 序列首尾差（對應所選 N 日）。讓卡片能「點數在前、%在括號」。
+  const idxChangePts: number | null =
+    rtTaiex?.change != null
+      ? Number(rtTaiex.change)
+      : taiexQuote?.change != null && taiexQuote.change !== ""
+        ? Number(taiexQuote.change)
+        : series.length >= 2
+          ? series[series.length - 1] - series[0]
+          : null;
 
   const tone =
     idxChange !== null && Number(idxChange) > 0
@@ -144,7 +154,8 @@ export function MarketIndexMiniChart() {
           </p>
           <PriceDelta
             value={idxChange}
-            mode="raw"
+            delta={idxChangePts}
+            mode="both"
             className="mt-1 text-sm"
           />
         </div>

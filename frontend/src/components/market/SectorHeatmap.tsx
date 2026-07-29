@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { cn } from "@/lib/utils";
@@ -8,20 +8,103 @@ import type { HeatmapResponse } from "@/lib/api-types";
 
 type Mode = "chg" | "flow";
 
-// 每產業最多顯示檔數；每格最低高度（px）——設地板保證「名稱＋代號＋漲跌%」都看得清楚，
-// 巨頭（如台積電）再大也不會把同欄小格壓成看不見的細條。
-const TOP_N = 12;
-const MIN_TILE_H = 44;
-// 最多顯示幾大產業。欄寬＝成交值比例（flex-grow），需要留白給 grow 才能讓大產業真的更寬；
-// 欄數太多會全部卡在 min-width、爆版橫向捲動、變成等寬窄條（就是「擠在一起」）。
-// 10 欄在 ~960px 容器有足夠留白 → 半導體等大產業明顯更寬，treemap 比例才讀得出來。
-const MAX_INDUSTRIES = 10;
-const MIN_COL_W = 66;
-// 面積權重壓縮：台積電等成交值極大的個股（接近全市場一大塊）會照真實比例霸佔整張圖，
-// 又寬又長。用 0.6 次方壓縮 → 保留「越大＝成交越熱」的大小順序，但讓巨頭不過度膨脹、
-// 中小格更好讀。純視覺；tooltip 與數字標籤仍顯示「真實成交值」。
-const SIZE_EXP = 0.6;
+// 面積權重壓縮：台積電等成交值極大者照真實面積會過度膨脹。用 0.8 次方輕度壓縮 →
+// 保留「越大＝成交越熱」的順序，但巨頭不霸佔整張圖、中小格更好讀。
+// （squarified treemap 本身已把巨頭排成接近正方而非超寬長條，故只需輕壓。）
+// 純視覺；tooltip 與標籤仍顯示真實成交值。
+const SIZE_EXP = 0.8;
 const sizeWeight = (v: number) => (v > 0 ? v ** SIZE_EXP : 0);
+
+/** 依容器寬度自適應：越寬顯示越多產業／個股，越窄自動精簡（響應式）。 */
+function layoutParams(w: number): { maxInd: number; topPer: number } {
+  if (w >= 1200) return { maxInd: 12, topPer: 16 };
+  if (w >= 900) return { maxInd: 11, topPer: 14 };
+  if (w >= 680) return { maxInd: 9, topPer: 12 };
+  if (w >= 480) return { maxInd: 7, topPer: 10 };
+  return { maxInd: 5, topPer: 8 };
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Squarified treemap（Bruls/Huizing/van Wijk）：把 items 依權重鋪滿矩形，
+ * 每格盡量接近正方形——這正是「左寬右擠」一維切欄的解法，巨頭變大方塊而非超寬長條。
+ * 回傳每個 item 加上 {x,y,w,h}（像素）。
+ */
+function squarify<T>(
+  items: T[],
+  rect: Rect,
+  valueOf: (item: T) => number,
+): Array<T & Rect> {
+  const vals = items.map(valueOf);
+  const total = vals.reduce((a, b) => a + b, 0);
+  if (!(total > 0) || !(rect.w > 0) || !(rect.h > 0) || items.length === 0) {
+    return [];
+  }
+  const scale = (rect.w * rect.h) / total;
+  const nodes = items.map((it, k) => ({ it, area: vals[k] * scale }));
+
+  const out: Array<T & Rect> = [];
+  let { x, y, w, h } = rect;
+  let idx = 0;
+
+  const worst = (row: { area: number }[], side: number): number => {
+    let s = 0;
+    let mx = -Infinity;
+    let mn = Infinity;
+    for (const r of row) {
+      s += r.area;
+      if (r.area > mx) mx = r.area;
+      if (r.area < mn) mn = r.area;
+    }
+    const s2 = s * s;
+    const side2 = side * side;
+    return Math.max((side2 * mx) / s2, s2 / (side2 * mn));
+  };
+
+  while (idx < nodes.length) {
+    const side = Math.min(w, h);
+    const row: { it: T; area: number }[] = [];
+    while (idx < nodes.length) {
+      const cand = row.concat(nodes[idx]);
+      if (row.length === 0 || worst(cand, side) <= worst(row, side)) {
+        row.push(nodes[idx]);
+        idx++;
+      } else {
+        break;
+      }
+    }
+    const rowArea = row.reduce((a, r) => a + r.area, 0);
+    const thick = rowArea / side;
+    if (w >= h) {
+      // 短邊是 h → 這一列排成一直行（寬 thick、沿高度 h 疊）
+      let cy = y;
+      for (const r of row) {
+        const rh = r.area / thick;
+        out.push({ ...(r.it as T), x, y: cy, w: thick, h: rh });
+        cy += rh;
+      }
+      x += thick;
+      w -= thick;
+    } else {
+      // 短邊是 w → 這一列排成一橫帶（高 thick、沿寬度 w 排）
+      let cx = x;
+      for (const r of row) {
+        const rw = r.area / thick;
+        out.push({ ...(r.it as T), x: cx, y, w: rw, h: thick });
+        cx += rw;
+      }
+      y += thick;
+      h -= thick;
+    }
+  }
+  return out;
+}
 
 /** 熱力圖配色（紅漲綠跌）。chg：%，±3% 到滿色；flow：億，±30 億到滿色。 */
 function heatColor(v: number, mode: Mode): string {
@@ -40,6 +123,20 @@ function fmtYi(n: number): string {
   return `${(n / 1e8).toLocaleString("en-US", { maximumFractionDigits: 0 })} 億`;
 }
 
+interface HeatStock {
+  symbol: string;
+  name: string;
+  chg: number;
+  flow: number;
+  value: number;
+}
+interface HeatIndustry {
+  name: string;
+  value: number;
+  flow_total: number;
+  stocks: HeatStock[];
+}
+
 export function SectorHeatmap({
   data,
   isLoading,
@@ -49,19 +146,60 @@ export function SectorHeatmap({
 }) {
   const [mode, setMode] = useState<Mode>("chg");
 
-  const industries = useMemo(() => {
-    const list = data?.industries ?? [];
-    // 直欄並排（產業當欄、股票欄內垂直疊）；欄寬／格高以成交值為權重（兩模式一致 →
-    // 切換時格子不跳，只換配色/標籤）。取前 N 大產業，欄少才寬、比例才讀得出來。
-    return list.filter((i) => i.value > 0 && i.stocks.length > 0).slice(0, MAX_INDUSTRIES);
-  }, [data]);
+  // 量測容器寬度（響應式）：用 callback ref → 節點掛上（含資料載入後才渲染）即 observe，
+  // 並立即量一次；只在寬度真的變才更新，避免重繪迴圈。
+  // （用 useEffect([]) 會在資料未載入、board 尚未渲染時就跑掉且不重跑 → 永遠量不到寬度。）
+  // 另掛 window resize 後備，確保拖曳縮放也即時重排。
+  const roRef = useRef<ResizeObserver | null>(null);
+  const elRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  const measure = useCallback(() => {
+    const el = elRef.current;
+    if (!el) return;
+    const w = Math.round(el.getBoundingClientRect().width);
+    if (w > 0) setWidth((prev) => (prev === w ? prev : w));
+  }, []);
+  const setBoxRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      roRef.current?.disconnect();
+      roRef.current = null;
+      elRef.current = el;
+      if (!el || typeof ResizeObserver === "undefined") return;
+      const ro = new ResizeObserver(() => measure());
+      ro.observe(el);
+      roRef.current = ro;
+      measure();
+    },
+    [measure],
+  );
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
 
-  // 板塊圖總高＝隨「最擠的那一欄檔數」往下延伸，讓每格都有 ~64px 呼吸空間、且不低於地板。
-  // 這樣值小的個股也能完整顯示名稱與漲跌%，而非被壓成細條。
-  const boardH = useMemo(() => {
-    const maxTiles = industries.reduce((m, i) => Math.max(m, Math.min(i.stocks.length, TOP_N)), 1);
-    return Math.min(1120, Math.max(560, maxTiles * 64 + 8));
-  }, [industries]);
+  // 高度隨寬度自適應（約 16:8.3），夾在 380～720px。
+  const boardH = width <= 0 ? 460 : Math.round(Math.min(720, Math.max(380, width * 0.52)));
+
+  const layout = useMemo(() => {
+    const W = width;
+    const H = boardH;
+    if (W <= 0 || H <= 0) return { tiles: [] as Array<HeatStock & Rect>, groups: [] as Array<{ name: string } & Rect> };
+    const p = layoutParams(W);
+    const inds = ((data?.industries ?? []) as HeatIndustry[])
+      .filter((i) => i.value > 0 && i.stocks.length > 0)
+      .slice(0, p.maxInd);
+    const outer = squarify(inds, { x: 0, y: 0, w: W, h: H }, (i) => sizeWeight(i.value));
+
+    const tiles: Array<HeatStock & Rect> = [];
+    const groups: Array<{ name: string } & Rect> = [];
+    for (const g of outer) {
+      groups.push({ name: g.name, x: g.x, y: g.y, w: g.w, h: g.h });
+      const stocks = g.stocks.slice(0, p.topPer);
+      const inner = squarify(stocks, { x: g.x, y: g.y, w: g.w, h: g.h }, (s) => sizeWeight(s.value));
+      for (const t of inner) tiles.push(t);
+    }
+    return { tiles, groups };
+  }, [data, width, boardH]);
 
   const liveLabel =
     mode === "flow"
@@ -69,6 +207,8 @@ export function SectorHeatmap({
       : data?.realtime
         ? "即時 · 每 5 秒更新"
         : "收盤";
+
+  const hasData = (data?.industries ?? []).length > 0;
 
   return (
     <section className="rounded-lg border bg-card">
@@ -101,66 +241,76 @@ export function SectorHeatmap({
       <div className="p-2.5">
         {isLoading && !data ? (
           <LoadingSkeleton rows={6} />
-        ) : industries.length === 0 ? (
+        ) : !hasData ? (
           <div className="flex h-[420px] items-center justify-center text-sm text-muted-foreground">
             尚無板塊資料
           </div>
         ) : (
-          <div className="flex gap-[4px] overflow-x-auto" style={{ height: boardH }}>
-            {industries.map((ind) => (
+          <div ref={setBoxRef} className="relative w-full overflow-hidden" style={{ height: boardH }}>
+            {/* 個股方塊（squarified，接近正方；大小＝成交值、顏色＝漲跌/資金流） */}
+            {layout.tiles.map((t) => {
+              const v = mode === "chg" ? t.chg : t.flow;
+              const tw = Math.max(0, t.w - 2);
+              const th = Math.max(0, t.h - 2);
+              const showName = tw >= 38 && th >= 26;
+              const showMeta = tw >= 50 && th >= 42;
+              return (
+                <div
+                  key={t.symbol}
+                  className="absolute flex flex-col justify-center overflow-hidden rounded-[3px] text-white"
+                  style={{ left: t.x, top: t.y, width: tw, height: th, background: heatColor(v, mode) }}
+                  title={`${t.symbol} ${t.name}｜漲跌 ${fmtMetric(t.chg, "chg")}｜資金流 ${fmtMetric(t.flow, "flow")}｜成交值 ${fmtYi(t.value)}`}
+                >
+                  {showName ? (
+                    <div className="truncate px-1 text-[12px] font-bold leading-none">{t.name}</div>
+                  ) : null}
+                  {showMeta ? (
+                    <div className="mt-1 flex items-center justify-between gap-1 px-1 text-[10px] leading-none opacity-95">
+                      <span className="num tabular-nums">{t.symbol}</span>
+                      <span className="num font-bold tabular-nums">{fmtMetric(v, mode)}</span>
+                    </div>
+                  ) : showName ? (
+                    <div className="num px-1 text-[10px] leading-none opacity-90">{fmtMetric(v, mode)}</div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {/* 產業框線（淡）＋ 產業名標籤（左上角小片，overlay） */}
+            {layout.groups.map((g) => (
               <div
-                key={ind.name}
-                className="flex flex-col overflow-hidden"
-                style={{ flex: sizeWeight(ind.value), minWidth: MIN_COL_W }}
-              >
-                <div className="px-1 pb-1" title={ind.name} style={{ minHeight: 34 }}>
-                  {/* 產業名獨立整行、最多折兩行完整顯示（不再被成交值擠成一個字）；hover 看全名 */}
-                  <div
-                    className="break-all text-[11px] font-semibold leading-[1.15] text-foreground/90"
-                    style={{
-                      display: "-webkit-box",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {ind.name}
-                  </div>
-                  <div className="num tabular-nums text-[9.5px] text-muted-foreground">
-                    {mode === "flow"
-                      ? `${ind.flow_total > 0 ? "+" : ind.flow_total < 0 ? "−" : ""}${Math.abs(ind.flow_total).toFixed(1)}億`
-                      : fmtYi(ind.value)}
-                  </div>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col gap-[3px]">
-                  {ind.stocks.slice(0, TOP_N).map((s) => {
-                    const v = mode === "chg" ? s.chg : s.flow;
-                    return (
-                      <div
-                        key={s.symbol}
-                        className="flex min-h-0 flex-col justify-center overflow-hidden rounded-md px-2 py-1 text-white"
-                        style={{ flex: sizeWeight(s.value), minHeight: MIN_TILE_H, background: heatColor(v, mode) }}
-                        title={`${s.symbol} ${s.name}｜漲跌 ${fmtMetric(s.chg, "chg")}｜資金流 ${fmtMetric(s.flow, "flow")}｜成交值 ${fmtYi(s.value)}`}
-                      >
-                        {/* 完整中文名稱（FinMind）；min-height 地板保證整名＋代號＋漲跌%都放得下 */}
-                        <div className="truncate text-[13px] font-bold leading-tight">{s.name}</div>
-                        <div className="mt-0.5 flex items-center justify-between gap-1 text-[11px] leading-tight opacity-95">
-                          <span className="num tabular-nums">{s.symbol}</span>
-                          <span className="num font-bold tabular-nums">{fmtMetric(v, mode)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+                key={`b-${g.name}`}
+                aria-hidden
+                className="pointer-events-none absolute rounded-[3px]"
+                style={{
+                  left: g.x,
+                  top: g.y,
+                  width: g.w,
+                  height: g.h,
+                  boxShadow: "inset 0 0 0 1.5px rgba(0,0,0,0.22)",
+                }}
+              />
             ))}
+            {layout.groups.map((g) =>
+              g.w >= 52 && g.h >= 20 ? (
+                <div
+                  key={`l-${g.name}`}
+                  aria-hidden
+                  className="pointer-events-none absolute"
+                  style={{ left: g.x + 2, top: g.y + 2, maxWidth: g.w - 4 }}
+                >
+                  <span className="inline-block max-w-full truncate rounded bg-black/35 px-1 text-[10px] font-semibold text-white">
+                    {g.name}
+                  </span>
+                </div>
+              ) : null,
+            )}
           </div>
         )}
       </div>
 
       {/* 圖例：flex-wrap → 寬度夠一行、太窄自動往下折。大小＝成交值、顏色＝漲跌/資金流。 */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t px-4 py-2.5 text-[11px] text-muted-foreground">
-        {/* 大小圖例：小→大方塊，示意「面積＝成交值」 */}
         <div className="flex items-center gap-1.5">
           <span className="inline-flex items-end gap-[3px]" aria-hidden>
             <span className="inline-block shrink-0 rounded-[2px] bg-muted-foreground/40" style={{ width: 7, height: 7 }} />
@@ -169,8 +319,6 @@ export function SectorHeatmap({
           </span>
           <span className="shrink-0">格子越大＝成交值越高（資金越集中）</span>
         </div>
-
-        {/* 顏色圖例：綠→灰→紅漸層條，標籤隨模式切換 */}
         <div className="flex items-center gap-1.5">
           <span className="shrink-0">{mode === "chg" ? "跌" : "賣超"}</span>
           <span
@@ -184,7 +332,6 @@ export function SectorHeatmap({
             {mode === "chg" ? "（±3% 到最濃）" : "（±30 億到最濃）"}
           </span>
         </div>
-
         <span className="ml-auto shrink-0">{liveLabel}</span>
       </div>
     </section>
