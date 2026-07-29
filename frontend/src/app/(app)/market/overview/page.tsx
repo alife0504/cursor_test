@@ -259,8 +259,8 @@ export default function MarketOverviewPage() {
         )}
       </section>
 
-      {/* 漲跌家數分佈（左）＋ 加權指數／台指全即時走勢圖（右，佔較大空間、非等寬） */}
-      <section className="grid gap-3 lg:grid-cols-3">
+      {/* 漲跌家數分佈（左，寬度＝上方指數卡 1/4）＋ 加權指數／台指全走勢圖（右 3/4，各一半、等高撐滿） */}
+      <section className="grid items-stretch gap-3 lg:grid-cols-4">
         <MarketBreadthCard
           adv={adv}
           dec={dec}
@@ -271,7 +271,7 @@ export default function MarketOverviewPage() {
           live={breadthLive}
         />
         {isTW ? (
-          <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:col-span-3">
             <IntradayChart name="加權指數" data={intradayTaiex.data} isLoading={intradayTaiex.isLoading} />
             <IntradayChart name="台指全" data={intradayTxf.data} isLoading={intradayTxf.isLoading} />
           </div>

@@ -40,9 +40,9 @@ export function MarketBreadthCard({
         </span>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="relative h-[128px] w-[128px] shrink-0">
-          <svg viewBox="0 0 120 120" className="h-[128px] w-[128px]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="relative h-[124px] w-[124px] shrink-0">
+          <svg viewBox="0 0 120 120" className="h-[124px] w-[124px]">
             <circle cx="60" cy="60" r="52" fill="none" stroke="hsl(var(--muted))" strokeWidth="14" />
             <g transform="rotate(-90 60 60)" fill="none" strokeWidth="14">
               <circle cx="60" cy="60" r="52" stroke="hsl(var(--bull))" strokeDasharray={`${advLen} ${C}`} />
@@ -56,7 +56,7 @@ export function MarketBreadthCard({
           </div>
         </div>
 
-        <dl className="flex flex-1 flex-col gap-2.5">
+        <dl className="flex w-full flex-col gap-2">
           {rows.map(([label, n, color]) => (
             <div key={label} className="flex items-center gap-2">
               {/* 色卡（辨識用）＋較小的標籤字 */}
