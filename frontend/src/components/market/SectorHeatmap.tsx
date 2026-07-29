@@ -15,14 +15,13 @@ type Mode = "chg" | "flow";
 const SIZE_EXP = 0.8;
 const sizeWeight = (v: number) => (v > 0 ? v ** SIZE_EXP : 0);
 
-/** 依容器寬度自適應：越寬顯示越多產業／個股，越窄自動精簡（響應式）。 */
-function layoutParams(w: number): { maxInd: number; topPer: number } {
-  if (w >= 1200) return { maxInd: 12, topPer: 16 };
-  if (w >= 900) return { maxInd: 11, topPer: 14 };
-  if (w >= 680) return { maxInd: 9, topPer: 12 };
-  if (w >= 480) return { maxInd: 7, topPer: 10 };
-  return { maxInd: 5, topPer: 8 };
-}
+// 顯示的產業數／每產業檔數：固定（完整內容不因螢幕小而縮減）。
+const MAX_INDUSTRIES = 12;
+const TOP_PER = 14;
+// 最小畫布尺寸：容器比它小時出現捲軸（左右／上下拖曳），而非把格子縮到看不清。
+// 容器比它大時畫布填滿容器（格子隨之放大）。
+const MIN_CANVAS_W = 860;
+const MIN_CANVAS_H = 470;
 
 interface Rect {
   x: number;
@@ -152,12 +151,19 @@ export function SectorHeatmap({
   // 另掛 window resize 後備，確保拖曳縮放也即時重排。
   const roRef = useRef<ResizeObserver | null>(null);
   const elRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
+  // 量捲動視窗的「可視內容區」大小（clientWidth/Height 已排除捲軸與邊框）。
+  const [view, setView] = useState({ w: 0, h: 0 });
   const measure = useCallback(() => {
     const el = elRef.current;
     if (!el) return;
-    const w = Math.round(el.getBoundingClientRect().width);
-    if (w > 0) setWidth((prev) => (prev === w ? prev : w));
+    // 以 clientWidth/Height（內容區、已排除捲軸）為主 → 避免出現捲軸時內容區被吃掉又觸發
+    // 另一方向的多餘捲軸；mount 時機 client 可能回 0，退回 getBoundingClientRect（會強制 reflow）。
+    const r = el.getBoundingClientRect();
+    const w = el.clientWidth || Math.round(r.width);
+    const h = el.clientHeight || Math.round(r.height);
+    if (w > 0 && h > 0) {
+      setView((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    }
   }, []);
   const setBoxRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -169,6 +175,8 @@ export function SectorHeatmap({
       ro.observe(el);
       roRef.current = ro;
       measure();
+      // 再於下一影格補量一次（mount 當下版面可能尚未完成）。
+      if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(measure);
     },
     [measure],
   );
@@ -177,29 +185,29 @@ export function SectorHeatmap({
     return () => window.removeEventListener("resize", measure);
   }, [measure]);
 
-  // 高度隨寬度自適應（約 16:8.3），夾在 380～720px。
-  const boardH = width <= 0 ? 460 : Math.round(Math.min(720, Math.max(380, width * 0.52)));
+  // 畫布尺寸＝視窗與最小尺寸取大者：夠大就填滿（格子放大）、不夠就出現捲軸可拖曳看完整。
+  const canvasW = Math.max(view.w || 0, MIN_CANVAS_W);
+  const canvasH = Math.max(view.h || 0, MIN_CANVAS_H);
 
   const layout = useMemo(() => {
-    const W = width;
-    const H = boardH;
+    const W = canvasW;
+    const H = canvasH;
     if (W <= 0 || H <= 0) return { tiles: [] as Array<HeatStock & Rect>, groups: [] as Array<{ name: string } & Rect> };
-    const p = layoutParams(W);
     const inds = ((data?.industries ?? []) as HeatIndustry[])
       .filter((i) => i.value > 0 && i.stocks.length > 0)
-      .slice(0, p.maxInd);
+      .slice(0, MAX_INDUSTRIES);
     const outer = squarify(inds, { x: 0, y: 0, w: W, h: H }, (i) => sizeWeight(i.value));
 
     const tiles: Array<HeatStock & Rect> = [];
     const groups: Array<{ name: string } & Rect> = [];
     for (const g of outer) {
       groups.push({ name: g.name, x: g.x, y: g.y, w: g.w, h: g.h });
-      const stocks = g.stocks.slice(0, p.topPer);
+      const stocks = g.stocks.slice(0, TOP_PER);
       const inner = squarify(stocks, { x: g.x, y: g.y, w: g.w, h: g.h }, (s) => sizeWeight(s.value));
       for (const t of inner) tiles.push(t);
     }
     return { tiles, groups };
-  }, [data, width, boardH]);
+  }, [data, canvasW, canvasH]);
 
   const liveLabel =
     mode === "flow"
@@ -246,7 +254,13 @@ export function SectorHeatmap({
             尚無板塊資料
           </div>
         ) : (
-          <div ref={setBoxRef} className="relative w-full overflow-hidden" style={{ height: boardH }}>
+          <div
+            ref={setBoxRef}
+            className="overflow-auto rounded-md bg-muted/10 ring-1 ring-inset ring-border"
+            style={{ height: "clamp(380px, 60vh, 680px)" }}
+          >
+            {/* 畫布：夠大就填滿容器、不夠就比容器大 → 外層 overflow-auto 出現左右／上下拖曳bar */}
+            <div className="relative" style={{ width: canvasW, height: canvasH }}>
             {/* 個股方塊（squarified，接近正方；大小＝成交值、顏色＝漲跌/資金流） */}
             {layout.tiles.map((t) => {
               const v = mode === "chg" ? t.chg : t.flow;
@@ -305,6 +319,7 @@ export function SectorHeatmap({
                 </div>
               ) : null,
             )}
+            </div>
           </div>
         )}
       </div>
