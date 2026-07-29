@@ -25,10 +25,12 @@ export function MarketBreadthCard({
   const decLen = seg(dec);
   const uncLen = seg(unc);
 
+  // 色卡顏色要用 hsl(var(--x))——globals.css 的 --bull/--bear/--flat 是 HSL 三元組（如 0 75% 50%），
+  // 直接 var(--bull) 當 background 是無效值 → 色卡不顯色。與甜甜圈同一種寫法才會有顏色。
   const rows: [string, number, string][] = [
-    ["上漲", adv, "var(--bull, #e0384b)"],
-    ["下跌", dec, "var(--bear, #0f9d63)"],
-    ["平盤", unc, "var(--flat, #94a1b2)"],
+    ["上漲", adv, "hsl(var(--bull))"],
+    ["下跌", dec, "hsl(var(--bear))"],
+    ["平盤", unc, "hsl(var(--flat))"],
   ];
 
   return (
@@ -41,8 +43,8 @@ export function MarketBreadthCard({
       </div>
 
       <div className="flex flex-col items-center gap-3">
-        <div className="relative h-[124px] w-[124px] shrink-0">
-          <svg viewBox="0 0 120 120" className="h-[124px] w-[124px]">
+        <div className="relative h-[152px] w-[152px] shrink-0">
+          <svg viewBox="0 0 120 120" className="h-[152px] w-[152px]">
             <circle cx="60" cy="60" r="52" fill="none" stroke="hsl(var(--muted))" strokeWidth="14" />
             <g transform="rotate(-90 60 60)" fill="none" strokeWidth="14">
               <circle cx="60" cy="60" r="52" stroke="hsl(var(--bull))" strokeDasharray={`${advLen} ${C}`} />
