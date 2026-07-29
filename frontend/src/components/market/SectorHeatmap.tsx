@@ -8,20 +8,20 @@ import type { HeatmapResponse } from "@/lib/api-types";
 
 type Mode = "chg" | "flow";
 
-// 面積權重壓縮：台積電等成交值極大者照真實面積會過度膨脹。用 0.8 次方輕度壓縮 →
-// 保留「越大＝成交越熱」的順序，但巨頭不霸佔整張圖、中小格更好讀。
-// （squarified treemap 本身已把巨頭排成接近正方而非超寬長條，故只需輕壓。）
-// 純視覺；tooltip 與標籤仍顯示真實成交值。
-const SIZE_EXP = 0.8;
+// 面積權重壓縮：0.5 次方（平方根）大幅壓縮斜度，讓格子接近平均 → 每格都夠大放得下字，
+// 不會有巨頭旁的細小格。保留「越大＝成交越熱」的順序；純視覺，tooltip/標籤仍為真實成交值。
+const SIZE_EXP = 0.5;
 const sizeWeight = (v: number) => (v > 0 ? v ** SIZE_EXP : 0);
 
-// 顯示的產業數／每產業檔數：固定（完整內容不因螢幕小而縮減）。
-const MAX_INDUSTRIES = 12;
-const TOP_PER = 14;
-// 最小畫布尺寸：容器比它小時出現捲軸（左右／上下拖曳），而非把格子縮到看不清。
-// 容器比它大時畫布填滿容器（格子隨之放大）。
-const MIN_CANVAS_W = 860;
-const MIN_CANVAS_H = 470;
+// 產業數上限；每產業檔數上限（實際檔數依該產業分到的面積動態決定，小產業少放、每檔才夠大）。
+const MAX_INDUSTRIES = 9;
+const TOP_PER = 8;
+// 每格最小可讀面積（px²）：產業依 rect 面積 / 此值 決定放幾檔，確保每格夠大放得下名稱。
+const MIN_TILE_AREA = 3200;
+// 最小畫布尺寸（桌面級）：容器比它小時出現捲軸（左右／上下拖曳），畫布維持這個尺寸 →
+// 任何螢幕上格子大小一致、都夠大放得下字。容器比它大時畫布填滿容器（格子隨之放大）。
+const MIN_CANVAS_W = 960;
+const MIN_CANVAS_H = 480;
 
 interface Rect {
   x: number;
@@ -174,9 +174,17 @@ export function SectorHeatmap({
       const ro = new ResizeObserver(() => measure());
       ro.observe(el);
       roRef.current = ro;
-      measure();
-      // 再於下一影格補量一次（mount 當下版面可能尚未完成）。
-      if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(measure);
+      // 反覆量測直到取得非零寬度：mount 當下版面可能尚未完成，此瀏覽器初次量測常回 0。
+      let tries = 0;
+      const attempt = () => {
+        measure();
+        const cur = elRef.current;
+        const w = cur ? cur.clientWidth || cur.getBoundingClientRect().width : 0;
+        if (w <= 0 && tries++ < 20 && typeof requestAnimationFrame !== "undefined") {
+          requestAnimationFrame(attempt);
+        }
+      };
+      attempt();
     },
     [measure],
   );
@@ -202,7 +210,9 @@ export function SectorHeatmap({
     const groups: Array<{ name: string } & Rect> = [];
     for (const g of outer) {
       groups.push({ name: g.name, x: g.x, y: g.y, w: g.w, h: g.h });
-      const stocks = g.stocks.slice(0, TOP_PER);
+      // 依該產業分到的面積決定放幾檔：小產業少放、每檔才夠大放得下名稱。
+      const cap = Math.max(1, Math.min(TOP_PER, Math.floor((g.w * g.h) / MIN_TILE_AREA)));
+      const stocks = g.stocks.slice(0, cap);
       const inner = squarify(stocks, { x: g.x, y: g.y, w: g.w, h: g.h }, (s) => sizeWeight(s.value));
       for (const t of inner) tiles.push(t);
     }
@@ -266,25 +276,33 @@ export function SectorHeatmap({
               const v = mode === "chg" ? t.chg : t.flow;
               const tw = Math.max(0, t.w - 2);
               const th = Math.max(0, t.h - 2);
-              const showName = tw >= 38 && th >= 26;
-              const showMeta = tw >= 50 && th >= 42;
+              // 一律顯示股票名稱（至少「有字」）；夠高再加漲跌%；再夠大才加代號那一行。
+              const showPct = th >= 28;
+              const showMeta = tw >= 52 && th >= 40;
+              // 名稱字級隨格子大小微調，太小的格子字也縮小才塞得下。
+              const nameSize = tw >= 64 && th >= 40 ? 13 : tw >= 44 ? 12 : 10;
               return (
                 <div
                   key={t.symbol}
-                  className="absolute flex flex-col justify-center overflow-hidden rounded-[3px] text-white"
+                  className="absolute flex flex-col justify-center overflow-hidden rounded-[3px] px-1 text-white"
                   style={{ left: t.x, top: t.y, width: tw, height: th, background: heatColor(v, mode) }}
                   title={`${t.symbol} ${t.name}｜漲跌 ${fmtMetric(t.chg, "chg")}｜資金流 ${fmtMetric(t.flow, "flow")}｜成交值 ${fmtYi(t.value)}`}
                 >
-                  {showName ? (
-                    <div className="truncate px-1 text-[12px] font-bold leading-none">{t.name}</div>
-                  ) : null}
+                  <div
+                    className="truncate font-bold leading-none"
+                    style={{ fontSize: nameSize }}
+                  >
+                    {t.name}
+                  </div>
                   {showMeta ? (
-                    <div className="mt-1 flex items-center justify-between gap-1 px-1 text-[10px] leading-none opacity-95">
+                    <div className="mt-0.5 flex items-center justify-between gap-1 text-[10px] leading-none opacity-95">
                       <span className="num tabular-nums">{t.symbol}</span>
                       <span className="num font-bold tabular-nums">{fmtMetric(v, mode)}</span>
                     </div>
-                  ) : showName ? (
-                    <div className="num px-1 text-[10px] leading-none opacity-90">{fmtMetric(v, mode)}</div>
+                  ) : showPct ? (
+                    <div className="num mt-0.5 truncate text-[10px] leading-none opacity-90">
+                      {fmtMetric(v, mode)}
+                    </div>
                   ) : null}
                 </div>
               );
