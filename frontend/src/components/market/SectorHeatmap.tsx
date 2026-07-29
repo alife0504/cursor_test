@@ -8,16 +8,17 @@ import type { HeatmapResponse } from "@/lib/api-types";
 
 type Mode = "chg" | "flow";
 
-// 面積權重壓縮：0.5 次方（平方根）大幅壓縮斜度，讓格子接近平均 → 每格都夠大放得下字，
-// 不會有巨頭旁的細小格。保留「越大＝成交越熱」的順序；純視覺，tooltip/標籤仍為真實成交值。
+// 面積權重壓縮：0.6 次方壓縮斜度，讓巨頭不霸佔、格子較平均，但仍看得出大小差異。
+// 保留「越大＝成交越熱」的順序；純視覺，tooltip/標籤仍為真實成交值。
 const SIZE_EXP = 0.5;
 const sizeWeight = (v: number) => (v > 0 ? v ** SIZE_EXP : 0);
 
 // 產業數上限；每產業檔數上限（實際檔數依該產業分到的面積動態決定，小產業少放、每檔才夠大）。
-const MAX_INDUSTRIES = 9;
-const TOP_PER = 8;
-// 每格最小可讀面積（px²）：產業依 rect 面積 / 此值 決定放幾檔，確保每格夠大放得下名稱。
-const MIN_TILE_AREA = 3200;
+// 多放一些股票（使用者要更多檔），可接受少數小格只顯示名稱。
+const MAX_INDUSTRIES = 12;
+const TOP_PER = 16;
+// 每格最小面積（px²）：產業依 rect 面積 / 此值 決定放幾檔——調低＝每產業多放幾檔。
+const MIN_TILE_AREA = 2500;
 // 最小畫布尺寸（桌面級）：容器比它小時出現捲軸（左右／上下拖曳），畫布維持這個尺寸 →
 // 任何螢幕上格子大小一致、都夠大放得下字。容器比它大時畫布填滿容器（格子隨之放大）。
 const MIN_CANVAS_W = 960;
