@@ -427,7 +427,11 @@ class MarketService:
         else:
             fut_snap = await rt.fetch_futures_snapshot(["TXF"])
             fq = fut_snap.get("quotes") or []
-            quote = fq[0] if fq else None
+            # 與前端 nearMonthFutures 一致：優先 TXFR1（近月連續），否則取成交量最大的合約——
+            # 才會和上方「台指全」指數卡對得上（原本用 fq[0]＝TXFJ6，選到不同合約→數字對不上）。
+            quote = next((q for q in fq if q.get("symbol") == "TXFR1"), None)
+            if quote is None and fq:
+                quote = max(fq, key=lambda q: q.get("total_volume") or 0)
 
         # FinMind 盤中序列：完整日多半盤後才發布，當日盤中常為空（實測 07-30 盤中回 0 筆）。
         fm_series: list[dict[str, Any]] = []
