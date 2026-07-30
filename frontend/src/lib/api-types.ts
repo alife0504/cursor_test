@@ -311,16 +311,17 @@ export interface IntradayPoint {
 export interface IntradayResponse {
   symbol: string;
   as_of?: string | null;
+  phase?: string; // day / night / closed
   series: IntradayPoint[];
   current: number | null;
   change: number | null;
   change_rate: number | null;
   prev_close: number | null;
-  high: number | null;
-  low: number | null;
-  limit_up: number | null;
-  limit_down: number | null;
-  has_limit: boolean;
+  high: number | null; // 當日（全時段）最高
+  low: number | null; // 當日（全時段）最低
+  day_high?: number | null; // 日盤最高（台指全，夜盤時作參考線）
+  day_low?: number | null; // 日盤最低
+  show_day_hl?: boolean; // 是否顯示日盤高低參考線（台指全夜盤）
   [k: string]: unknown;
 }
 

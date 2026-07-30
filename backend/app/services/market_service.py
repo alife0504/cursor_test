@@ -49,6 +49,41 @@ def _downsample(series: list[dict[str, Any]], target: int) -> list[dict[str, Any
     return out
 
 
+def _to_float(v: Any) -> float | None:
+    try:
+        return float(v) if v is not None and v != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _intraday_session(sym: str, as_of: str) -> tuple[str | None, str]:
+    """回 (交易日 session_date_iso, phase)。phase ∈ {day, night, closed}。
+
+    - 台指全（TXF）交易日：日盤 08:45–13:45 → night 15:00–翌日 05:00 為「同一交易日」；
+      夜盤跨午夜，00:00–05:00 屬「前一日 08:45 開」的那個交易日。08:45 一到就是新交易日。
+    - 加權指數（現貨 TAIEX）：只有 09:00–13:30 為 day，其餘 closed（盤後無成交、不累積）。
+    """
+    from datetime import timedelta
+
+    try:
+        d = date_type.fromisoformat(as_of[:10])
+        minutes = int(as_of[11:13]) * 60 + int(as_of[14:16])
+    except (ValueError, IndexError):
+        return None, "closed"
+    if sym == "TXF":
+        if 8 * 60 + 45 <= minutes <= 13 * 60 + 45:
+            return d.isoformat(), "day"
+        if minutes >= 15 * 60:  # 15:00–24:00 夜盤（當日開）
+            return d.isoformat(), "night"
+        if minutes <= 5 * 60:  # 00:00–05:00 夜盤尾 → 屬前一交易日
+            return (d - timedelta(days=1)).isoformat(), "night"
+        return d.isoformat(), "closed"  # 05:00–08:45 / 13:45–15:00 休息
+    # TAIEX 現貨
+    if 9 * 60 <= minutes <= 13 * 60 + 30:
+        return d.isoformat(), "day"
+    return d.isoformat(), "closed"
+
+
 def _validate_market(market: str) -> str:
     m = (market or "TW").upper()
     if m not in MARKET_VALUES:
@@ -385,13 +420,66 @@ class MarketService:
             for q in top
         ]
 
-    async def get_intraday(self, symbol: str) -> dict[str, Any]:
-        """盤中即時走勢序列 + 關鍵水位（平盤/漲停/跌停/最高/最低/當下）。
+    async def _intraday_snapshot(self, sym: str) -> tuple[dict[str, Any] | None, str | None]:
+        """取盤中即時報價：加權＝指數快照 TAIEX；台指全＝期貨快照 TXFR1（近月連續，與前端
+        nearMonthFutures 一致，否則取成交量最大的合約）。回 (quote, as_of)。"""
+        from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
 
-        symbol＝"TAIEX"（加權指數，FinMind 5 秒序列，Free）或 "TXF"（台指全，逐筆降採樣，Sponsor）。
-        走勢線用當日盤中序列；水位取自即時 snapshot（當下/漲跌/最高/最低），平盤＝當下−漲跌，
-        漲停/跌停＝平盤×1.1／0.9（指數無實體漲跌停，故 has_limit=False，前端僅作參考線）。
-        """
+        rt = FinMindRealtimeClient(settings)
+        if sym == "TAIEX":
+            snap = await rt.fetch_index_snapshot()
+            qs = snap.get("quotes") or []
+            quote = next((q for q in qs if q.get("symbol") == "TAIEX"), None)
+        else:
+            snap = await rt.fetch_futures_snapshot(["TXF"])
+            qs = snap.get("quotes") or []
+            quote = next((q for q in qs if q.get("symbol") == "TXFR1"), None)
+            if quote is None and qs:
+                quote = max(qs, key=lambda q: q.get("total_volume") or 0)
+        return quote, snap.get("as_of")
+
+    async def accumulate_intraday_point(self, symbol: str) -> None:
+        """盤中每 ~10 秒累積一點到 Redis（背景任務呼叫），讓走勢線一開盤就完整。
+        休息時段不累積（避免平盤假點）；台指全日盤階段同步記錄「日盤最高/最低」。"""
+        sym = (symbol or "").upper()
+        if sym not in ("TAIEX", "TXF"):
+            return
+        quote, as_of = await self._intraday_snapshot(sym)
+        if not quote or not as_of:
+            return
+        price = _to_float(quote.get("price"))
+        if price is None:
+            return
+        session_date, phase = _intraday_session(sym, str(as_of))
+        if session_date is None or phase == "closed":
+            return
+        t = str(as_of)[11:19]
+        try:
+            redis = await get_redis(RedisDB.CACHE)
+            acc_key = f"market:intraday:acc:{sym}:{session_date}"
+            raw = await redis.get(acc_key)
+            acc = json.loads(raw) if raw else []
+            if not acc or acc[-1]["time"] < t:
+                acc.append({"time": t, "price": price})
+                await redis.set(acc_key, json.dumps(acc[-3000:]), ex=172800)
+            if sym == "TXF" and phase == "day":
+                hi, lo = _to_float(quote.get("high")), _to_float(quote.get("low"))
+                if hi is not None and lo is not None:
+                    dhl_key = f"market:intraday:dayhl:TXF:{session_date}"
+                    draw = await redis.get(dhl_key)
+                    dhl = json.loads(draw) if draw else {"high": hi, "low": lo}
+                    await redis.set(
+                        dhl_key,
+                        json.dumps({"high": max(dhl["high"], hi), "low": min(dhl["low"], lo)}),
+                        ex=172800,
+                    )
+        except Exception as exc:
+            logger.warning("market.intraday.acc_failed", symbol=sym, error=str(exc))
+
+    async def get_intraday(self, symbol: str) -> dict[str, Any]:
+        """盤中即時走勢 + 關鍵水位。走勢線用 Redis 累積序列（背景每 ~10 秒累積，一開盤就完整）；
+        加權指數當日累積若空則退回 FinMind 5 秒序列。水位：平盤（當下−漲跌）、當日最高/最低；
+        台指全另回日盤最高/最低（夜盤時 show_day_hl=True，前端畫成參考線）。"""
         sym = (symbol or "TAIEX").upper()
         if sym not in ("TAIEX", "TXF"):
             raise ValidationError(message_zh="symbol 必須是 TAIEX 或 TXF", field="symbol", value=symbol)
@@ -405,106 +493,82 @@ class MarketService:
         except Exception as exc:
             logger.warning("market.intraday.cache_read_failed", error=str(exc))
 
-        from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
-        from app.data_sources.tw.finmind_source import FinMindSource
+        quote, as_of = await self._intraday_snapshot(sym)
+        session_date, phase = _intraday_session(sym, str(as_of)) if as_of else (None, "closed")
 
-        rt = FinMindRealtimeClient(settings)
-        # 交易日一律取自「指數快照」的日盤時間，避免用期貨夜盤 as_of（跨午夜）抓到隔日空資料。
-        idx_snap = await rt.fetch_index_snapshot()
-        idx_quotes = idx_snap.get("quotes") or []
-        as_of = idx_snap.get("as_of")
-        trade_date: date_type | None = None
-        if as_of:
-            try:
-                trade_date = date_type.fromisoformat(str(as_of)[:10])
-            except ValueError:
-                trade_date = None
-        if trade_date is None:
-            trade_date = await self.repo.get_latest_trading_date("TW")
+        snap_price = _to_float(quote.get("price")) if quote else None
+        snap_chg = _to_float(quote.get("change")) if quote else None
+        snap_hi = _to_float(quote.get("high")) if quote else None
+        snap_lo = _to_float(quote.get("low")) if quote else None
 
-        if sym == "TAIEX":
-            quote = next((q for q in idx_quotes if q.get("symbol") == "TAIEX"), None)
-        else:
-            fut_snap = await rt.fetch_futures_snapshot(["TXF"])
-            fq = fut_snap.get("quotes") or []
-            # 與前端 nearMonthFutures 一致：優先 TXFR1（近月連續），否則取成交量最大的合約——
-            # 才會和上方「台指全」指數卡對得上（原本用 fq[0]＝TXFJ6，選到不同合約→數字對不上）。
-            quote = next((q for q in fq if q.get("symbol") == "TXFR1"), None)
-            if quote is None and fq:
-                quote = max(fq, key=lambda q: q.get("total_volume") or 0)
-
-        # FinMind 盤中序列：完整日多半盤後才發布，當日盤中常為空（實測 07-30 盤中回 0 筆）。
-        fm_series: list[dict[str, Any]] = []
-        if trade_date is not None:
-            src = FinMindSource(settings)
-            try:
-                fm_series = (
-                    await src.fetch_index_intraday(trade_date)
-                    if sym == "TAIEX"
-                    else await src.fetch_futures_intraday(trade_date)
-                )
-            except Exception as exc:
-                logger.warning("market.intraday.series_failed", symbol=sym, error=str(exc))
-
-        def _f(v: Any) -> float | None:
-            try:
-                return float(v) if v is not None and v != "" else None
-            except (TypeError, ValueError):
-                return None
-
-        snap_price = _f(quote.get("price")) if quote else None
-        snap_chg = _f(quote.get("change")) if quote else None
-        snap_hi = _f(quote.get("high")) if quote else None
-        snap_lo = _f(quote.get("low")) if quote else None
-        snap_time = str(as_of)[11:19] if as_of else None
-
-        # 即時累積走勢線：FinMind 當日盤中序列還沒發布時，用即時 snapshot 逐點累積，
-        # 讓走勢線「一開盤就開始長」。存 Redis（每檔每日一份），每次更新 append 一點。
-        acc_series: list[dict[str, Any]] = []
-        if trade_date is not None and snap_price is not None and snap_time:
-            acc_key = f"market:intraday:acc:{sym}:{trade_date.isoformat()}"
+        # 讀累積序列（背景任務建立）＋順手補當下這點（背景還沒跑時也不空）
+        acc: list[dict[str, Any]] = []
+        day_hl: dict[str, Any] | None = None
+        if session_date is not None:
             try:
                 redis = await get_redis(RedisDB.CACHE)
+                acc_key = f"market:intraday:acc:{sym}:{session_date}"
                 raw = await redis.get(acc_key)
-                acc_series = json.loads(raw) if raw else []
-                if not acc_series or acc_series[-1]["time"] < snap_time:
-                    acc_series.append({"time": snap_time, "price": snap_price})
-                    acc_series = acc_series[-2000:]
-                    await redis.set(acc_key, json.dumps(acc_series), ex=86400)
+                acc = json.loads(raw) if raw else []
+                if phase != "closed" and snap_price is not None and as_of:
+                    t = str(as_of)[11:19]
+                    if not acc or acc[-1]["time"] < t:
+                        acc.append({"time": t, "price": snap_price})
+                        await redis.set(acc_key, json.dumps(acc[-3000:]), ex=172800)
+                if sym == "TXF":
+                    draw = await redis.get(f"market:intraday:dayhl:TXF:{session_date}")
+                    day_hl = json.loads(draw) if draw else None
             except Exception as exc:
-                logger.warning("market.intraday.acc_failed", error=str(exc))
+                logger.warning("market.intraday.read_acc_failed", error=str(exc))
 
-        # 有 FinMind 完整序列就用（盤後回看），否則用即時累積（盤中即時）
-        series = _downsample(fm_series if fm_series else acc_series, 240)
+        # 加權指數：累積為空（例：伺服器剛啟動）時退回 FinMind 5 秒序列
+        if not acc and sym == "TAIEX" and session_date is not None:
+            try:
+                from app.data_sources.tw.finmind_source import FinMindSource
 
-        # 平盤＝snapshot 當下−漲跌（該盤前收／前結算）
+                acc = await FinMindSource(settings).fetch_index_intraday(
+                    date_type.fromisoformat(session_date)
+                )
+            except Exception as exc:
+                logger.warning("market.intraday.finmind_fallback_failed", error=str(exc))
+
+        series = _downsample(acc, 240)
+        prices = [p["price"] for p in series]
+        cur = snap_price if snap_price is not None else (prices[-1] if prices else None)
         prev_close = (
             round(snap_price - snap_chg, 2)
             if (snap_price is not None and snap_chg is not None)
             else None
         )
-        prices = [p["price"] for p in series]
-        # 當下＝即時 snapshot（活的）；退回走勢線末端
-        cur = snap_price if snap_price is not None else (prices[-1] if prices else None)
-        # 最高/最低：snapshot 當日高低（權威）優先，並確保涵蓋走勢線與當下
-        cand = list(prices) + ([cur] if cur is not None else [])
-        hi = snap_hi
-        lo = snap_lo
-        if cand:
-            hi = max(cand) if hi is None else max(hi, max(cand))
-            lo = min(cand) if lo is None else min(lo, min(cand))
+        # 當日（全時段）最高/最低：snapshot 高低 + 序列 + 日盤高低取極值
+        cand = list(prices)
+        if cur is not None:
+            cand.append(cur)
+        cand += [v for v in (snap_hi, snap_lo) if v is not None]
+        if day_hl:
+            cand += [v for v in (day_hl.get("high"), day_hl.get("low")) if v is not None]
+        hi = max(cand) if cand else None
+        lo = min(cand) if cand else None
+        # 日盤最高/最低（台指全）：日盤階段＝當下 snapshot 高低；夜盤＝記錄的日盤高低
+        day_high = day_low = None
+        if sym == "TXF":
+            if phase == "day":
+                day_high, day_low = snap_hi, snap_lo
+            elif day_hl:
+                day_high, day_low = day_hl.get("high"), day_hl.get("low")
+        show_day_hl = sym == "TXF" and phase == "night"
+
         if cur is not None and prev_close:
             chg = round(cur - prev_close, 2)
             chg_rate = round(chg / prev_close * 100, 2)
         else:
             chg = snap_chg
-            chg_rate = _f(quote.get("change_rate")) if quote else None
-        limit_up = round(prev_close * 1.1, 2) if prev_close is not None else None
-        limit_down = round(prev_close * 0.9, 2) if prev_close is not None else None
+            chg_rate = _to_float(quote.get("change_rate")) if quote else None
 
         payload: dict[str, Any] = {
             "symbol": sym,
             "as_of": as_of,
+            "phase": phase,
             "series": series,
             "current": cur,
             "change": chg,
@@ -512,14 +576,12 @@ class MarketService:
             "prev_close": prev_close,
             "high": hi,
             "low": lo,
-            "limit_up": limit_up,
-            "limit_down": limit_down,
-            "has_limit": sym == "TXF",
+            "day_high": day_high,
+            "day_low": day_low,
+            "show_day_hl": show_day_hl,
         }
         try:
             redis = await get_redis(RedisDB.CACHE)
-            # 差異化快取：加權 5 秒序列輕（~0.9s）→ 5s 對齊前端輪詢＝真 5 秒即時；
-            # 台指全逐筆重（10 萬筆 ~2.5s）→ 10s，仍即時但不過度重抓上游。
             ttl = INTRADAY_CACHE_TTL_TAIEX if sym == "TAIEX" else INTRADAY_CACHE_TTL_TXF
             await redis.set(cache_key, json.dumps(payload), ex=ttl)
         except Exception as exc:

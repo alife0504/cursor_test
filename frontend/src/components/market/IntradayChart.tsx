@@ -8,6 +8,7 @@ import type { IntradayResponse } from "@/lib/api-types";
 const BULL = "rgb(224,56,75)";
 const BEAR = "rgb(15,157,99)";
 const FLAT = "rgb(148,161,178)";
+const AMBER = "rgb(217,151,44)"; // 日盤高低參考線
 
 function fmt0(n: number | null | undefined): string {
   return n == null ? "—" : Math.round(n).toLocaleString("en-US");
@@ -38,7 +39,15 @@ export function IntradayChart({
   const chgRate = data?.change_rate ?? null;
   const tone = chg == null || chg === 0 ? "flat" : chg > 0 ? "bull" : "bear";
   const color = tone === "bull" ? BULL : tone === "bear" ? BEAR : FLAT;
-  const source = data?.has_limit ? "台指全 · 逐筆" : "加權 · 5 秒";
+  // 台指全：日盤/夜盤標示；加權：現貨
+  const source =
+    data?.symbol === "TXF"
+      ? data?.phase === "night"
+        ? "夜盤"
+        : data?.phase === "day"
+          ? "日盤"
+          : "台指全"
+      : "現貨";
 
   // 量測繪圖區容器 → SVG 依實際 px 尺寸繪製（填滿、文字不變形）
   const roRef = useRef<ResizeObserver | null>(null);
@@ -95,7 +104,11 @@ export function IntradayChart({
     const prices = series.map((p) => p.price);
     const hi = data?.high ?? Math.max(...prices);
     const lo = data?.low ?? Math.min(...prices);
-    const anchors = [hi, lo, prev].filter((v): v is number => v != null);
+    // 日盤高低（台指全夜盤時作參考線）
+    const showDay = !!data?.show_day_hl && data?.day_high != null && data?.day_low != null;
+    const dayHi = showDay ? (data?.day_high as number) : null;
+    const dayLo = showDay ? (data?.day_low as number) : null;
+    const anchors = [hi, lo, prev, dayHi, dayLo].filter((v): v is number => v != null);
     let yMin = Math.min(...anchors);
     let yMax = Math.max(...anchors);
     let range = yMax - yMin;
@@ -119,6 +132,9 @@ export function IntradayChart({
       curY: cur != null ? sy(cur) : sy(prices[prices.length - 1]),
       prevY: prev != null ? sy(prev) : null,
       hiY: sy(hi), loY: sy(lo), hi, lo,
+      dayHi, dayLo,
+      dayHiY: dayHi != null ? sy(dayHi) : null,
+      dayLoY: dayLo != null ? sy(dayLo) : null,
       firstT: series[0].time.slice(0, 5),
       lastT: series[series.length - 1].time.slice(0, 5),
       showPrev: inRange(prev),
@@ -174,11 +190,25 @@ export function IntradayChart({
               </>
             ) : null}
 
-            {/* 當日最高 / 最低 虛線 + 標籤 */}
+            {/* 當日（全時段）最高 / 最低 虛線 + 標籤 */}
             <line x1={chart.x0} y1={chart.hiY} x2={chart.x1} y2={chart.hiY} stroke={BULL} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.55" />
             <text x={chart.x1 + 3} y={chart.hiY + 3} fontSize="10" fill={BULL} opacity="0.95">高 {fmt0(chart.hi)}</text>
             <line x1={chart.x0} y1={chart.loY} x2={chart.x1} y2={chart.loY} stroke={BEAR} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.55" />
             <text x={chart.x1 + 3} y={chart.loY + 3} fontSize="10" fill={BEAR} opacity="0.95">低 {fmt0(chart.lo)}</text>
+
+            {/* 日盤最高 / 最低（台指全夜盤時的參考線，琥珀色點虛線） */}
+            {chart.dayHiY != null ? (
+              <>
+                <line x1={chart.x0} y1={chart.dayHiY} x2={chart.x1} y2={chart.dayHiY} stroke={AMBER} strokeWidth="0.9" strokeDasharray="1 3" opacity="0.7" />
+                <text x={chart.x1 + 3} y={chart.dayHiY + 3} fontSize="9.5" fill={AMBER}>日高 {fmt0(chart.dayHi)}</text>
+              </>
+            ) : null}
+            {chart.dayLoY != null ? (
+              <>
+                <line x1={chart.x0} y1={chart.dayLoY} x2={chart.x1} y2={chart.dayLoY} stroke={AMBER} strokeWidth="0.9" strokeDasharray="1 3" opacity="0.7" />
+                <text x={chart.x1 + 3} y={chart.dayLoY + 3} fontSize="9.5" fill={AMBER}>日低 {fmt0(chart.dayLo)}</text>
+              </>
+            ) : null}
 
             {/* 面積 + 走勢線 */}
             <path d={chart.area} fill={`url(#ig-${data?.symbol})`} />

@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -49,6 +51,8 @@ celery_app: Celery = Celery(
         "app.workers.tasks.verify_audit",
         # P12: LangGraph 主分析任務
         "app.workers.tasks.run_analysis",
+        # 盤中即時走勢累積（每 10 秒）
+        "app.workers.tasks.intraday",
     ],
 )
 
@@ -82,6 +86,12 @@ celery_app.conf.update(
 
 # ─────────── Beat schedule（PLAN 13.1 + Phase 7 prompt） ───────────
 celery_app.conf.beat_schedule = {
+    # 盤中即時走勢：每 10 秒累積加權/台指全一點到 Redis（讓走勢線一開盤就完整；
+    # 休息時段任務內部自動略過）。FinMind 盤中序列有延遲，故靠即時 snapshot 累積。
+    "intraday-accumulate": {
+        "task": "app.workers.tasks.intraday.accumulate_intraday_tw",
+        "schedule": timedelta(seconds=10),
+    },
     # 台股 13:30 收盤 → 14:30 抓（給後台時間更新）
     "tw-ohlcv-after-close": {
         "task": "app.workers.tasks.sync_ohlcv.sync_ohlcv_tw_all",
