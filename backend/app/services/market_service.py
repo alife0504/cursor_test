@@ -29,7 +29,10 @@ logger = get_logger(__name__)
 OVERVIEW_CACHE_TTL = 300  # 5 minutes
 # 除權息事件變動極慢（公司決議後才變），快取久一點；法定期限則是純計算不用快取。
 CALENDAR_CACHE_TTL = 3600  # 1 hour
-INTRADAY_CACHE_TTL = 20  # 盤中即時走勢；短快取（前端每 5 秒輪詢）
+# 盤中即時走勢快取（前端每 5 秒輪詢）：加權 5 秒序列輕故 5s＝真 5 秒即時；
+# 台指全逐筆重（~2.5s）故 10s，仍即時但不過度重抓上游。
+INTRADAY_CACHE_TTL_TAIEX = 5
+INTRADAY_CACHE_TTL_TXF = 10
 MARKET_VALUES = {"TW", "US"}
 
 
@@ -481,7 +484,10 @@ class MarketService:
         }
         try:
             redis = await get_redis(RedisDB.CACHE)
-            await redis.set(cache_key, json.dumps(payload), ex=INTRADAY_CACHE_TTL)
+            # 差異化快取：加權 5 秒序列輕（~0.9s）→ 5s 對齊前端輪詢＝真 5 秒即時；
+            # 台指全逐筆重（10 萬筆 ~2.5s）→ 10s，仍即時但不過度重抓上游。
+            ttl = INTRADAY_CACHE_TTL_TAIEX if sym == "TAIEX" else INTRADAY_CACHE_TTL_TXF
+            await redis.set(cache_key, json.dumps(payload), ex=ttl)
         except Exception as exc:
             logger.warning("market.intraday.cache_write_failed", error=str(exc))
         return payload
