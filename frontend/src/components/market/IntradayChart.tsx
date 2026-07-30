@@ -126,6 +126,13 @@ export function IntradayChart({
     const area = `${line}L${sx(series.length - 1).toFixed(1)},${y1}L${x0},${y1}Z`;
     const inRange = (v: number | null | undefined) => v != null && v >= yMin && v <= yMax;
 
+    // 台指全：夜盤起點（第一個 time≥15:00 的點）的 x → 畫一條灰色垂直虛線分日盤/夜盤
+    let nightX: number | null = null;
+    if (data?.symbol === "TXF") {
+      const idx = series.findIndex((p) => p.time >= "15:00:00");
+      if (idx > 0) nightX = sx(idx);
+    }
+
     return {
       W, H, x0, x1, y0, y1, line, area,
       curX: sx(series.length - 1),
@@ -135,6 +142,7 @@ export function IntradayChart({
       dayHi, dayLo,
       dayHiY: dayHi != null ? sy(dayHi) : null,
       dayLoY: dayLo != null ? sy(dayLo) : null,
+      nightX,
       firstT: series[0].time.slice(0, 5),
       lastT: series[series.length - 1].time.slice(0, 5),
       showPrev: inRange(prev),
@@ -182,42 +190,47 @@ export function IntradayChart({
               </linearGradient>
             </defs>
 
-            {/* 平盤（前收）虛線 */}
+            {/* 參考虛線（先畫，讓面積/走勢線蓋在上面；數字標籤稍後畫在最上層） */}
             {chart.showPrev && chart.prevY != null ? (
-              <>
-                <line x1={chart.x0} y1={chart.prevY} x2={chart.x1} y2={chart.prevY} stroke={FLAT} strokeWidth="1" strokeDasharray="4 3" opacity="0.75" />
-                <text x={chart.x1 + 3} y={chart.prevY + 3} fontSize="10" fill={FLAT}>平盤 {fmt0(prev)}</text>
-              </>
+              <line x1={chart.x0} y1={chart.prevY} x2={chart.x1} y2={chart.prevY} stroke={FLAT} strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
             ) : null}
-
-            {/* 當日（全時段）最高 / 最低 虛線 + 標籤 */}
-            <line x1={chart.x0} y1={chart.hiY} x2={chart.x1} y2={chart.hiY} stroke={BULL} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.55" />
-            <text x={chart.x1 + 3} y={chart.hiY + 3} fontSize="10" fill={BULL} opacity="0.95">高 {fmt0(chart.hi)}</text>
-            <line x1={chart.x0} y1={chart.loY} x2={chart.x1} y2={chart.loY} stroke={BEAR} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.55" />
-            <text x={chart.x1 + 3} y={chart.loY + 3} fontSize="10" fill={BEAR} opacity="0.95">低 {fmt0(chart.lo)}</text>
-
-            {/* 日盤最高 / 最低（台指全夜盤時的參考線，琥珀色點虛線） */}
+            <line x1={chart.x0} y1={chart.hiY} x2={chart.x1} y2={chart.hiY} stroke={BULL} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.5" />
+            <line x1={chart.x0} y1={chart.loY} x2={chart.x1} y2={chart.loY} stroke={BEAR} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.5" />
             {chart.dayHiY != null ? (
-              <>
-                <line x1={chart.x0} y1={chart.dayHiY} x2={chart.x1} y2={chart.dayHiY} stroke={AMBER} strokeWidth="0.9" strokeDasharray="1 3" opacity="0.7" />
-                <text x={chart.x1 + 3} y={chart.dayHiY + 3} fontSize="9.5" fill={AMBER}>日高 {fmt0(chart.dayHi)}</text>
-              </>
+              <line x1={chart.x0} y1={chart.dayHiY} x2={chart.x1} y2={chart.dayHiY} stroke={AMBER} strokeWidth="0.9" strokeDasharray="1 3" opacity="0.7" />
             ) : null}
             {chart.dayLoY != null ? (
-              <>
-                <line x1={chart.x0} y1={chart.dayLoY} x2={chart.x1} y2={chart.dayLoY} stroke={AMBER} strokeWidth="0.9" strokeDasharray="1 3" opacity="0.7" />
-                <text x={chart.x1 + 3} y={chart.dayLoY + 3} fontSize="9.5" fill={AMBER}>日低 {fmt0(chart.dayLo)}</text>
-              </>
+              <line x1={chart.x0} y1={chart.dayLoY} x2={chart.x1} y2={chart.dayLoY} stroke={AMBER} strokeWidth="0.9" strokeDasharray="1 3" opacity="0.7" />
             ) : null}
 
             {/* 面積 + 走勢線 */}
             <path d={chart.area} fill={`url(#ig-${data?.symbol})`} />
             <path d={chart.line} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
 
-            {/* 當下端點 */}
-            <line x1={chart.curX} y1={chart.y0} x2={chart.curX} y2={chart.y1} stroke={color} strokeWidth="0.7" opacity="0.3" />
+            {/* 台指全 15:00 夜盤分隔：灰色垂直虛線 */}
+            {chart.nightX != null ? (
+              <>
+                <line x1={chart.nightX} y1={chart.y0} x2={chart.nightX} y2={chart.y1} stroke={FLAT} strokeWidth="1" strokeDasharray="3 3" opacity="0.65" />
+                <text x={chart.nightX + 2} y={chart.y0 + 8} fontSize="8.5" fill={FLAT}>15:00 夜盤</text>
+              </>
+            ) : null}
+
+            {/* 參考數字：寫在左邊、貼在虛線上（最上層，不被面積蓋住） */}
+            {chart.showPrev && chart.prevY != null ? (
+              <text x={chart.x0 + 2} y={chart.prevY - 2.5} fontSize="10" fill={FLAT}>平盤 {fmt0(prev)}</text>
+            ) : null}
+            <text x={chart.x0 + 2} y={chart.hiY - 2.5} fontSize="10" fill={BULL}>高 {fmt0(chart.hi)}</text>
+            <text x={chart.x0 + 2} y={chart.loY - 2.5} fontSize="10" fill={BEAR}>低 {fmt0(chart.lo)}</text>
+            {chart.dayHiY != null ? (
+              <text x={chart.x0 + 2} y={chart.dayHiY - 2.5} fontSize="9.5" fill={AMBER}>日高 {fmt0(chart.dayHi)}</text>
+            ) : null}
+            {chart.dayLoY != null ? (
+              <text x={chart.x0 + 2} y={chart.dayLoY - 2.5} fontSize="9.5" fill={AMBER}>日低 {fmt0(chart.dayLo)}</text>
+            ) : null}
+
+            {/* 當下端點：即時值在右邊 */}
             <circle cx={chart.curX} cy={chart.curY} r="3" fill={color} />
-            <text x={chart.x1 + 3} y={chart.curY - 4} fontSize="11" fontWeight="700" fill={color}>{fmt0(cur)}</text>
+            <text x={chart.x1 + 3} y={chart.curY + 3} fontSize="11" fontWeight="700" fill={color}>{fmt0(cur)}</text>
 
             {/* 時間軸 */}
             <text x={chart.x0} y={chart.H - 5} fontSize="9.5" fill={FLAT}>{chart.firstT}</text>
