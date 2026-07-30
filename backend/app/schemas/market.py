@@ -46,7 +46,8 @@ class MarketOverview(BaseSchema):
     unchanged_count: int = Field(default=0, description="平盤家數")
     limit_up_count: int = Field(default=0, description="漲停家數（漲幅約 ≥9.9%）")
     limit_down_count: int = Field(default=0, description="跌停家數（跌幅約 ≤−9.9%）")
-    total_volume: int = Field(default=0, description="市場總成交量")
+    total_volume: int = Field(default=0, description="市場總成交量（股）")
+    total_amount: int = Field(default=0, description="市場總成交金額（元）")
 
 
 class InstitutionalRow(BaseSchema):

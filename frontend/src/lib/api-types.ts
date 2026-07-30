@@ -278,6 +278,7 @@ export interface MarketOverview {
   limit_up_count?: number | null;
   limit_down_count?: number | null;
   total_volume?: number | string | null;
+  total_amount?: number | string | null;
   // 結構彈性,前端容忍未知欄位
   [k: string]: unknown;
 }
@@ -331,6 +332,7 @@ export interface RealtimeOverview {
   limit_up_count?: number | null;
   limit_down_count?: number | null;
   total_volume: number | string;
+  total_amount?: number | string | null;
   as_of?: string | null;
   realtime?: boolean;
   [k: string]: unknown;

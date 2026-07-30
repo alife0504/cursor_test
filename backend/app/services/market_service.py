@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import date as date_type
 from datetime import datetime
@@ -107,6 +108,7 @@ class MarketService:
                 "limit_up_count": 0,
                 "limit_down_count": 0,
                 "total_volume": 0,
+                "total_amount": 0,
             }
         else:
             agg = await self.repo.get_overview_aggregates(m, as_of)
@@ -120,6 +122,7 @@ class MarketService:
                 "limit_up_count": int(agg.get("limit_up") or 0),
                 "limit_down_count": int(agg.get("limit_down") or 0),
                 "total_volume": int(agg.get("volume") or 0),
+                "total_amount": int(agg.get("amount") or 0),
             }
 
         # 寫 cache（失敗不擋）
@@ -247,6 +250,7 @@ class MarketService:
         quotes, as_of = got
         adv = dec = unc = lu = ld = 0
         vol = 0
+        amt = 0.0
         for q in quotes:
             cr = q["change_rate"]
             if cr > 0:
@@ -262,6 +266,8 @@ class MarketService:
             elif -10.5 <= cr <= -9.9:
                 ld += 1
             vol += int(q.get("total_volume") or 0)
+            with contextlib.suppress(TypeError, ValueError):
+                amt += float(q.get("total_amount") or 0)  # 累計成交金額（元）
         return {
             "advance_count": adv,
             "decline_count": dec,
@@ -269,6 +275,7 @@ class MarketService:
             "limit_up_count": lu,
             "limit_down_count": ld,
             "total_volume": vol,
+            "total_amount": int(amt),
             "as_of": as_of,
             "realtime": True,
         }
@@ -422,18 +429,18 @@ class MarketService:
             fq = fut_snap.get("quotes") or []
             quote = fq[0] if fq else None
 
-        series: list[dict[str, Any]] = []
+        # FinMind 盤中序列：完整日多半盤後才發布，當日盤中常為空（實測 07-30 盤中回 0 筆）。
+        fm_series: list[dict[str, Any]] = []
         if trade_date is not None:
             src = FinMindSource(settings)
             try:
-                series = (
+                fm_series = (
                     await src.fetch_index_intraday(trade_date)
                     if sym == "TAIEX"
                     else await src.fetch_futures_intraday(trade_date)
                 )
             except Exception as exc:
                 logger.warning("market.intraday.series_failed", symbol=sym, error=str(exc))
-        series = _downsample(series, 240)
 
         def _f(v: Any) -> float | None:
             try:
@@ -443,6 +450,29 @@ class MarketService:
 
         snap_price = _f(quote.get("price")) if quote else None
         snap_chg = _f(quote.get("change")) if quote else None
+        snap_hi = _f(quote.get("high")) if quote else None
+        snap_lo = _f(quote.get("low")) if quote else None
+        snap_time = str(as_of)[11:19] if as_of else None
+
+        # 即時累積走勢線：FinMind 當日盤中序列還沒發布時，用即時 snapshot 逐點累積，
+        # 讓走勢線「一開盤就開始長」。存 Redis（每檔每日一份），每次更新 append 一點。
+        acc_series: list[dict[str, Any]] = []
+        if trade_date is not None and snap_price is not None and snap_time:
+            acc_key = f"market:intraday:acc:{sym}:{trade_date.isoformat()}"
+            try:
+                redis = await get_redis(RedisDB.CACHE)
+                raw = await redis.get(acc_key)
+                acc_series = json.loads(raw) if raw else []
+                if not acc_series or acc_series[-1]["time"] < snap_time:
+                    acc_series.append({"time": snap_time, "price": snap_price})
+                    acc_series = acc_series[-2000:]
+                    await redis.set(acc_key, json.dumps(acc_series), ex=86400)
+            except Exception as exc:
+                logger.warning("market.intraday.acc_failed", error=str(exc))
+
+        # 有 FinMind 完整序列就用（盤後回看），否則用即時累積（盤中即時）
+        series = _downsample(fm_series if fm_series else acc_series, 240)
+
         # 平盤＝snapshot 當下−漲跌（該盤前收／前結算）
         prev_close = (
             round(snap_price - snap_chg, 2)
@@ -450,15 +480,15 @@ class MarketService:
             else None
         )
         prices = [p["price"] for p in series]
-        if prices:
-            # 當下／最高／最低都取自走勢線本身 → 標記與線一致（台指全 snapshot 可能是夜盤，不一致）
-            cur = prices[-1]
-            hi = max(prices)
-            lo = min(prices)
-        else:
-            cur = snap_price
-            hi = _f(quote.get("high")) if quote else None
-            lo = _f(quote.get("low")) if quote else None
+        # 當下＝即時 snapshot（活的）；退回走勢線末端
+        cur = snap_price if snap_price is not None else (prices[-1] if prices else None)
+        # 最高/最低：snapshot 當日高低（權威）優先，並確保涵蓋走勢線與當下
+        cand = list(prices) + ([cur] if cur is not None else [])
+        hi = snap_hi
+        lo = snap_lo
+        if cand:
+            hi = max(cand) if hi is None else max(hi, max(cand))
+            lo = min(cand) if lo is None else min(lo, min(cand))
         if cur is not None and prev_close:
             chg = round(cur - prev_close, 2)
             chg_rate = round(chg / prev_close * 100, 2)

@@ -90,7 +90,7 @@ class MarketRepository(BaseRepository):
             text(
                 """
                 WITH w AS (
-                    SELECT sp.symbol, sp.date, sp.close, sp.volume,
+                    SELECT sp.symbol, sp.date, sp.close, sp.volume, sp.turnover,
                            LAG(sp.close) OVER (PARTITION BY sp.symbol ORDER BY sp.date) AS prev,
                            ROW_NUMBER() OVER (
                                PARTITION BY sp.symbol ORDER BY sp.date DESC
@@ -101,7 +101,7 @@ class MarketRepository(BaseRepository):
                       AND sp.date >= :from_date AND sp.date <= :as_of
                 ),
                 d AS (
-                    SELECT close, prev, volume,
+                    SELECT close, prev, volume, turnover,
                            (close - prev) / prev * 100.0 AS pct
                     FROM w
                     WHERE rn = 1 AND prev IS NOT NULL AND prev > 0
@@ -112,7 +112,8 @@ class MarketRepository(BaseRepository):
                     COUNT(*) FILTER (WHERE close = prev)                        AS unchanged,
                     COUNT(*) FILTER (WHERE pct >= :lu_lo AND pct <= :lim_hi)    AS limit_up,
                     COUNT(*) FILTER (WHERE pct <= :ld_hi AND pct >= :lim_lo)    AS limit_down,
-                    COALESCE(SUM(volume), 0)                                    AS volume
+                    COALESCE(SUM(volume), 0)                                    AS volume,
+                    COALESCE(SUM(turnover), 0)                                  AS amount
                 FROM d
                 """
             ),
@@ -135,6 +136,7 @@ class MarketRepository(BaseRepository):
                 "limit_up": 0,
                 "limit_down": 0,
                 "volume": 0,
+                "amount": 0,
             }
         return {
             "advance": int(row.advance or 0),
@@ -143,6 +145,7 @@ class MarketRepository(BaseRepository):
             "limit_up": int(row.limit_up or 0),
             "limit_down": int(row.limit_down or 0),
             "volume": int(row.volume or 0),
+            "amount": int(row.amount or 0),
         }
 
     # ── 大盤指數報價（從 stock_prices 取指數 symbol 的最近兩日）────────

@@ -209,10 +209,9 @@ export default function MarketOverviewPage() {
     (rt?.limit_down_count as number | undefined) ??
     (data?.limit_down_count as number | undefined) ??
     0;
-  const totalVolumeRaw = rt?.total_volume ?? data?.total_volume ?? null;
-  const totalVolume =
-    totalVolumeRaw != null && totalVolumeRaw !== "" ? Number(totalVolumeRaw) : null;
-  const breadthLive = rt != null;
+  const totalAmountRaw = rt?.total_amount ?? data?.total_amount ?? null;
+  const totalAmount =
+    totalAmountRaw != null && totalAmountRaw !== "" ? Number(totalAmountRaw) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -267,8 +266,7 @@ export default function MarketOverviewPage() {
           unc={unc}
           limitUp={limitUp}
           limitDown={limitDown}
-          totalVolume={totalVolume}
-          live={breadthLive}
+          totalAmount={totalAmount}
         />
         {isTW ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:col-span-3">

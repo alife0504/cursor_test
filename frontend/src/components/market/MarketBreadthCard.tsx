@@ -7,16 +7,14 @@ export function MarketBreadthCard({
   unc,
   limitUp,
   limitDown,
-  totalVolume,
-  live,
+  totalAmount,
 }: {
   adv: number;
   dec: number;
   unc: number;
   limitUp: number;
   limitDown: number;
-  totalVolume: number | null;
-  live: boolean;
+  totalAmount: number | null;
 }) {
   const total = adv + dec + unc;
   const C = 2 * Math.PI * 52; // 周長
@@ -37,9 +35,7 @@ export function MarketBreadthCard({
     <section className="flex flex-col gap-4 rounded-lg border bg-card p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">漲跌家數分佈</h3>
-        <span className="text-[11px] text-muted-foreground">
-          市場摘要 {live ? <span className="text-bull/80">· 即時</span> : "· 收盤"}
-        </span>
+        <span className="text-[11px] text-muted-foreground">市場摘要</span>
       </div>
 
       <div className="flex flex-col items-center gap-3">
@@ -92,9 +88,9 @@ export function MarketBreadthCard({
           </div>
         </div>
         <div className="px-2.5">
-          <div className="text-[11px] text-muted-foreground">總成交量</div>
+          <div className="text-[11px] text-muted-foreground">總成交金額</div>
           <div className="num text-sm font-bold tabular-nums">
-            {totalVolume != null ? `${(totalVolume / 1e8).toFixed(1)} 億股` : "—"}
+            {totalAmount != null ? `${(totalAmount / 1e8).toLocaleString("en-US", { maximumFractionDigits: 0 })} 億` : "—"}
           </div>
         </div>
         <div className="px-2.5">
