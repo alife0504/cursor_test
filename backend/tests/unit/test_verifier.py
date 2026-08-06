@@ -59,6 +59,17 @@ def test_buy_against_strong_bearish_is_overridden_to_hold() -> None:
     assert any(f.code == "ACTION_DATA_CONFLICT" for f in r.flags)
 
 
+def test_news_sentiment_not_counted_as_direction_vote() -> None:
+    # 回歸：NewsAnalyst 的 sentiment 與情緒面 market_sentiment 同源於新聞，不應各投一票被
+    # 重複計數。僅有極端新聞語氣、其餘中性 → net 必須為 0（新聞語氣不計方向票）。
+    analyses = {
+        "news": json.dumps({"sentiment": "極度正面"}),
+        "sentiment": json.dumps({"market_sentiment": "中性"}),
+    }
+    r = verify_signal(_buy(), analyses)
+    assert r.net_direction == 0
+
+
 def test_price_incoherent_buy_stop_above_target() -> None:
     r = verify_signal(_buy(stop_loss="130"), _bullish())
     assert any(f.code == "PRICE_INCOHERENT" for f in r.flags)

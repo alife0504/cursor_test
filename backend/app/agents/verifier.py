@@ -83,8 +83,10 @@ def _safe_json(raw: Any) -> dict[str, Any] | None:
         return None
 
 
-_NEWS_SENTIMENT = {"極度正面": 2, "正面": 1, "中性": 0, "負面": -1, "極度負面": -2}
-# 情緒面分析師（新聞情緒聚合）的方向票
+# 情緒面分析師（新聞情緒聚合）的方向票。
+# 註：不對 NewsAnalyst 的 sentiment 另計方向票——它與本表都源自同一批新聞（get_news 7d），
+# 兩者各投 ±2 會讓「新聞語氣」被重複計數、對 net 產生高達 ±4 的相關性偏誤（技術/基本面各僅 ±1），
+# 且與 analyst_outputs「新聞情緒不是交易訊號」自相矛盾。故新聞方向訊號僅由此情緒面一票代表。
 _MARKET_SENTIMENT = {"極度樂觀": 2, "樂觀": 1, "中性": 0, "悲觀": -1, "極度悲觀": -2}
 _INST_FLOW = {"大量買超": 2, "小量買超": 1, "中性": 0, "小量賣超": -1, "大量賣超": -2}
 _VIEW = {"看多": 1, "看空": -1, "中性": 0}
@@ -95,9 +97,9 @@ def _direction_votes(analyses: dict[str, Any]) -> tuple[int, int, int]:
 
     以「欄位探測」計票（不依賴 analyst 名稱）：
     - market/fundamental → short_term_view / long_term_view
-    - news → sentiment（新聞語氣）
-    - sentiment（情緒面）→ market_sentiment（樂觀/悲觀）
+    - sentiment（情緒面）→ market_sentiment（樂觀/悲觀）— 新聞方向訊號僅由此一票代表
     - chip（籌碼面）→ institutional_flow / margin_trading_signal
+    - news（新聞面）：不計方向票（新聞情緒不是交易訊號，且避免與情緒面重複計數）
     """
     net = 0
     n_structured = 0
@@ -109,7 +111,7 @@ def _direction_votes(analyses: dict[str, Any]) -> tuple[int, int, int]:
         n_structured += 1
         net += _VIEW.get(d.get("short_term_view"), 0)
         net += _VIEW.get(d.get("long_term_view"), 0)
-        net += _NEWS_SENTIMENT.get(d.get("sentiment"), 0)
+        # NewsAnalyst 的 sentiment 不計方向票（見 _MARKET_SENTIMENT 註解：避免與情緒面重複計數）
         net += _MARKET_SENTIMENT.get(d.get("market_sentiment"), 0)
         net += _INST_FLOW.get(d.get("institutional_flow"), 0)
         net += _VIEW.get(d.get("margin_trading_signal"), 0)
