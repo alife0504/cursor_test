@@ -18,6 +18,7 @@ P13+ 起 Analyst 透過 `tools.get_xxx(...)` 取資料給 LLM。
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
@@ -40,6 +41,44 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = get_logger(__name__)
+
+
+def _derive_monthly_metrics(
+    rows: list[dict[str, Any]],
+) -> dict[tuple[int, int], dict[str, Decimal | None]]:
+    """由「已存的月營收歷史」就地衍生 YoY / MoM / YTD / YTD-YoY（台股最重要的月頻訊號）。
+
+    rows: [{year, month, revenue(Decimal|None)}, ...]（任意順序）。回 {(year,month): {...}}。
+    **PIT 安全**：本函式純算術，YoY 用「去年同月」、MoM 用「上月」、YTD 用「同年至本月」，
+    全是**已發生的過去月**；至於「某月能否被看見」仍由 caller 查詢的 available_at<=pit 閘門控制，
+    故不會偷看未來。基期為 None/0 → 該比率回 None（避免除以零 / 無意義百分比）。
+    """
+    by_ym: dict[tuple[int, int], Decimal] = {
+        (int(r["year"]), int(r["month"])): r["revenue"]
+        for r in rows
+        if r.get("revenue") is not None
+    }
+
+    def _pct(cur: Decimal | None, base: Decimal | None) -> Decimal | None:
+        if cur is None or base is None or base == 0:
+            return None
+        return ((cur - base) / base * 100).quantize(Decimal("0.01"))
+
+    def _ytd(year: int, month: int) -> Decimal | None:
+        vals = [by_ym[(year, m)] for m in range(1, month + 1) if (year, m) in by_ym]
+        return sum(vals) if vals else None
+
+    out: dict[tuple[int, int], dict[str, Decimal | None]] = {}
+    for (y, m), rev in by_ym.items():
+        prev_ym = (y, m - 1) if m > 1 else (y - 1, 12)
+        this_ytd = _ytd(y, m)
+        out[(y, m)] = {
+            "revenue_mom": _pct(rev, by_ym.get(prev_ym)),
+            "revenue_yoy": _pct(rev, by_ym.get((y - 1, m))),
+            "ytd_revenue": this_ytd,
+            "ytd_yoy": _pct(this_ytd, _ytd(y - 1, m)),
+        }
+    return out
 
 
 # ── ToolRegistry ────────────────────────────────────────
@@ -494,21 +533,40 @@ class ToolRegistry:
                     MonthlyRevenue.year.desc(),
                     MonthlyRevenue.month.desc(),
                 )
-                .limit(months_back)
+                # 多抓 12 個月（仍受 available_at<=pit 閘門）：讓回傳窗內每個月都能對到「去年同月」算 YoY
+                .limit(months_back + 12)
             )
             rows = (await session.execute(stmt)).scalars().all()
+        # 由既有(PIT 可見)歷史就地衍生 YoY/MoM/YTD/YTD-YoY——這些欄位在 DB 目前 100% NULL
+        # （FinMind 只回原始 revenue），台股最重要的月頻訊號原本永遠顯示「無資料」。
+        derived = _derive_monthly_metrics(
+            [{"year": r.year, "month": r.month, "revenue": r.revenue} for r in rows]
+        )
+
+        def _pick(db_val: Any, comp: Decimal | None) -> str | None:
+            # DB 有值優先（向後相容：未來若接到會算這些欄位的來源就用它），否則用衍生值
+            v = db_val if db_val is not None else comp
+            return str(v) if v is not None else None
+
+        # 只回最近 months_back 個月（rows 由新到舊 → 取前 months_back）
         out = [
             {
                 "year": r.year,
                 "month": r.month,
                 "revenue": str(r.revenue) if r.revenue is not None else None,
-                "revenue_mom": str(r.revenue_mom) if r.revenue_mom is not None else None,
-                "revenue_yoy": str(r.revenue_yoy) if r.revenue_yoy is not None else None,
-                "ytd_revenue": str(r.ytd_revenue) if r.ytd_revenue is not None else None,
-                "ytd_yoy": str(r.ytd_yoy) if r.ytd_yoy is not None else None,
+                "revenue_mom": _pick(
+                    r.revenue_mom, derived.get((r.year, r.month), {}).get("revenue_mom")
+                ),
+                "revenue_yoy": _pick(
+                    r.revenue_yoy, derived.get((r.year, r.month), {}).get("revenue_yoy")
+                ),
+                "ytd_revenue": _pick(
+                    r.ytd_revenue, derived.get((r.year, r.month), {}).get("ytd_revenue")
+                ),
+                "ytd_yoy": _pick(r.ytd_yoy, derived.get((r.year, r.month), {}).get("ytd_yoy")),
                 "announced_at": r.announced_at.isoformat() if r.announced_at else None,
             }
-            for r in rows
+            for r in rows[:months_back]
         ]
         # 由新到舊改回由舊到新（方便 LLM 看趨勢）
         out.reverse()
