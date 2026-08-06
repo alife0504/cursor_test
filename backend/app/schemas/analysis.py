@@ -35,7 +35,7 @@ class AnalysisCreateRequest(BaseSchema):
     symbol: str | None = Field(default=None, max_length=20)
     screen_level: str | None = Field(
         default=None,
-        description="自動選股等級（basic/low/mid/high）；未帶 symbol 時必填",
+        description="自動選股等級（low/mid/high）；未帶 symbol 時必填。basic 是永遠套用的 floor、非可選等級",
     )
     market: str | None = Field(
         default=None,

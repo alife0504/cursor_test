@@ -81,6 +81,11 @@ celery_app.conf.update(
     accept_content=["json"],
     # result TTL：1 天就好（DLQ 已負責持久化失敗紀錄）
     result_expires=86400,
+    # 全域忽略 task 回傳值：本專案無任何 AsyncResult 讀取（前端輪詢 DB analysis_reports、
+    # 非 celery 結果），且 intraday 每 10 秒的 fire-and-forget 結果曾實測堆積上萬個
+    # celery-task-meta-* key 於 broker db1（白佔記憶體、拖慢 SCAN）。需回傳值的任務可個別
+    # 加 @task(ignore_result=False)（目前無此需求；未用 chord/group）。
+    task_ignore_result=True,
 )
 
 
@@ -91,6 +96,9 @@ celery_app.conf.beat_schedule = {
     "intraday-accumulate": {
         "task": "app.workers.tasks.intraday.accumulate_intraday_tw",
         "schedule": timedelta(seconds=10),
+        # expires：若 worker 被長分析佔滿（如自動選股 fan-out 30 筆 run_analysis）而 9 秒內
+        # 排不到 slot，此 tick 直接作廢，不在 broker 堆積數百筆過時累積任務（餓死後集中排空）。
+        "options": {"expires": 9},
     },
     # 台股 13:30 收盤 → 14:30 抓（給後台時間更新）
     "tw-ohlcv-after-close": {

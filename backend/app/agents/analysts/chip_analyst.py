@@ -272,7 +272,9 @@ def _format_margin_table(rows: list[dict[str, Any]]) -> str:
             f"{_fmt(r.get('margin_balance'), int_=True)} | "
             f"{_fmt((r.get('margin_buy') or 0) - (r.get('margin_sell') or 0), int_=True)} | "
             f"{_fmt(r.get('short_balance'), int_=True)} | "
-            f"{_fmt((r.get('short_buy') or 0) - (r.get('short_sell') or 0), int_=True)} |"
+            # 融券增減＝融券賣出(短售,新增空單→餘額↑) − 融券買進(回補→餘額↓)＝short_sell − short_buy。
+            # 原寫成 short_buy − short_sell 方向相反，會讓 LLM 把「增加空單(偏空)」讀成「回補(偏多)」。
+            f"{_fmt((r.get('short_sell') or 0) - (r.get('short_buy') or 0), int_=True)} |"
         )
     return "\n".join(lines)
 

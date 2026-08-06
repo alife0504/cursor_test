@@ -76,6 +76,27 @@ class FinMindSource(BaseDataSource):
         )
         return self._normalize_ohlcv(data)
 
+    @staticmethod
+    def _check_bulk_failures(failed_days: list[str], attempted: int, kind: str) -> None:
+        """bulk 逐日抓取的失敗彙整（消除靜默部分失敗）。
+        正常空視窗（假日：呼叫成功但回 []，不進 failed_days）不受影響：
+        - 全部嘗試天數皆拋例外 → raise，讓 Celery task 走 retry/DLQ，而非靜默回空當成功。
+        - 部分天數失敗 → logger.warning 列出失敗日，避免『N 天缺 M 天』被無聲吞掉。
+        （起因：FinMind 配額耗盡/IP ban 在視窗中段觸發時，只回成功日、written=N>0 被誤判成功。）"""
+        if not failed_days:
+            return
+        if attempted > 0 and len(failed_days) >= attempted:
+            raise ExternalServiceError(
+                message_zh=f"FinMind {kind} bulk：{attempted} 天全部抓取失敗（疑配額耗盡/IP ban）",
+            )
+        logger.warning(
+            "finmind.bulk.partial_failure",
+            kind=kind,
+            failed=len(failed_days),
+            attempted=attempted,
+            sample=failed_days[:10],
+        )
+
     async def fetch_all_news(self, start: date, end: date) -> list[dict[str, Any]]:
         """全市場相關新聞（FinMind TaiwanStockNews，Free 等級，取代被 WAF 擋的 MOPS）。
 
@@ -86,12 +107,15 @@ class FinMindSource(BaseDataSource):
         from datetime import timedelta
 
         out: list[dict[str, Any]] = []
+        failed_days: list[str] = []
+        attempted = (end - start).days + 1
         day = start
         while day <= end:
             try:
                 data = await self._call(dataset="TaiwanStockNews", start_date=day.isoformat())
             except (AuthError, RateLimitError, ExternalServiceError):
-                data = []  # 單日失敗不影響其他日
+                data = []
+                failed_days.append(day.isoformat())  # 記錄失敗日，區分真失敗 vs 假日空視窗
             for r in data:
                 link = r.get("link")
                 title = r.get("title")
@@ -109,6 +133,7 @@ class FinMindSource(BaseDataSource):
                     }
                 )
             day += timedelta(days=1)
+        self._check_bulk_failures(failed_days, attempted, "news")
         return out
 
     async def fetch_company_info(self, symbol: str) -> dict[str, Any]:
@@ -185,6 +210,8 @@ class FinMindSource(BaseDataSource):
         acc: dict[tuple[str, date], dict[str, int]] = defaultdict(
             lambda: {f"{g}_{s}": 0 for g in ("foreign", "trust", "dealer") for s in ("buy", "sell")}
         )
+        failed_days: list[str] = []
+        attempted = (end - start).days + 1
         day = start
         while day <= end:
             try:
@@ -194,6 +221,7 @@ class FinMindSource(BaseDataSource):
                 )
             except (AuthError, RateLimitError, ExternalServiceError):
                 data = []
+                failed_days.append(day.isoformat())
             for r in data:
                 sid = r.get("stock_id")
                 g = _grp(r.get("name"))
@@ -219,6 +247,7 @@ class FinMindSource(BaseDataSource):
                 b, s = a[f"{g}_buy"], a[f"{g}_sell"]
                 row[f"{g}_buy"], row[f"{g}_sell"], row[f"{g}_net"] = b, s, b - s
             out.append(row)
+        self._check_bulk_failures(failed_days, attempted, "institutional")
         return out
 
     async def fetch_all_per(self, start: date, end: date) -> list[dict[str, Any]]:
@@ -229,12 +258,15 @@ class FinMindSource(BaseDataSource):
         from datetime import timedelta
 
         out: list[dict[str, Any]] = []
+        failed_days: list[str] = []
+        attempted = (end - start).days + 1
         day = start
         while day <= end:
             try:
                 data = await self._call(dataset="TaiwanStockPER", start_date=day.isoformat())
             except (AuthError, RateLimitError, ExternalServiceError):
                 data = []
+                failed_days.append(day.isoformat())
             for r in data:
                 sid = r.get("stock_id")
                 d = r.get("date")
@@ -254,6 +286,7 @@ class FinMindSource(BaseDataSource):
                     }
                 )
             day += timedelta(days=1)
+        self._check_bulk_failures(failed_days, attempted, "per")
         return out
 
     async def fetch_all_market_value(self, start: date, end: date) -> list[dict[str, Any]]:
@@ -264,6 +297,8 @@ class FinMindSource(BaseDataSource):
         from datetime import timedelta
 
         out: list[dict[str, Any]] = []
+        failed_days: list[str] = []
+        attempted = (end - start).days + 1
         day = start
         while day <= end:
             try:
@@ -272,6 +307,7 @@ class FinMindSource(BaseDataSource):
                 )
             except (AuthError, RateLimitError, ExternalServiceError):
                 data = []
+                failed_days.append(day.isoformat())
             for r in data:
                 sid = r.get("stock_id")
                 d = r.get("date")
@@ -288,6 +324,7 @@ class FinMindSource(BaseDataSource):
                     mv_int = None
                 out.append({"symbol": sid, "date": d_obj, "market_cap": mv_int})
             day += timedelta(days=1)
+        self._check_bulk_failures(failed_days, attempted, "market_value")
         return out
 
     async def fetch_all_margin(self, start: date, end: date) -> list[dict[str, Any]]:
@@ -320,6 +357,8 @@ class FinMindSource(BaseDataSource):
             "ShortSaleLimit": "short_quota",
         }
         out: list[dict[str, Any]] = []
+        failed_days: list[str] = []
+        attempted = (end - start).days + 1
         day = start
         while day <= end:
             try:
@@ -328,7 +367,8 @@ class FinMindSource(BaseDataSource):
                     start_date=day.isoformat(),
                 )
             except (AuthError, RateLimitError, ExternalServiceError):
-                data = []  # 單日失敗不影響其他日
+                data = []
+                failed_days.append(day.isoformat())
             for r in data:
                 sid = r.get("stock_id")
                 d = r.get("date")
@@ -347,6 +387,7 @@ class FinMindSource(BaseDataSource):
                         item[_out_map[src]] = 0
                 out.append(item)
             day += timedelta(days=1)
+        self._check_bulk_failures(failed_days, attempted, "margin")
         return out
 
     async def fetch_monthly_revenue(

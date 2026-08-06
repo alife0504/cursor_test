@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, CalendarDays, FileText } from "lucide-react";
+import { Banknote, CalendarDays, FileText, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
@@ -8,55 +8,84 @@ import { KpiCard } from "@/components/common/KpiCard";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useMarketCalendar } from "@/hooks/useMarket";
-import type { CalendarEvent } from "@/lib/api-types";
+import type { CalendarEvent, CalendarEventType } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
 // 財報日曆（真實資料）
 //   - GET /api/v1/market/calendar?from&to
-//   - 兩類真實事件：法定申報期限（依證交法 §36 推算）+ 除權息（FinMind 本地庫）
-//   - 刻意不做「股東會 / 法說會」：FinMind 無此 dataset，不顯示勝過顯示假資料
+//   - 真實事件：法定申報期限（依證交法 §36 推算）+ 除權息（FinMind 本地庫）
+//     + 股東會（tw-hawk/twofc 本地資料湖，含真實公告日）
+//   - 刻意不做「法說會」：無穩定 dataset，不顯示勝過顯示假資料
 
 const TYPE_LABEL: Record<string, string> = {
   filing_deadline: "法定申報期限",
   ex_dividend: "除權息",
+  shareholder_meeting: "股東會",
   us_econ: "美國數據",
 };
 const TYPE_COLOR: Record<string, string> = {
   filing_deadline: "bg-info/15 text-info",
   ex_dividend: "bg-bull-muted text-bull",
+  shareholder_meeting: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
   us_econ: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
 };
 
-/** 單一格內的事件顯示：除權息若很多家 → 只顯示 1 家 + 「其餘 N 家 ▾」可展開。 */
-function DayEvents({ events }: { events: CalendarEvent[] }) {
+// 每日多筆、逐檔的事件類型 → 收合成「1 筆 + 其餘 N 筆 ▾」；其餘（法定期限/美國數據）逐筆顯示
+const COLLAPSIBLE_TYPES: CalendarEventType[] = ["ex_dividend", "shareholder_meeting"];
+
+/** 每日多筆、逐檔的事件類型（除權息/股東會）各自收合成「1 筆 + 其餘 N 筆 ▾」。 */
+function CollapsibleGroup({ events }: { events: CalendarEvent[] }) {
   const [open, setOpen] = useState(false);
-  const exDiv = events.filter((e) => e.event_type === "ex_dividend");
-  const others = events.filter((e) => e.event_type !== "ex_dividend");
-
-  const pill = (e: CalendarEvent, i: number) => (
-    <div
-      key={`${e.event_type}-${e.symbol ?? ""}-${i}`}
-      className={cn("truncate rounded px-1 py-0.5 text-[10px]", TYPE_COLOR[e.event_type] ?? "bg-muted")}
-      title={`${e.title}（${TYPE_LABEL[e.event_type] ?? e.event_type}）`}
-    >
-      {e.symbol ? `${e.symbol} ${e.name ?? ""}` : e.title}
-    </div>
-  );
-
-  const shownExDiv = open ? exDiv : exDiv.slice(0, 1);
+  const shown = open ? events : events.slice(0, 1);
+  const cls = TYPE_COLOR[events[0].event_type] ?? "bg-muted";
   return (
-    <div className="mt-1 space-y-1">
-      {others.map((e, i) => pill(e, i))}
-      {shownExDiv.map((e, i) => pill(e, i))}
-      {exDiv.length > 1 ? (
+    <>
+      {shown.map((e, i) => (
+        <div
+          key={`${e.event_type}-${e.symbol ?? ""}-${i}`}
+          className={cn("truncate rounded px-1 py-0.5 text-[10px]", cls)}
+          title={`${e.title}（${TYPE_LABEL[e.event_type] ?? e.event_type}）`}
+        >
+          {e.symbol ? `${e.symbol} ${e.name ?? ""}` : e.title}
+        </div>
+      ))}
+      {events.length > 1 ? (
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="w-full truncate rounded bg-bull-muted/60 px-1 py-0.5 text-left text-[10px] text-bull hover:bg-bull-muted"
+          className={cn("w-full truncate rounded px-1 py-0.5 text-left text-[10px] opacity-80 hover:opacity-100", cls)}
         >
-          {open ? "收合 ▴" : `其餘 ${exDiv.length - 1} 家 ▾`}
+          {open ? "收合 ▴" : `其餘 ${events.length - 1} 筆 ▾`}
         </button>
       ) : null}
+    </>
+  );
+}
+
+/** 單一格內的事件顯示：逐檔事件（除權息/股東會）各自收合；其餘逐筆顯示。 */
+function DayEvents({ events }: { events: CalendarEvent[] }) {
+  const others = events.filter((e) => !COLLAPSIBLE_TYPES.includes(e.event_type));
+  const groups = COLLAPSIBLE_TYPES.map((t) =>
+    events.filter((e) => e.event_type === t),
+  ).filter((g) => g.length > 0);
+
+  return (
+    <div className="mt-1 space-y-1">
+      {others.map((e, i) => (
+        <div
+          key={`${e.event_type}-${e.symbol ?? ""}-${i}`}
+          className={cn(
+            "truncate rounded px-1 py-0.5 text-[10px]",
+            TYPE_COLOR[e.event_type] ?? "bg-muted",
+          )}
+          title={`${e.title}（${TYPE_LABEL[e.event_type] ?? e.event_type}）`}
+        >
+          {e.symbol ? `${e.symbol} ${e.name ?? ""}` : e.title}
+        </div>
+      ))}
+      {groups.map((g) => (
+        <CollapsibleGroup key={g[0].event_type} events={g} />
+      ))}
     </div>
   );
 }
@@ -86,6 +115,7 @@ export default function MarketCalendarPage() {
       total: events.length,
       filing: events.filter((e) => e.event_type === "filing_deadline").length,
       exDiv: events.filter((e) => e.event_type === "ex_dividend").length,
+      agm: events.filter((e) => e.event_type === "shareholder_meeting").length,
       usEcon: events.filter((e) => e.event_type === "us_econ").length,
     }),
     [events],
@@ -117,11 +147,11 @@ export default function MarketCalendarPage() {
       <PageHeader
         icon={CalendarDays}
         title="財報日曆"
-        description="法定申報期限、除權息、美國重大數據（台北時間）"
+        description="法定申報期限、除權息、股東會、美國重大數據（台北時間）"
       />
 
       {/* 本月事件摘要 KPI 帶 */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard
           title="本月事件"
           value={counts.total}
@@ -142,6 +172,13 @@ export default function MarketCalendarPage() {
           subtitle="配息配股"
           icon={Banknote}
           accent="bull"
+        />
+        <KpiCard
+          title="股東會"
+          value={counts.agm}
+          subtitle="tw-hawk 公告日"
+          icon={Users}
+          accent="warning"
         />
         <KpiCard
           title="美國數據"

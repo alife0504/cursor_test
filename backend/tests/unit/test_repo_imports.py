@@ -27,7 +27,6 @@ P1_REQUIRED_MODULES = [
     "alembic",
     "redis",
     "jose",  # python-jose
-    "passlib",
     "email_validator",
 ]
 

@@ -15,7 +15,7 @@ from datetime import date as date_type
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.logging_config import get_logger
@@ -202,7 +202,11 @@ class FinancialsRepository(BaseRepository):
         stmt = pg_insert(FinancialStatement).values(clean)
         update_set: dict[str, Any] = {
             "payload": stmt.excluded.payload,
-            "announced_at": stmt.excluded.announced_at,
+            # 只在來源提供非 NULL 時才覆寫 announced_at：FinMind 恆給 NULL，若無條件覆寫，
+            # 未來接 MOPS 回填的真公告日會在每晚例行 re-sync 被抹回 NULL（PIT 自動升級失效）。
+            "announced_at": func.coalesce(
+                stmt.excluded.announced_at, FinancialStatement.announced_at
+            ),
             "disclosure_deadline": stmt.excluded.disclosure_deadline,
             "source": stmt.excluded.source,
         }
@@ -275,7 +279,13 @@ class FinancialsRepository(BaseRepository):
                 "revenue_yoy": stmt.excluded.revenue_yoy,
                 "ytd_revenue": stmt.excluded.ytd_revenue,
                 "ytd_yoy": stmt.excluded.ytd_yoy,
-                "announced_at": stmt.excluded.announced_at,
+                # 同 upsert_statements：真公告日只在來源非 NULL 時覆寫，避免被例行 re-sync 抹除
+                "announced_at": func.coalesce(
+                    stmt.excluded.announced_at, MonthlyRevenue.announced_at
+                ),
+                # 補上 disclosure_deadline（原遺漏，與 upsert_statements 不一致）：category 變動時
+                # re-upsert 才會刷新法定期限，避免舊邊界殘留（反向 GENERAL→INSURER 會偏早=lookahead）。
+                "disclosure_deadline": stmt.excluded.disclosure_deadline,
                 "source": stmt.excluded.source,
             },
         )

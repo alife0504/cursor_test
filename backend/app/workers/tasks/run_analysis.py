@@ -12,6 +12,7 @@ P14 升級：
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -106,6 +107,18 @@ def _run_with_loop(
                 t.cancel()
             if pending:
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            # 釋放綁在本 loop 的全域 async client（Qdrant/Redis）：worker 每筆任務都用新 loop，
+            # 全域單例會綁在前一個已關閉的 loop 上，使同一 child 第 2 筆起 AgentMemory 的
+            # retrieve/store 因 'Event loop is closed' 被靜默吞成 no-op（使用者選用的記憶/反思失效）。
+            # 比照 intraday.py：於 loop 關閉前在本 loop 上 dispose，下一筆在自己的 loop 重建乾淨 client。
+            from app.core.qdrant_client import dispose_qdrant_client
+            from app.core.redis_client import dispose_redis_pools
+
+            # 兩個各自 suppress，確保 redis 釋放不因 qdrant 釋放失敗而被跳過
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(dispose_qdrant_client())
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(dispose_redis_pools())
         finally:
             loop.close()
             asyncio.set_event_loop(None)
@@ -219,7 +232,7 @@ async def _async_pipeline(
         # chain 會 fallback 到可用 provider 的預設模型 —— 誠實顯示真正跑的模型，避免誤導。
         used_model = getattr(chain, "last_used_model", None) or report_data["llm_model"]
 
-        _update_completed(
+        finalized = _update_completed(
             analysis_id=analysis_id,
             signal_dict=signal_dict,
             report_md=final_state.get("report_md"),
@@ -228,6 +241,11 @@ async def _async_pipeline(
             total_tokens=int(final_state.get("llm_usage_total_tokens", 0) or 0),
             analyses=final_state.get("analyses") or {},
         )
+        if not finalized:
+            # 期間被使用者 cancel：狀態維持 cancelled，跳過記憶寫入/建待核准訂單/發 completed 事件，
+            # 避免「已取消」復活成「已完成」＋幽靈訂單（Secure Edition 訂單雖須人工核准，仍不應冒出）。
+            logger.info("run_analysis.cancelled_before_finalize id=%s", analysis_id)
+            return {"analysis_id": analysis_id, "status": "cancelled"}
 
         # 4b. 把多空辯論歷程寫入 debate_history 表（前端「辯論詳情」分頁 + StatusStepper
         # 多空辯論階段 + Agent Flow reload 退路皆依賴此資料）。失敗不擋整次分析。
@@ -531,13 +549,18 @@ def _update_completed(
     llm_model: str | None,
     total_tokens: int,
     analyses: dict[str, Any] | None = None,
-) -> None:
-    """寫回 completed 狀態 + signal 拆解 + analyst_outputs + 從 llm_usage 表彙總 cost。"""
+) -> bool:
+    """寫回 completed 狀態 + signal 拆解 + analyst_outputs + 從 llm_usage 表彙總 cost。
+    回傳是否真的寫入 completed：若期間已被使用者 cancel（status='cancelled'），跳過寫回並回 False，
+    讓 caller 一併跳過建待核准訂單/記憶寫入，避免「已取消」分析復活成「已完成」＋幽靈訂單。"""
     with sync_rw_session() as s:
         row = s.get(AnalysisReport, UUID(analysis_id))
         if row is None:
             logger.warning("run_analysis.update_completed.row_missing id=%s", analysis_id)
-            return
+            return False
+        if row.status == "cancelled":
+            logger.info("run_analysis.finalize.skipped_cancelled id=%s", analysis_id)
+            return False
         row.status = "completed"
         row.completed_at = datetime.now(tz=UTC)
         row.report_md = report_md or row.report_md
@@ -587,6 +610,7 @@ def _update_completed(
         row.total_cost_usd = Decimal(cost_sum or 0).quantize(Decimal("0.000001"))
 
         s.commit()
+    return True
 
 
 def _decimal_or_none(v: Any) -> Decimal | None:

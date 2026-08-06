@@ -159,7 +159,8 @@ export interface DebateMessage {
 export interface AnalysisCreateBody {
   // 指定個股（symbol）與自動選股（screen_level）二擇一
   symbol?: string;
-  screen_level?: "basic" | "low" | "mid" | "high";
+  // basic 是永遠套用的 floor、非可選等級（後端 validator 只收 low/mid/high）
+  screen_level?: "low" | "mid" | "high";
   market?: "TW" | "US";
   analyst_types: string[];
   llm_model: string;
@@ -378,15 +379,16 @@ export interface InstitutionalRow {
   symbol: string;
   name?: string | null;
   date: string;
-  foreign_buy?: string | null;
-  foreign_sell?: string | null;
-  foreign_net?: string | null;
-  trust_buy?: string | null;
-  trust_sell?: string | null;
-  trust_net?: string | null;
-  dealer_buy?: string | null;
-  dealer_sell?: string | null;
-  dealer_net?: string | null;
+  // 買/賣/淨額為股數（後端 schema 為 int，JSON 序列化成 number；原宣告 string 為筆誤）
+  foreign_buy?: number | null;
+  foreign_sell?: number | null;
+  foreign_net?: number | null;
+  trust_buy?: number | null;
+  trust_sell?: number | null;
+  trust_net?: number | null;
+  dealer_buy?: number | null;
+  dealer_sell?: number | null;
+  dealer_net?: number | null;
   // 淨額金額（元）＝ 淨股數 × 最新收盤，供「金額(億)」顯示
   foreign_amount?: number | null;
   trust_amount?: number | null;
@@ -552,9 +554,15 @@ export interface DLQItem {
 
 // 對齊 backend/app/schemas/market.py CalendarItem（v1.1 接真實資料用；目前 calendar 頁仍用本地 mock）
 // 對齊 backend/app/services/market_service.py get_calendar（真實資料，非 mock）
-//   filing_deadline：法定申報期限（依證交法 §36 推算，全市場共通 → 無 symbol）
-//   ex_dividend    ：除權息（FinMind 本地庫真實資料）
-export type CalendarEventType = "filing_deadline" | "ex_dividend" | "us_econ";
+//   filing_deadline    ：法定申報期限（依證交法 §36 推算，全市場共通 → 無 symbol）
+//   ex_dividend        ：除權息（FinMind 本地庫真實資料）
+//   shareholder_meeting：股東會（tw-hawk/twofc 本地資料湖，含真實 announced_at）
+//   us_econ            ：美國重大數據（FOMC/非農/ISM，台北時間）
+export type CalendarEventType =
+  | "filing_deadline"
+  | "ex_dividend"
+  | "shareholder_meeting"
+  | "us_econ";
 
 export interface CalendarEvent {
   /** 法定申報期限為全市場事件，無個股代號 → 可能為 null */
@@ -564,7 +572,7 @@ export interface CalendarEvent {
   event_type: CalendarEventType;
   event_date: string;
   title: string;
-  /** statutory（依法規推算）或 finmind_local（真實資料源） */
+  /** statutory（依法規推算）｜finmind_local（除權息）｜twhawk（股東會）｜curated（美國數據） */
   source?: string | null;
   extra?: Record<string, unknown> | null;
 }

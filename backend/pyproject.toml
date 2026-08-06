@@ -24,6 +24,7 @@ dependencies = [
     # DB
     "sqlalchemy[asyncio]>=2.0.30,<2.1",
     "asyncpg>=0.29,<0.31",
+    "duckdb>=1.5.4,<2",  # 讀 tw-hawk/twofc 本地資料湖（股東會/財報公布日等）；下限鎖 1.5.4：需 >= 寫入端才能讀其 storage format
     "alembic>=1.13,<2.0",
     # Redis
     "redis>=5.0,<6.0",
@@ -32,8 +33,10 @@ dependencies = [
     # pgvector（P4 加,現階段不主用,預留未來若改 pgvector 替代 Qdrant）
     "pgvector>=0.3,<0.5",
     # Auth (P8 才用,這裡先列)
-    "python-jose[cryptography]>=3.3,<4.0",
-    "passlib[bcrypt]>=1.7,<2.0",
+    # python-jose 下限提到 3.4：3.3.0 受 CVE-2024-33664/33663 影響，3.4.0 起修復
+    "python-jose[cryptography]>=3.4,<4.0",
+    # passlib 已移除：密碼雜湊實際由 app/core/security.py 直接 import bcrypt 完成，
+    # passlib 1.7.4(2020 停維護)與 bcrypt>=4.1 不相容、且無任何使用 → 純死相依
     # 時區
     "tzdata",
     # P5：資料源 Adapter / Repository（pandas + parsing + rate limit）
@@ -136,6 +139,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106"]   # tests 允許 hardcoded secret 字串
 "app/schemas/auth.py" = ["S105"]             # token_type='Bearer' 是 OAuth2 標籤，不是密碼
+# get_movers 的動態 ORDER BY 以白名單固定字串插值（gainers/losers/volume），非使用者輸入 → S608 誤報
+"app/repos/market_repo.py" = ["S608"]
 
 [tool.ruff.format]
 quote-style = "double"

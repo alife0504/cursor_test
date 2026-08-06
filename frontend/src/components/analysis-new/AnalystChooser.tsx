@@ -59,7 +59,7 @@ interface AnalystChooserProps {
 }
 
 // Phase 16 § D 步驟 2:選 analyst(多選)
-//   - 籌碼面（sentiment）為台股專屬：美股時「顯示但禁用 + 標註原因」，不隱藏（避免選項憑空消失）
+//   - 情緒面（sentiment）與籌碼面（chip）為台股專屬：美股時「顯示但禁用 + 標註原因」，不隱藏（避免選項憑空消失）
 export function AnalystChooser({ value, onChange, market }: AnalystChooserProps) {
   const toggle = (id: AnalystType) => {
     if (value.includes(id)) {

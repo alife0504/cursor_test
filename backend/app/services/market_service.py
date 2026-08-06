@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 from datetime import date as date_type
@@ -82,6 +83,24 @@ def _intraday_session(sym: str, as_of: str) -> tuple[str | None, str]:
     if 9 * 60 <= minutes <= 13 * 60 + 30:
         return d.isoformat(), "day"
     return d.isoformat(), "closed"
+
+
+def _intraday_sort_key(time_str: str) -> int:
+    """把累積點的 HH:MM:SS 轉成可單調排序的秒數。
+    台指全夜盤 15:00→翌日 05:00 為同一交易日、跨午夜；純字典序在 00:00 會斷裂
+    （'23:59' > '00:00'），使午夜後不再累積。故把 00:00–05:xx（時<6）視為 +24h，
+    讓整段 08:45→翌日05:00 維持遞增。TAIEX 現貨只有 09:00–13:30，永不觸發偏移。"""
+    try:
+        hh, mm, ss = int(time_str[0:2]), int(time_str[3:5]), int(time_str[6:8])
+    except (ValueError, IndexError):
+        return -1
+    base = hh * 3600 + mm * 60 + ss
+    return base + 86400 if hh < 6 else base
+
+
+# 累積序列上限：台指全「日盤 08:45–13:45 + 夜盤 15:00→翌日05:00」同一 key 約 19.75 小時，
+# ~10 秒一點 ≈ 7100 點；留 8000 以完整保存整段 session（含 15:00 開盤起始段）。
+_INTRADAY_ACC_CAP = 8000
 
 
 def _validate_market(market: str) -> str:
@@ -296,9 +315,12 @@ class MarketService:
                 unc += 1
             # 漲停/跌停：漲跌幅 ±9.9%～±10.5%（台股 ±10%，tick 取整實際約 9.7～10%；
             # 上界排除除權息參考價調整等異常）。與 get_overview_aggregates 同一判定。
-            if 9.9 <= cr <= 10.5:
+            # cr 是 Decimal；float 字面量 9.9≈9.9000000000000035 略大於 Decimal('9.9')，
+            # 混比會讓恰為 ±9.90% 者在邊界被漏計 → 先轉 float 讓兩側型別一致。
+            crf = float(cr)
+            if 9.9 <= crf <= 10.5:
                 lu += 1
-            elif -10.5 <= cr <= -9.9:
+            elif -10.5 <= crf <= -9.9:
                 ld += 1
             vol += int(q.get("total_volume") or 0)
             with contextlib.suppress(TypeError, ValueError):
@@ -459,9 +481,9 @@ class MarketService:
             acc_key = f"market:intraday:acc:{sym}:{session_date}"
             raw = await redis.get(acc_key)
             acc = json.loads(raw) if raw else []
-            if not acc or acc[-1]["time"] < t:
+            if not acc or _intraday_sort_key(acc[-1]["time"]) < _intraday_sort_key(t):
                 acc.append({"time": t, "price": price})
-                await redis.set(acc_key, json.dumps(acc[-3000:]), ex=172800)
+                await redis.set(acc_key, json.dumps(acc[-_INTRADAY_ACC_CAP:]), ex=172800)
             if sym == "TXF" and phase == "day":
                 hi, lo = _to_float(quote.get("high")), _to_float(quote.get("low"))
                 if hi is not None and lo is not None:
@@ -482,7 +504,9 @@ class MarketService:
         台指全另回日盤最高/最低（夜盤時 show_day_hl=True，前端畫成參考線）。"""
         sym = (symbol or "TAIEX").upper()
         if sym not in ("TAIEX", "TXF"):
-            raise ValidationError(message_zh="symbol 必須是 TAIEX 或 TXF", field="symbol", value=symbol)
+            raise ValidationError(
+                message_zh="symbol 必須是 TAIEX 或 TXF", field="symbol", value=symbol
+            )
 
         cache_key = f"cache:market:intraday:{sym}"
         try:
@@ -512,9 +536,11 @@ class MarketService:
                 acc = json.loads(raw) if raw else []
                 if phase != "closed" and snap_price is not None and as_of:
                     t = str(as_of)[11:19]
-                    if not acc or acc[-1]["time"] < t:
+                    # 只補進「本次回傳」的序列，不回寫 Redis：背景 beat（accumulate_intraday_point）
+                    # 才是唯一的 Redis 寫者，避免前端每 5s 輪詢與 beat 併發 read-modify-write 互相
+                    # 覆蓋而丟點。此本地 append 仍讓「伺服器剛啟動、beat 尚未跑第一輪」時走勢線不空。
+                    if not acc or _intraday_sort_key(acc[-1]["time"]) < _intraday_sort_key(t):
                         acc.append({"time": t, "price": snap_price})
-                        await redis.set(acc_key, json.dumps(acc[-3000:]), ex=172800)
                 if sym == "TXF":
                     draw = await redis.get(f"market:intraday:dayhl:TXF:{session_date}")
                     day_hl = json.loads(draw) if draw else None
@@ -601,8 +627,8 @@ class MarketService:
         1. **法定申報期限**（event_type='filing_deadline'）：依證交法 §36 推算（含月營收/季報截止）。
         2. **除權息**（event_type='ex_dividend'）：來自 FinMind 本地庫的真實決議資料。
         3. **美國重大數據**（event_type='us_econ'）：FOMC/非農/ISM 等能精確定日的排程（台北時間）。
-
-        刻意不提供「股東會 / 法說會」：FinMind 無此 dataset，與其顯示假資料不如不顯示。
+        4. **股東會**（event_type='shareholder_meeting'）：來自 tw-hawk/twofc 本地資料湖（含真實
+           announced_at）——FinMind 無此 dataset，靠 tw-hawk 補；未啟用/讀不到則不顯示（graceful）。
         """
         if from_date > to_date:
             raise ValidationError(
@@ -619,8 +645,84 @@ class MarketService:
         events: list[dict[str, Any]] = _tw_filing_deadlines(from_date, to_date)
         events.extend(await self._tw_ex_dividend_events(from_date, to_date))
         events.extend(us_econ_events(from_date, to_date))
+        events.extend(await self._tw_shareholder_meeting_events(from_date, to_date))
         events.sort(key=lambda e: (e["event_date"], e.get("symbol") or ""))
         return events
+
+    async def _tw_shareholder_meeting_events(
+        self, from_date: date_type, to_date: date_type
+    ) -> list[dict[str, Any]]:
+        """從 tw-hawk/twofc DuckDB 讀股東會（twofc_event_calendar，含真實 announced_at）。
+        未啟用（TWHAWK_ENABLED=False）或讀不到（檔案未掛載/被鎖）時回空——graceful，日曆其餘照常。"""
+        if not getattr(settings, "TWHAWK_ENABLED", False):
+            return []
+
+        cache_key = f"cache:market:calendar:agm:{from_date}:{to_date}"
+        redis = None
+        try:
+            redis = await get_redis(RedisDB.CACHE)
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as exc:
+            logger.warning("market.calendar.agm.cache_read_failed", error=str(exc))
+            redis = None
+
+        path = settings.TWHAWK_DUCKDB_PATH
+
+        def _read() -> list[dict[str, Any]]:
+            import duckdb
+
+            con = duckdb.connect(path, read_only=True)
+            try:
+                rows = con.execute(
+                    "SELECT stock_id, event_date, announced_at, payload "
+                    "FROM twofc_event_calendar "
+                    "WHERE event_type='shareholder_meeting' AND event_date BETWEEN ? AND ? "
+                    "ORDER BY event_date",
+                    [from_date.isoformat(), to_date.isoformat()],
+                ).fetchall()
+                return [
+                    {"stock_id": r[0], "event_date": str(r[1])[:10], "payload": r[3]} for r in rows
+                ]
+            finally:
+                con.close()
+
+        try:
+            raw = await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("market.calendar.agm.read_failed", error=str(exc))
+            return []
+
+        names = await self.repo.get_names_for([r["stock_id"] for r in raw])
+        out: list[dict[str, Any]] = []
+        for r in raw:
+            sym = r["stock_id"]
+            name = names.get(sym) or sym
+            kind = ""
+            if r.get("payload"):
+                try:
+                    kind = (json.loads(r["payload"]) or {}).get("kind", "") or ""
+                except (ValueError, TypeError):
+                    kind = ""
+            out.append(
+                {
+                    "symbol": sym,
+                    "name": name,
+                    "market": "TW",
+                    "event_type": "shareholder_meeting",
+                    "event_date": r["event_date"],
+                    "title": f"{name} 股東{kind or '會'}",
+                    "source": "twhawk",
+                }
+            )
+
+        if redis is not None:
+            try:
+                await redis.set(cache_key, json.dumps(out), ex=CALENDAR_CACHE_TTL)
+            except Exception as exc:
+                logger.warning("market.calendar.agm.cache_write_failed", error=str(exc))
+        return out
 
     async def _tw_ex_dividend_events(
         self, from_date: date_type, to_date: date_type

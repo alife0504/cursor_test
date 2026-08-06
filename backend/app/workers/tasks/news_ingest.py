@@ -150,7 +150,16 @@ async def _async_ingest(market: str, hours_back: int) -> dict[str, Any]:
                 # 無 NEWS source 註冊（測試環境可能發生）
                 logger.warning("news_ingest.no_source market=%s err=%s", market, e)
                 return {"market": market, "written": 0, "skipped": True}
-        logger.info("news_ingest.done market=%s written=%d", market, written)
+        if market not in ("TWSE", "TPEX") and written == 0:
+            # 美股 NEWS 來源(yfinance/finnhub)在 symbol=None 時回空 → 市場級抓取結構上永遠 0 筆。
+            # 顯式告警，避免 written=0 被當成「正常無新聞」而長期無人察覺（見審計：US 新聞永遠空白）。
+            logger.warning(
+                "news_ingest.market_level_unsupported market=%s written=0 "
+                "(US NEWS 需個股 symbol；市場級抓取尚未實作)",
+                market,
+            )
+        else:
+            logger.info("news_ingest.done market=%s written=%d", market, written)
         return {"market": market, "written": int(written)}
     finally:
         await engine.dispose()

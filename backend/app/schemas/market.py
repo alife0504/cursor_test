@@ -82,13 +82,17 @@ class MoverRow(BaseSchema):
 
 
 class CalendarItem(BaseSchema):
-    """財報日曆／重大事件單筆。"""
+    """財報日曆／重大事件單筆。對齊 market_service.get_calendar 實際回傳：
+    法定申報期限／美國數據為全市場事件 → symbol 為 None；每筆都帶 source 與 name。
+    （原宣告 symbol/market 非空、缺 source/name，與實際 payload 脫節。）"""
 
-    symbol: str
-    market: MarketCode
-    event_type: str
+    symbol: str | None = None
+    name: str | None = None
+    market: MarketCode | None = None
+    event_type: str  # filing_deadline / ex_dividend / shareholder_meeting / us_econ
     event_date: date
     title: str
+    source: str | None = None
     extra: dict | None = None
 
 

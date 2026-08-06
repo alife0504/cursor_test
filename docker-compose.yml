@@ -111,6 +111,16 @@ services:
       REDIS_HOST: redis
       QDRANT_HOST: qdrant
       APP_ENV: dev
+      # tw-hawk/twofc 本地資料湖（唯讀掛載）→ 財報日曆的股東會事件
+      TWHAWK_ENABLED: "true"
+      TWHAWK_DUCKDB_PATH: /twhawk/twofc.duckdb
+    volumes:
+      # tw-hawk 資料湖唯讀掛載（僅讀 twofc.duckdb 取股東會；讀不到則 graceful 跳過）
+      # 用 long syntax：Windows 磁碟機字母的冒號會讓短語法(HOST:CONTAINER:MODE)誤切段
+      - type: bind
+        source: C:/Projects/tw-hawk/data
+        target: /twhawk
+        read_only: true
     depends_on:
       timescaledb:
         condition: service_healthy

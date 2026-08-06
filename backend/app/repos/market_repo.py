@@ -20,10 +20,8 @@ from typing import Any, ClassVar
 
 from sqlalchemy import (
     Date,
-    Numeric,
     String,
     and_,
-    cast,
     func,
     literal,
     select,
@@ -90,7 +88,7 @@ class MarketRepository(BaseRepository):
             text(
                 """
                 WITH w AS (
-                    SELECT sp.symbol, sp.date, sp.close, sp.volume, sp.turnover,
+                    SELECT sp.symbol, sp.date AS trade_date, sp.close, sp.volume, sp.turnover,
                            LAG(sp.close) OVER (PARTITION BY sp.symbol ORDER BY sp.date) AS prev,
                            ROW_NUMBER() OVER (
                                PARTITION BY sp.symbol ORDER BY sp.date DESC
@@ -101,7 +99,7 @@ class MarketRepository(BaseRepository):
                       AND sp.date >= :from_date AND sp.date <= :as_of
                 ),
                 d AS (
-                    SELECT close, prev, volume, turnover,
+                    SELECT trade_date, close, prev, volume, turnover,
                            (close - prev) / prev * 100.0 AS pct
                     FROM w
                     WHERE rn = 1 AND prev IS NOT NULL AND prev > 0
@@ -112,8 +110,10 @@ class MarketRepository(BaseRepository):
                     COUNT(*) FILTER (WHERE close = prev)                        AS unchanged,
                     COUNT(*) FILTER (WHERE pct >= :lu_lo AND pct <= :lim_hi)    AS limit_up,
                     COUNT(*) FILTER (WHERE pct <= :ld_hi AND pct >= :lim_lo)    AS limit_down,
-                    COALESCE(SUM(volume), 0)                                    AS volume,
-                    COALESCE(SUM(turnover), 0)                                  AS amount
+                    -- 家數用 rn=1 母體（補回當日未載完的檔）；但總量/總額只加總「as_of 當日」列，
+                    -- 否則未載檔退用前一交易日的 volume/turnover，會使總額變成今昨混日相加（高估）。
+                    COALESCE(SUM(volume) FILTER (WHERE trade_date = :as_of), 0)   AS volume,
+                    COALESCE(SUM(turnover) FILTER (WHERE trade_date = :as_of), 0) AS amount
                 FROM d
                 """
             ),
@@ -560,47 +560,58 @@ class MarketRepository(BaseRepository):
                 return []
 
         markets = _market_filter(market)
-        # change_pct = (close - open) / open * 100
-        # 用 NULLIF(open, 0) 防除以 0
-        change_pct_expr = (
-            (cast(StockPrice.close, Numeric(20, 6)) - cast(StockPrice.open, Numeric(20, 6)))
-            / func.nullif(cast(StockPrice.open, Numeric(20, 6)), 0)
-            * literal(100)
-        ).label("change_pct")
-
-        stmt = (
-            select(
-                StockPrice.symbol.label("symbol"),
-                StockList.name.label("name"),
-                StockPrice.close.label("close"),
-                change_pct_expr,
-                StockPrice.volume.label("volume"),
-            )
-            .join(StockList, StockList.symbol == StockPrice.symbol)
-            .where(
-                and_(
-                    StockList.market.in_(markets),
-                    # 同 get_overview_aggregates：不濾 active，排行榜會塞滿權證
-                    StockList.is_active.is_(True),
-                    StockPrice.date == as_of,
+        # 漲跌幅＝(收盤 − 前一交易日收盤)/前收 ×100，即台股標準「漲跌幅」定義。
+        # 原用 (close−open)/open 是「當日開盤→收盤」的盤中變化，與 get_overview_aggregates
+        # (L104)、get_eod_change_rows(L468/490)、以及即時榜 get_realtime_movers（對 prev_close）
+        # 全部不一致：跳空漲停鎖死一整天(open≈close) 會算成 ~0% → 被完全排出漲幅榜；跳空跌停
+        # 同樣嚴重低估。故比照 get_eod_change_rows 改用 LAG(close) 取前一交易日收盤為基準。
+        # 日期下界在 Python 算好當參數（SQLAlchemy text() 的 :param 會撞 ::date cast）。
+        from_date = as_of - timedelta(days=20)
+        # order_by 以白名單映射固定字串，避免任何注入（mover_type 非自由文字）。
+        order_clause = {
+            "gainers": "d.change_pct DESC NULLS LAST",
+            "losers": "d.change_pct ASC NULLS LAST",
+            "volume": "d.volume DESC NULLS LAST",
+        }.get(mover_type.lower(), "d.change_pct DESC NULLS LAST")
+        # 注意：本檔對 get_movers 的動態 ORDER BY 以白名單固定字串插值（order_clause 僅
+        # gainers/losers/volume 三種），非使用者輸入；ruff S608 為誤報，已於 pyproject
+        # per-file-ignores 對本檔關閉 S608。其餘 text() 查詢一律走 bind param。
+        result = await self.session.execute(
+            text(
+                f"""
+                WITH w AS (
+                    SELECT sp.symbol, sp.date, sp.open, sp.close, sp.volume,
+                           LAG(sp.close) OVER (PARTITION BY sp.symbol ORDER BY sp.date) AS prev_close,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY sp.symbol ORDER BY sp.date DESC
+                           ) AS rn
+                    FROM stock_prices sp
+                    JOIN stock_list sl ON sl.symbol = sp.symbol
+                    WHERE sl.is_active AND sl.market = ANY(:mk)
+                      AND sp.date >= :from_date AND sp.date <= :as_of
+                      -- 排除 close=0 的「無成交/佔位」列（如流動性低的債券 ETF）：否則 rn=1 會選到
+                      -- 這種 0 收盤 → (0-前收)/前收 = -100% 污染跌幅榜；濾掉後 LAG 也會取到上一個真實收盤。
+                      AND sp.close IS NOT NULL AND sp.close > 0
+                ),
+                d AS (
+                    SELECT symbol, close, volume,
+                           CASE
+                               WHEN prev_close IS NOT NULL AND prev_close <> 0
+                                   THEN (close - prev_close) / prev_close * 100.0
+                               WHEN open IS NOT NULL AND open <> 0
+                                   THEN (close - open) / open * 100.0
+                               ELSE NULL
+                           END AS change_pct
+                    FROM w WHERE rn = 1
                 )
-            )
+                SELECT d.symbol, sl.name AS name, d.close, d.change_pct, d.volume
+                FROM d JOIN stock_list sl ON sl.symbol = d.symbol
+                ORDER BY {order_clause}
+                LIMIT :limit
+                """
+            ),
+            {"mk": list(markets), "from_date": from_date, "as_of": as_of, "limit": limit},
         )
-        mt = mover_type.lower()
-        if mt == "gainers":
-            stmt = stmt.order_by(change_pct_expr.desc().nullslast())
-        elif mt == "losers":
-            # 跌幅榜語意＝最負在前、未定義(NULL，如 open=0 停牌股) 沉底；
-            # 與 gainers 的 nullslast 對稱。原用 nullsfirst 會把 NULL 排到榜首擠掉真正大跌股。
-            stmt = stmt.order_by(change_pct_expr.asc().nullslast())
-        elif mt == "volume":
-            stmt = stmt.order_by(StockPrice.volume.desc())
-        else:
-            # 預設 gainers
-            stmt = stmt.order_by(change_pct_expr.desc().nullslast())
-
-        stmt = stmt.limit(limit)
-        result = await self.session.execute(stmt)
         rows: list[dict[str, Any]] = []
         for r in result.all():
             rows.append(
@@ -608,7 +619,7 @@ class MarketRepository(BaseRepository):
                     "symbol": r.symbol,
                     "name": r.name,
                     "close": r.close,
-                    "change_pct": r.change_pct,
+                    "change_pct": float(r.change_pct) if r.change_pct is not None else None,
                     "volume": int(r.volume or 0),
                 }
             )

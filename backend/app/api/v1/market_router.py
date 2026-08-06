@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.database import get_rw_session
 from app.core.response_envelope import envelope_success
 from app.data_sources.tw.finmind_realtime import FinMindRealtimeClient
-from app.schemas.market import InstitutionalRow, MoverRow
+from app.schemas.market import CalendarItem, InstitutionalRow, MoverRow
 from app.services.market_service import MarketService
 
 if TYPE_CHECKING:
@@ -121,7 +121,7 @@ async def get_movers(
     return envelope_success(items, trace_id=_trace_id(request))
 
 
-@router.get("/calendar", summary="財報日曆（mock；P17 完整）")
+@router.get("/calendar", summary="財報日曆（法定申報期限＋除權息＋股東會＋美國數據，真實資料）")
 async def get_calendar(
     request: Request,
     from_date: date = Query(..., alias="from"),
@@ -131,7 +131,10 @@ async def get_calendar(
     session: AsyncSession = Depends(get_rw_session),
 ):
     service = MarketService(session)
-    items = await service.get_calendar(from_date=from_date, to_date=to_date, market=market)
+    rows = await service.get_calendar(from_date=from_date, to_date=to_date, market=market)
+    # 經 CalendarItem 驗證/序列化把關（與 movers/institutional 端點一致）：來源若漏欄位或改名，
+    # schema 會在此攔截，而非讓前端渲染時取到 undefined。
+    items = [CalendarItem(**e).model_dump(mode="json") for e in rows]
     return envelope_success(items, trace_id=_trace_id(request))
 
 
@@ -210,7 +213,9 @@ async def get_heatmap(
 @router.get("/intraday", summary="盤中即時走勢序列 + 水位（加權指數 / 台指全）")
 async def get_intraday(
     request: Request,
-    symbol: str = Query(default="TAIEX", max_length=10, description="TAIEX（加權指數）或 TXF（台指全）"),
+    symbol: str = Query(
+        default="TAIEX", max_length=10, description="TAIEX（加權指數）或 TXF（台指全）"
+    ),
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_rw_session),
 ):

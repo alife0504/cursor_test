@@ -148,6 +148,12 @@ class Settings(BaseSettings):
     FINMIND_LOCAL_USER: str = "postgres"
     FINMIND_LOCAL_PASSWORD: SecretStr | None = None
 
+    # ── tw-hawk / twofc 本地資料湖（DuckDB 檔）——補 FinMind 缺的股東會/財報公布日等 ──
+    # 啟用後財報日曆會加上「股東會」事件（twofc_event_calendar，含真實 announced_at）。
+    # 讀不到（檔案未掛載/被鎖）時 graceful 跳過，日曆其餘照常。
+    TWHAWK_ENABLED: bool = False
+    TWHAWK_DUCKDB_PATH: str = "/twhawk/twofc.duckdb"
+
     # ── FinMind 即時盤 snapshot（盤中即時報價；需 FinMind 付費 Sponsor 等級 token）──
     # taiwan_stock_tick_snapshot / taiwan_futures_snapshot 這兩個端點免費(register)等級無權，
     # 會回 status=400「Your level is register」。預設關閉：開啟前請確認 token 為 Sponsor 等級，
