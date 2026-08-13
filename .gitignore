@@ -1,0 +1,91 @@
+# ── 本機備份（含密鑰，禁止進 git）────────────────────
+backups/
+
+# ── Python ─────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+*.egg
+build/
+dist/
+
+# ── Node / Frontend ────────────────────────────────
+node_modules/
+.next/
+*.tsbuildinfo
+coverage/
+.npm
+.pnpm-debug.log*
+.yarn-debug.log*
+.yarn-error.log*
+
+# ── Env / Secrets ──────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.prod
+*.key
+*.pem
+*.p12
+*.crt
+
+# ── OS ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Docker / Backup ────────────────────────────────
+docker/backups/*.tar.gz*
+docker/backups/*.gpg
+docker/backups/*.enc
+docker/nginx/certs/*.pem
+docker/nginx/certs/*.key
+!docker/nginx/certs/.gitkeep
+
+# ── IDE ────────────────────────────────────────────
+.vscode/settings.local.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Test artifacts ─────────────────────────────────
+playwright-report/
+test-results/
+.coverage
+htmlcov/
+
+# ── Security / coverage audit 工具產物 ──────────────
+backend/bandit_audit.json
+backend/cov_audit.json
+backend/.coverage
+
+# ── Logs ───────────────────────────────────────────
+*.log
+logs/
+backend.log
+celery.log
+
+# ── Python uv ──────────────────────────────────────
+.uv-cache/
+
+# ── Local override（非 git 管理） ────────────────────
+*.local
+
+# ── Claude Code worktrees（執行時臨時建立） ──────────
+.claude/worktrees/
+
+# ── Phase 19: runtime 報表（每日跑出來，不進 git） ──────
+docs/slo_reports/*.json
+docs/dr_drills/*.md
+docs/dr_drills/*.log
+# 但保留 .gitkeep 讓目錄存在
+!docs/slo_reports/.gitkeep
+!docs/dr_drills/.gitkeep

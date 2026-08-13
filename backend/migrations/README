@@ -1,0 +1,15 @@
+Alembic migrations for TradingAgents-TW (Phase 4 baseline).
+
+用法（在 backend/）：
+  uv run alembic upgrade head        # 升到最新
+  uv run alembic downgrade -1        # 退一步
+  uv run alembic downgrade base      # 全部退回
+  uv run alembic revision -m "msg"   # 新增空白 migration
+  uv run alembic current             # 看目前版本
+  uv run alembic history             # 看歷史
+
+連線：env.py 預設用 settings.postgres_dsn_migration（ta_migration 帳號）。
+測試 / CI 可用 ALEMBIC_DATABASE_URL 環境變數覆寫。
+
+baseline 0001-0013 是 Phase 4 一次性建立所有 v1.0 必要 schema。
+hypertable / retention policy / trigger 都用 op.execute() 顯式寫。

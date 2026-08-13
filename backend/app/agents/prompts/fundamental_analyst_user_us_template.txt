@@ -1,0 +1,33 @@
+## 個股基本資訊（美股）
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+- 交易所：{market}
+- 市值（資本額；USD）：{capital}
+- 員工數：{employees}
+
+## 近 4 季財報摘要（季度由新到舊；資料源：yfinance / Alpha Vantage / SEC EDGAR）
+{financials_table}
+
+## 月度營收
+{monthly_revenue_table}
+
+## 關鍵比率（後端已計算，**請直接引用，不要重算**）
+- 最新 EPS（TTM）：{eps_ttm}
+- PE：{pe_ratio}（產業中位數約 {industry_pe_hint}）
+- PB：{pb_ratio}
+- ROE（近 4 季平均）：{roe}%
+- 毛利率（最近季）：{gross_margin}%
+- 營業利益率：{op_margin}%
+- 營收年增率（最近季 vs 去年同季）：{revenue_yoy_latest}%
+- 自由現金流量（近 4 季合計，USD）：{fcf_ttm}
+
+## 美股基本面常識補充
+- 美股公司多採每季財報（Q1/Q2/Q3/Q4），公告時程 earnings calendar 為主軸；無台股「月營收」公告制度。
+- US GAAP 與 IFRS 差異：營收認列、租賃、stock-based compensation 等項目處理不同；請避免跨地區直接比較。
+- 美股估值常用指標含 PE、Forward PE、PEG、EV/EBITDA、P/S；對成長股可結合 PEG 評估。
+- 部分大型科技股無股息但回購可觀（shareholder yield 應考慮回購）。
+
+## 你的任務
+請依上述資料，產出基本面分析（用美股市場慣用框架）。
+**最後輸出**：繁體中文綜述（1~2 段） + ```json``` 區塊（符合 FundamentalAnalysisResult schema）。

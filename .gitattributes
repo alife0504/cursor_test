@@ -1,0 +1,36 @@
+# 強制 Unix line endings（給 docker container 用的 shell script）
+# 避免 Windows core.autocrlf 把 LF 轉 CRLF 導致 container 內 #!/bin/bash\r 失敗
+*.sh           text eol=lf
+*.bash         text eol=lf
+Dockerfile     text eol=lf
+Dockerfile.*   text eol=lf
+
+# Docker compose / yaml / toml 統一 LF
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.toml         text eol=lf
+
+# Python / config 統一 LF
+*.py           text eol=lf
+*.cfg          text eol=lf
+*.ini          text eol=lf
+*.sql          text eol=lf
+*.template     text eol=lf
+
+# Frontend / config 統一 LF
+*.ts           text eol=lf
+*.tsx          text eol=lf
+*.js           text eol=lf
+*.jsx          text eol=lf
+*.json         text eol=lf
+*.md           text eol=lf
+
+# Binary（明確標示，避免亂處理）
+*.png          binary
+*.jpg          binary
+*.jpeg         binary
+*.gif          binary
+*.ico          binary
+*.pdf          binary
+*.zip          binary
+*.gz           binary

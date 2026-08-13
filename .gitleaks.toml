@@ -1,0 +1,16 @@
+# gitleaks 設定 — 沿用預設規則，僅將「說明文件」中的範例/placeholder 金鑰列入 allowlist。
+# 背景：docs/ 下的 runbook / phase 報告 / 指南含 smoke-test 範例指令與 placeholder 金鑰
+#       （如 docs/runbooks/auth.md 的範例 API key），非真實機密。
+# 程式碼（backend/ frontend/）仍以預設規則完整掃描。
+title = "TradingAgents-TW gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "文件範例/placeholder（非真實機密）"
+paths = [
+  '''docs/.*''',
+  '''.*\.example$''',
+  '''.*\.example\..*''',
+]

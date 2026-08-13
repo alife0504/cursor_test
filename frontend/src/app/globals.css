@@ -1,0 +1,275 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────────────────────
+   TradingAgents-TW Design System v1.1
+   - 品牌：靛藍（trust + 金融專業）
+   - 漲跌：台股慣例（紅漲綠跌）
+   - Chart palette：藍 / 橙 / 紫 / 綠 / 紅 — 有對比邏輯
+   - Shadow：軟陰影 + hover 提示
+   - Radius：稍大（0.75rem）— 現代感
+   ────────────────────────────────────────────────────────────── */
+
+@layer base {
+  :root {
+    /* 基底 — 冷調靛灰底（非純白），白卡片浮其上形成層次；與深色 sidebar 同色系呼應 */
+    --background: 222 32% 95.5%;
+    --foreground: 222 47% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 13%;
+
+    /* 品牌（靛藍）— 提亮為飽和靛藍，更有生命、去除近黑感 */
+    --primary: 223 57% 33%;
+    --primary-foreground: 0 0% 100%;
+    --primary-muted: 223 45% 94%;
+
+    /* 中性 — 冷調，與品牌同源 */
+    --secondary: 220 22% 93%;
+    --secondary-foreground: 223 47% 26%;
+    --muted: 220 24% 93%;
+    --muted-foreground: 220 12% 42%;
+    --accent: 222 30% 90%;
+    --accent-foreground: 223 47% 26%;
+
+    /* 表單 */
+    --border: 220 20% 88%;
+    --input: 220 20% 86%;
+    --ring: 223 57% 45%;
+
+    /* 訊號（台股紅漲綠跌） */
+    --bull: 0 75% 50%;
+    --bull-foreground: 0 0% 100%;
+    --bull-muted: 0 80% 96%;
+    --bear: 142 65% 38%;
+    --bear-foreground: 0 0% 100%;
+    --bear-muted: 142 50% 95%;
+    --flat: 220 9% 46%;
+    --flat-muted: 220 14% 96%;
+
+    /* Signal Badge */
+    --signal-buy: 0 75% 50%;
+    --signal-buy-foreground: 0 0% 100%;
+    --signal-buy-muted: 0 80% 96%;
+    --signal-sell: 142 65% 38%;
+    --signal-sell-foreground: 0 0% 100%;
+    --signal-sell-muted: 142 50% 95%;
+    --signal-hold: 38 92% 50%;
+    --signal-hold-foreground: 0 0% 100%;
+    --signal-hold-muted: 38 90% 95%;
+
+    /* Stage（AgentFlowGraph） */
+    --state-pending: 220 9% 65%;
+    --state-pending-muted: 220 14% 96%;
+    --state-running: 38 92% 50%;
+    --state-running-muted: 38 90% 95%;
+    --state-done: 142 65% 38%;
+    --state-done-muted: 142 50% 95%;
+    --state-failed: 0 75% 50%;
+    --state-failed-muted: 0 80% 96%;
+
+    /* 危險 / 警告 / 資訊 */
+    --destructive: 0 75% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 215 80% 50%;
+    --info-foreground: 0 0% 100%;
+    --success: 142 65% 38%;
+    --success-foreground: 0 0% 100%;
+
+    /* Chart palette */
+    --chart-1: 215 80% 50%;
+    --chart-2: 38 92% 55%;
+    --chart-3: 280 60% 55%;
+    --chart-4: 142 65% 45%;
+    --chart-5: 0 75% 55%;
+
+    /* 圓角 + 陰影 */
+    --radius: 0.75rem;
+
+    /* Sidebar */
+    --sidebar: 222 47% 11%;
+    --sidebar-foreground: 220 14% 90%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 40% 18%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 222 40% 18%;
+    --sidebar-ring: 217 91% 60%;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 220 14% 96%;
+    --card: 222 47% 11%;
+    --card-foreground: 220 14% 96%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 220 14% 96%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 7%;
+    --primary-muted: 222 47% 15%;
+
+    --secondary: 222 40% 18%;
+    --secondary-foreground: 220 14% 96%;
+    --muted: 222 40% 18%;
+    --muted-foreground: 220 9% 65%;
+    --accent: 222 40% 22%;
+    --accent-foreground: 220 14% 96%;
+
+    --border: 222 40% 20%;
+    --input: 222 40% 20%;
+    --ring: 217 91% 60%;
+
+    --bull: 0 70% 58%;
+    --bull-foreground: 0 0% 100%;
+    --bull-muted: 0 50% 16%;
+    --bear: 142 55% 50%;
+    --bear-foreground: 0 0% 100%;
+    --bear-muted: 142 30% 14%;
+    --flat: 220 9% 65%;
+    --flat-muted: 222 40% 18%;
+
+    --signal-buy: 0 70% 58%;
+    --signal-buy-foreground: 0 0% 100%;
+    --signal-buy-muted: 0 50% 16%;
+    --signal-sell: 142 55% 50%;
+    --signal-sell-foreground: 0 0% 100%;
+    --signal-sell-muted: 142 30% 14%;
+    --signal-hold: 38 88% 58%;
+    --signal-hold-foreground: 222 47% 7%;
+    --signal-hold-muted: 38 50% 16%;
+
+    --state-pending: 220 9% 55%;
+    --state-pending-muted: 222 40% 18%;
+    --state-running: 38 88% 58%;
+    --state-running-muted: 38 50% 16%;
+    --state-done: 142 55% 50%;
+    --state-done-muted: 142 30% 14%;
+    --state-failed: 0 70% 58%;
+    --state-failed-muted: 0 50% 16%;
+
+    --destructive: 0 70% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 38 88% 58%;
+    --warning-foreground: 222 47% 7%;
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+    --success: 142 55% 50%;
+    --success-foreground: 0 0% 100%;
+
+    --chart-1: 217 91% 60%;
+    --chart-2: 38 88% 58%;
+    --chart-3: 280 65% 65%;
+    --chart-4: 142 55% 50%;
+    --chart-5: 0 70% 58%;
+
+    --sidebar: 222 47% 9%;
+    --sidebar-foreground: 220 14% 90%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 222 47% 7%;
+    --sidebar-accent: 222 40% 16%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 222 40% 16%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  html {
+    @apply font-sans;
+    /* 中文與數字 fallback；數字用 tnum 排齊 */
+    text-rendering: optimizeLegibility;
+  }
+
+  /* 標題層級：階層比預設更鮮明 */
+  h1 {
+    @apply text-2xl font-bold tracking-tight;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    @apply text-xl font-semibold tracking-tight;
+  }
+  h3 {
+    @apply text-base font-semibold;
+  }
+
+  /* 卡片 hover 提示（共用 .card） */
+  .card-hover {
+    transition: box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease;
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 12px hsl(var(--primary) / 0.08);
+    border-color: hsl(var(--primary) / 0.2);
+  }
+
+  /* 數字一律 tabular-nums + 不換行 */
+  .num {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* 滾動條（細） */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* 漸層 hero 用 */
+  .bg-hero-mesh {
+    background-image:
+      radial-gradient(at 0% 0%, hsl(var(--primary) / 0.08) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsl(var(--chart-2) / 0.06) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsl(var(--chart-3) / 0.06) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsl(var(--info) / 0.06) 0px, transparent 50%);
+  }
+  /* App 內容區底色 — 冷靛灰 + 極淡品牌光暈，與深色 sidebar 同源呼應、避免死白 */
+  .bg-app-mesh {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(1000px circle at 0% -5%, hsl(var(--primary) / 0.07), transparent 45%),
+      radial-gradient(760px circle at 100% 0%, hsl(var(--info) / 0.05), transparent 42%);
+    background-attachment: fixed;
+  }
+  /* 深色品牌漸層 — sidebar / 登入 hero 用：明顯的垂直靛藍漸層 + 頂部品牌光暈，
+     色彩飽和、清楚是「藍」非「黑」，但仍夠深讓白字可讀。 */
+  .bg-brand-gradient {
+    background-color: hsl(225 52% 21%);
+    background-image:
+      /* 頂部品牌光暈（logo 後方）— 明亮靛藍 halo，往下淡出 */
+      radial-gradient(128% 50% at 50% -6%, hsl(221 84% 54% / 0.62), transparent 58%),
+      /* 右下微紫，增添層次 */
+      radial-gradient(100% 45% at 100% 106%, hsl(265 64% 50% / 0.38), transparent 60%),
+      /* 主體垂直漸層：上亮靛藍 → 下深靛藍（高瘦面才看得出變化） */
+      linear-gradient(180deg, hsl(224 58% 32%) 0%, hsl(228 56% 22%) 55%, hsl(231 54% 15%) 100%);
+  }
+  /* 可重複使用：focus ring */
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+}

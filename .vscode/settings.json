@@ -1,0 +1,59 @@
+{
+  "//": "v7.0：排除 legacy/、build artifacts、套件目錄，避免 IDE 搜尋到舊版內容造成混淆",
+  "python.analysis.exclude": [
+    "legacy/**",
+    ".venv/**",
+    "venv/**",
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/__pycache__/**"
+  ],
+  "python.testing.pytestArgs": [
+    "backend/tests"
+  ],
+  "python.testing.pytestEnabled": true,
+  "files.watcherExclude": {
+    "**/legacy/**": true,
+    "**/.venv/**": true,
+    "**/venv/**": true,
+    "**/node_modules/**": true,
+    "**/.next/**": true,
+    "**/__pycache__/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.mypy_cache/**": true
+  },
+  "search.exclude": {
+    "legacy/**": true,
+    ".venv/**": true,
+    "venv/**": true,
+    "node_modules/**": true,
+    ".next/**": true,
+    "**/*.lock": true,
+    "**/uv.lock": true,
+    "**/package-lock.json": true,
+    "PLAN.v6.0.backup.md": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.mypy_cache": true
+  },
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  }
+}

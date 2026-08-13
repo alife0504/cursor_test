@@ -1,0 +1,17 @@
+### Phase 18 — bandit static analysis 設定（YAML）
+###
+### B104（hardcoded_bind_all_interfaces）誤判：
+###   - rate_limit.py / auth_router.py 等檔案出現 "0.0.0.0" 是「fallback IP 字串」
+###     用於 audit log / rate-limit key，不是 socket bind。
+###   - validators.py 的 "0.0.0.0" 是 SSRF blocklist 條目（拒絕綁定到 0.0.0.0），
+###     反而是「防禦性使用」。
+### 結論：B104 整體跳過；個別檔案若真有 bind 應另外 review。
+
+skips:
+  - B104
+exclude_dirs:
+  - tests
+  - migrations
+  - scripts
+  - .venv
+  - venv

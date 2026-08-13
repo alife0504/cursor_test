@@ -1,0 +1,27 @@
+## 個股基本資訊
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+- 市場：{market}
+- 資本額：{capital}
+- 員工數：{employees}
+
+## 近 4 季財報摘要（季度由新到舊）
+{financials_table}
+
+## 月營收（近 12 個月，台股獨有）
+{monthly_revenue_table}
+
+## 關鍵比率（後端已計算，**請直接引用，不要重算**）
+- 最新 EPS（TTM）：{eps_ttm}
+- PE：{pe_ratio}（產業中位數約 {industry_pe_hint}）
+- PB：{pb_ratio}
+- ROE（近 4 季平均）：{roe}%
+- 毛利率（最近季）：{gross_margin}%
+- 營業利益率：{op_margin}%
+- 營收年增率（最近月）：{revenue_yoy_latest}%
+- 自由現金流量（近 4 季合計）：{fcf_ttm}
+
+## 你的任務
+請依上述資料，產出基本面分析。
+**最後輸出**：繁體中文綜述（1~2 段） + ```json``` 區塊（符合 FundamentalAnalysisResult schema）。

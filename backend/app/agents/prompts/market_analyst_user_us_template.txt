@@ -1,0 +1,33 @@
+## 個股基本資訊（美股）
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+- 交易所：{market}
+
+## 近 60 個交易日價量摘要（資料源：yfinance / Alpha Vantage / Finnhub）
+- 期間：{date_start} ~ {date_end}
+- 收盤價區間：最低 {price_low} / 最高 {price_high} / 最新 {price_last}
+- 平均成交量（日，單位股）：{avg_volume}
+- 累計漲跌幅：{cum_return_pct}%
+
+## 技術指標（後端已計算，**請直接引用，不要重算**）
+- RSI(14)：{rsi}
+- MACD：{macd_line} / Signal：{macd_signal} / Histogram：{macd_hist}
+- KD：K={kd_k} / D={kd_d}
+- BBANDS(20, 2σ)：上軌 {bb_upper} / 中軌 {bb_middle} / 下軌 {bb_lower}
+- MA20：{ma20}
+- MA60：{ma60}
+- 量價背離訊號：{divergence_note}
+
+## 近 10 個交易日 OHLCV（由舊到新；價格單位 USD）
+{ohlcv_table}
+
+## 美股市場常識補充
+- 美股一手 = 1 股（非台股 1000 股）；計算位置大小時請以美元計。
+- 成交量單位為「股」，與台股「張」不同；請勿換算。
+- 美股無漲跌幅限制（除非個股觸發 LULD circuit breaker）；極端波動屬常態。
+- 美股可做空（融券）較台股普及，技術面破位常加速下挫。
+
+## 你的任務
+請依上述資料，產出技術面分析。請依美股市場常識給結論（不要套用台股 7% 漲跌停的假設）。
+**最後輸出**：先用繁體中文寫綜述（1~2 段），接著用 ```json``` 區塊輸出符合 MarketAnalysisResult schema 的物件。

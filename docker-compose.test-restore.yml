@@ -1,0 +1,41 @@
+# TradingAgents-TW — 還原驗證隔離環境（Phase 19）
+#
+# 用途：verify_backup.sh 啟動獨立的 TimescaleDB（5433 port），
+#       把備份還原進來跑 verify_data.py，不會影響 prod 的 timescaledb (5432)。
+#
+# 啟動：docker compose -f docker-compose.test-restore.yml up -d
+# 清理：docker compose -f docker-compose.test-restore.yml down -v   # -v 清 volume
+
+name: tradingagents-test-restore
+
+services:
+  timescaledb_test:
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: ta-timescaledb-test-restore
+    # 對外 5433（與 prod 5432 隔離）
+    ports:
+      - "${TEST_RESTORE_PG_PORT:-5433}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: tradingagents_tw_test
+      # init.sh 需要這些密碼來建帳號（重複利用 prod 的 init.sh）
+      TA_MIGRATION_PASSWORD: ${TA_MIGRATION_PASSWORD}
+      TA_SERVICE_RW_PASSWORD: ${TA_SERVICE_RW_PASSWORD}
+      TA_AGENT_RO_PASSWORD: ${TA_AGENT_RO_PASSWORD}
+    volumes:
+      # 獨立 named volume，避免覆蓋 prod
+      - timescaledb_data_test:/var/lib/postgresql/data
+      # 重複利用 prod 的 init script（schema 對齊）
+      - ./docker/timescaledb/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./docker/timescaledb/init.sql.template:/docker-entrypoint-initdb.d/init.sql.template:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tradingagents_tw_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: "no"   # 只在驗證時跑，不自動 restart
+
+volumes:
+  timescaledb_data_test:
+    name: tradingagents_timescaledb_data_test

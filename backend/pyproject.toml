@@ -1,0 +1,190 @@
+[project]
+name = "tradingagents-backend"
+version = "1.1.0"
+description = "TradingAgents-TW Secure Edition backend (FastAPI + LangGraph + TimescaleDB)"
+readme = "../README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "TradingAgents-TW" }]
+
+# v7.0 Phase 1~5 累積依賴
+dependencies = [
+    # Web 框架
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.32,<0.33",
+    # 設定 / 驗證
+    "pydantic>=2.7,<3.0",
+    "pydantic-settings>=2.4,<3.0",
+    "email-validator>=2.2,<3.0",
+    # Logging
+    "structlog>=24.4,<25.0",
+    # HTTP client
+    "httpx>=0.27,<0.29",
+    "tenacity>=8.5,<10.0",
+    # DB
+    "sqlalchemy[asyncio]>=2.0.30,<2.1",
+    "asyncpg>=0.29,<0.31",
+    "duckdb>=1.5.4,<2",  # 讀 tw-hawk/twofc 本地資料湖（股東會/財報公布日等）；下限鎖 1.5.4：需 >= 寫入端才能讀其 storage format
+    "alembic>=1.13,<2.0",
+    # Redis
+    "redis>=5.0,<6.0",
+    # Qdrant（P3 startup 連線需要）
+    "qdrant-client>=1.9,<2.0",
+    # pgvector（P4 加,現階段不主用,預留未來若改 pgvector 替代 Qdrant）
+    "pgvector>=0.3,<0.5",
+    # Auth (P8 才用,這裡先列)
+    # python-jose 下限提到 3.4：3.3.0 受 CVE-2024-33664/33663 影響，3.4.0 起修復
+    "python-jose[cryptography]>=3.4,<4.0",
+    # passlib 已移除：密碼雜湊實際由 app/core/security.py 直接 import bcrypt 完成，
+    # passlib 1.7.4(2020 停維護)與 bcrypt>=4.1 不相容、且無任何使用 → 純死相依
+    # 時區
+    "tzdata",
+    # P5：資料源 Adapter / Repository（pandas + parsing + rate limit）
+    "pandas>=2.2,<3.0",
+    "pyarrow>=15,<22",
+    "aiolimiter>=1.1,<2.0",
+    "feedparser>=6.0,<7.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "lxml>=5.2,<7.0",
+    # P6：美股資料源（yfinance 同步包，async wrap；Alpha Vantage/Finnhub/SEC EDGAR 用 httpx）
+    "yfinance>=0.2.40,<0.3",
+    # P7：Celery worker + beat（broker/backend = redis db=1）+ sync DB driver（給 DLQ signal 用）
+    "celery[redis]>=5.4,<5.5",
+    "psycopg2-binary>=2.9,<3.0",
+    # P7：bcrypt（seed_users.py 用，與 init_db.py 一致；passlib 4.x bug 改用 bcrypt 直接）
+    "bcrypt>=4.2,<5.0",
+    # P7：seed/backfill CLI 進度條
+    "tqdm>=4.66,<5.0",
+    # P11：PDF 匯出（Playwright + chromium，依 ADR-010）
+    "playwright>=1.45,<2.0",
+    # P11：HTML 模板（PDF / 通知）
+    "jinja2>=3.1,<4.0",
+    # P11：Prometheus metrics（/metrics endpoint）
+    "prometheus-client>=0.20,<1.0",
+    # P11：XLSX 匯出
+    "openpyxl>=3.1,<4.0",
+    # P11：Fernet 加密 LINE / Telegram token
+    "cryptography>=42.0,<46.0",
+    # P12：LangGraph + LangChain Core + Gemini Provider + token counting
+    # 注意：langgraph pin <0.3（0.3 大改 API）；langchain-core 配合 langgraph 0.2.x 需 0.3.x
+    "langgraph>=0.2.50,<0.3",
+    "langchain-core>=0.3,<0.4",
+    "langchain-google-genai>=2.0,<3.0",
+    "tiktoken>=0.7,<1.0",
+    # P14：OpenAI / Anthropic Provider + Fallback Chain（14.4）
+    # 直接 SDK 為主（cost / token 取自 response.usage），langchain wrapper 預留 tool calling
+    "openai>=1.50,<2.0",
+    "anthropic>=0.40,<1.0",
+    "langchain-openai>=0.2,<1.0",
+    "langchain-anthropic>=0.3,<1.0",
+]
+
+[dependency-groups]
+dev = [
+    # Lint / Format
+    "ruff>=0.7,<1.0",
+    # 測試
+    "pytest>=8.3,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-cov>=5.0,<7.0",
+    # 型別
+    "mypy>=1.13,<2.0",
+    "types-redis>=4.6,<5.0",
+    # Phase 8：Redis-in-memory（fakeredis）給 auth 單元測試用
+    # Phase 9：加 lupa 讓 fakeredis 支援 EVAL / SCRIPT
+    "fakeredis[lua]>=2.26,<3.0",
+    "lupa>=2.0,<3.0",
+    # 安全工具（P1 退出條件需要）
+    "detect-secrets>=1.5,<2.0",
+    "pre-commit>=4.0,<5.0",
+    # P18 退出條件：bandit -r app/ 高風險 = 0
+    "bandit>=1.7,<2.0",
+    # P18 測試：httpx mock transport / pytest 補強
+    "pytest-httpx>=0.30,<1.0",
+]
+
+# ────────────────────────────────────────────────────────
+# Tooling 設定
+# ────────────────────────────────────────────────────────
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "../legacy",
+    "migrations/versions",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle / pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "S",             # bandit-lite
+    "C4",            # comprehensions
+    "SIM",           # simplify
+    "RUF",           # ruff-specific
+]
+ignore = [
+    "E501",          # line length（formatter 處理）
+    "S101",          # assert 在 test 中正常
+    "B008",          # FastAPI Depends() 在 default arg 是慣例
+    # 繁中專案：ruff 會把全形標點視為 ambiguous，但這正是中文寫作慣例
+    "RUF001",        # ambiguous string 全形
+    "RUF002",        # ambiguous docstring 全形
+    "RUF003",        # ambiguous comment 全形
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]   # tests 允許 hardcoded secret 字串
+"app/schemas/auth.py" = ["S105"]             # token_type='Bearer' 是 OAuth2 標籤，不是密碼
+# get_movers 的動態 ORDER BY 以白名單固定字串插值（gainers/losers/volume），非使用者輸入 → S608 誤報
+"app/repos/market_repo.py" = ["S608"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+]
+markers = [
+    "unit: unit tests (no external dependency)",
+    "integration: integration tests (need docker compose up)",
+    "security: security / OWASP tests",
+    "network: tests that hit real external API (skip in CI by default)",
+    "expensive: tests that cost real money (LLM API calls, skip by default)",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+ignore_missing_imports = true
+exclude = ["migrations/", "tests/"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "tests/*",
+    "migrations/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

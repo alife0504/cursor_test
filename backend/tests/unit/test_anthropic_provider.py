@@ -1,0 +1,193 @@
+"""AnthropicProvider 單元測試 — pricing / health_check / generate（mock SDK）。
+
+依 PLAN.md 第 14.4 章。
+不打真 Anthropic API；用 monkeypatch 替換 client。
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from pydantic import SecretStr
+
+from app.core.errors import ExternalServiceError
+from app.llm.anthropic_provider import AnthropicProvider, _rejects_sampling_params
+from app.llm.base_provider import LLM_PROVIDER_REGISTRY
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def settings_with_key(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from app.core.config import settings as _s
+
+    monkeypatch.setattr(_s, "ANTHROPIC_API_KEY", SecretStr("fake-anthropic-key"), raising=False)
+    return _s
+
+
+@pytest.fixture
+def settings_without_key(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from app.core.config import settings as _s
+
+    monkeypatch.setattr(_s, "ANTHROPIC_API_KEY", None, raising=False)
+    return _s
+
+
+def test_anthropic_registered() -> None:
+    assert "anthropic" in LLM_PROVIDER_REGISTRY
+    assert LLM_PROVIDER_REGISTRY["anthropic"] is AnthropicProvider
+
+
+def test_default_model(settings_with_key: Any) -> None:
+    prov = AnthropicProvider(settings_with_key)
+    assert prov.name == "anthropic"
+    assert prov.default_model == "claude-haiku-4-5"
+
+
+def test_pricing_haiku(settings_with_key: Any) -> None:
+    """claude-haiku-4-5：input $1.00/1M, output $5.00/1M。
+
+    1000 input + 500 output → 0.001*1 + 0.005*0.5 = 0.001 + 0.0025 = 0.0035
+    """
+    prov = AnthropicProvider(settings_with_key)
+    cost = prov.calc_cost("claude-haiku-4-5", 1000, 500)
+    assert cost == Decimal("0.003500")
+
+
+def test_pricing_sonnet(settings_with_key: Any) -> None:
+    """claude-sonnet-4-6：input $3.00/1M, output $15.00/1M。"""
+    prov = AnthropicProvider(settings_with_key)
+    cost = prov.calc_cost("claude-sonnet-4-6", 2000, 1000)
+    # 0.003 * 2 + 0.015 * 1 = 0.006 + 0.015 = 0.021
+    assert cost == Decimal("0.021000")
+
+
+def test_pricing_unknown(settings_with_key: Any) -> None:
+    prov = AnthropicProvider(settings_with_key)
+    assert prov.calc_cost("nope", 1000, 500) == Decimal("0")
+
+
+def test_pricing_sonnet5(settings_with_key: Any) -> None:
+    """claude-sonnet-5：input $3.00/1M, output $15.00/1M（v1.1 新增）。"""
+    prov = AnthropicProvider(settings_with_key)
+    # 2000*0.003/1000 + 1000*0.015/1000 = 0.006 + 0.015 = 0.021
+    assert prov.calc_cost("claude-sonnet-5", 2000, 1000) == Decimal("0.021000")
+
+
+def test_pricing_fable5(settings_with_key: Any) -> None:
+    """claude-fable-5：input $10.00/1M, output $50.00/1M（v1.1 新增）。"""
+    prov = AnthropicProvider(settings_with_key)
+    # 1000*0.010/1000 + 1000*0.050/1000 = 0.010 + 0.050 = 0.060
+    assert prov.calc_cost("claude-fable-5", 1000, 1000) == Decimal("0.060000")
+
+
+# ── sampling 參數守衛（Opus 4.7+/Sonnet 5/Fable 5 拒收 temperature）────
+
+
+def test_rejects_sampling_params_matrix() -> None:
+    # 現役 4.7+/5 系列 → 拒收
+    assert _rejects_sampling_params("claude-opus-4-8") is True
+    assert _rejects_sampling_params("claude-opus-4-7") is True
+    assert _rejects_sampling_params("claude-sonnet-5") is True
+    assert _rejects_sampling_params("claude-fable-5") is True
+    # 仍接受 temperature 者
+    assert _rejects_sampling_params("claude-haiku-4-5") is False
+    assert _rejects_sampling_params("claude-sonnet-4-6") is False
+    assert _rejects_sampling_params("") is False
+
+
+def _mock_client() -> Any:
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "ok"
+    fake_usage = MagicMock()
+    fake_usage.input_tokens = 10
+    fake_usage.output_tokens = 5
+    fake_resp = MagicMock()
+    fake_resp.content = [text_block]
+    fake_resp.usage = fake_usage
+    fake_resp.stop_reason = "end_turn"
+    fake_messages = MagicMock()
+    fake_messages.create = AsyncMock(return_value=fake_resp)
+    fake_client = MagicMock()
+    fake_client.messages = fake_messages
+    return fake_client
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_temperature_for_sonnet5(
+    settings_with_key: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonnet 5 → messages.create 不可帶 temperature（否則 400）。"""
+    prov = AnthropicProvider(settings_with_key)
+    client = _mock_client()
+    monkeypatch.setattr(prov, "_client", client, raising=False)
+    await prov.generate(system="s", user="u", model="claude-sonnet-5", temperature=0.7)
+    kwargs = client.messages.create.call_args.kwargs
+    assert "temperature" not in kwargs
+    assert kwargs["model"] == "claude-sonnet-5"
+
+
+@pytest.mark.asyncio
+async def test_generate_keeps_temperature_for_haiku(
+    settings_with_key: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Haiku 4.5 仍接受 temperature → 應照常帶。"""
+    prov = AnthropicProvider(settings_with_key)
+    client = _mock_client()
+    monkeypatch.setattr(prov, "_client", client, raising=False)
+    await prov.generate(system="s", user="u", model="claude-haiku-4-5", temperature=0.7)
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["temperature"] == 0.7
+
+
+@pytest.mark.asyncio
+async def test_health_check_no_key_false(settings_without_key: Any) -> None:
+    prov = AnthropicProvider(settings_without_key)
+    assert await prov.health_check() is False
+
+
+@pytest.mark.asyncio
+async def test_generate_no_key_raises(settings_without_key: Any) -> None:
+    prov = AnthropicProvider(settings_without_key)
+    with pytest.raises(ExternalServiceError):
+        await prov.generate(system="s", user="u")
+
+
+@pytest.mark.asyncio
+async def test_generate_parses_content_and_usage(
+    settings_with_key: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mock messages.create：驗證 content 從 list[ContentBlock] 抽出 + usage 對。"""
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "hello from claude"
+
+    fake_usage = MagicMock()
+    fake_usage.input_tokens = 200
+    fake_usage.output_tokens = 100
+
+    fake_resp = MagicMock()
+    fake_resp.content = [text_block]
+    fake_resp.usage = fake_usage
+    fake_resp.stop_reason = "end_turn"
+
+    fake_messages = MagicMock()
+    fake_messages.create = AsyncMock(return_value=fake_resp)
+    fake_client = MagicMock()
+    fake_client.messages = fake_messages
+
+    prov = AnthropicProvider(settings_with_key)
+    monkeypatch.setattr(prov, "_client", fake_client, raising=False)
+
+    resp = await prov.generate(system="sys", user="ask")
+    assert resp.content == "hello from claude"
+    assert resp.usage.input_tokens == 200
+    assert resp.usage.output_tokens == 100
+    assert resp.usage.total_tokens == 300
+    # 預設模型 claude-haiku-4-5：200*0.001/1000 + 100*0.005/1000 = 0.0002 + 0.0005 = 0.0007
+    assert resp.usage.cost_usd == Decimal("0.000700")
+    assert resp.finish_reason == "end_turn"

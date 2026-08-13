@@ -1,0 +1,23 @@
+## 個股基本資訊
+- 代號：{symbol}
+- 名稱：{company_name}
+- 產業：{industry}
+
+## 個股新聞情緒統計（近 7 日，共 {stock_news_count} 篇）
+- 正面 {stock_pos} 篇 / 中性 {stock_neu} 篇 / 負面 {stock_neg} 篇
+- 平均情緒分數：{stock_avg_score}（-1 極空 ~ +1 極多）
+
+## 台股大盤新聞情緒統計（近 7 日，共 {market_news_count} 篇）
+- 正面 {market_pos} 篇 / 中性 {market_neu} 篇 / 負面 {market_neg} 篇
+- 平均情緒分數：{market_avg_score}
+
+## 個股新聞明細
+{stock_news_table}
+
+## 大盤新聞明細（總經/大盤氛圍）
+{market_news_table}
+
+## 你的任務
+綜合個股與大盤的新聞語氣，量化目前的市場情緒溫度、討論熱度與動能。
+注意個股情緒與大盤情緒可能背離（如大盤悲觀但個股有利多），請在綜述中點出。
+**最後輸出**：繁體中文綜述 + ```json``` 區塊（符合 SentimentAnalysisResult schema）。
