@@ -50,8 +50,8 @@ logger = get_task_logger(__name__)
 @celery_app.task(
     bind=True,
     name="app.workers.tasks.run_analysis.run_analysis",
-    time_limit=1200,
-    soft_time_limit=900,
+    time_limit=2400,
+    soft_time_limit=1800,
     max_retries=0,
 )
 def run_analysis(
