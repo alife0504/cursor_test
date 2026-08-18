@@ -93,6 +93,20 @@ def extract_json_block(text: str) -> dict[str, Any] | list[Any]:
 
 
 _MAX_USER_PROMPT_CHARS = 16000  # ~4k token；防 repair 越加越長
+# 截斷重試時 max_tokens 的加倍上限（防呆：避免無限加大而爆成本）
+_MAX_TOKENS_CEILING = 16384
+# 各家 provider 表示「因長度上限而截斷」的 finish_reason（大小寫不拘）
+_TRUNCATED_REASONS = {"max_tokens", "length", "max_output_tokens", "model_length"}
+
+
+def _is_truncated(resp: Any) -> bool:
+    """回應是否因 max_tokens 上限被截斷（而非正常結束）。
+
+    這是「JSON 解析失敗」最常見的真因：Gemini 2.5 等推理模型的 thinking token 也算進
+    max_output_tokens，額度不足時 JSON 會寫到一半就斷，錯誤卻長得像「模型不聽話」。
+    """
+    reason = str(getattr(resp, "finish_reason", "") or "").strip().lower()
+    return reason in _TRUNCATED_REASONS
 
 
 async def llm_call_with_schema(
@@ -103,7 +117,7 @@ async def llm_call_with_schema(
     *,
     tools: list[Any] | None = None,
     model: str | None = None,
-    max_tokens: int = 2048,
+    max_tokens: int = 4096,
     temperature: float = 0.3,
     max_retries: int = 2,
 ) -> tuple[T, TokenUsage]:
@@ -134,6 +148,7 @@ async def llm_call_with_schema(
     )
     system_with_schema = system + schema_hint
 
+    current_max_tokens = max_tokens
     current_user = user
     if len(current_user) > _MAX_USER_PROMPT_CHARS:
         logger.warning(
@@ -154,21 +169,47 @@ async def llm_call_with_schema(
             user=current_user,
             tools=tools,
             model=model,
-            max_tokens=max_tokens,
+            max_tokens=current_max_tokens,
             temperature=temperature,
         )
         total_in += resp.usage.input_tokens
         total_out += resp.usage.output_tokens
         total_cost += resp.usage.cost_usd
 
+        truncated = _is_truncated(resp)
+
         try:
             parsed_json = extract_json_block(resp.content)
         except ValueError as e:
+            # 區分兩種完全不同的失敗，別再用「找不到 JSON」蓋掉真因：
+            #  (a) 輸出被 max_tokens 截斷 → JSON 只寫到一半（實測：Gemini 2.5 思考 token 也算在
+            #      同一額度，2048 對本專案的 schema 根本不夠）→ 重試要「加大額度」，
+            #      叫模型「記得包 ```json```」完全沒用。
+            #  (b) 模型真的沒輸出 JSON → 才是提示問題，用 REPAIR 提示。
+            if truncated:
+                last_error = ValueError(
+                    f"LLM 回應被 max_tokens={current_max_tokens} 截斷"
+                    f"（finish_reason={resp.finish_reason}, output_tokens="
+                    f"{resp.usage.output_tokens}），JSON 不完整"
+                )
+                logger.warning(
+                    "llm_helpers.truncated",
+                    attempt=attempt + 1,
+                    max_tokens=current_max_tokens,
+                    output_tokens=resp.usage.output_tokens,
+                    finish_reason=resp.finish_reason,
+                )
+                if attempt < max_retries:
+                    current_max_tokens = min(current_max_tokens * 2, _MAX_TOKENS_CEILING)
+                    logger.info("llm_helpers.retry_larger_budget", max_tokens=current_max_tokens)
+                    continue
+                raise last_error from e
             last_error = e
             logger.warning(
                 "llm_helpers.no_json",
                 attempt=attempt + 1,
                 error=str(e),
+                finish_reason=resp.finish_reason,
                 content_preview=resp.content[:300],
             )
             if attempt < max_retries:
@@ -192,6 +233,15 @@ async def llm_call_with_schema(
                 first_error=str(e.errors()[0]) if e.errors() else None,
             )
             if attempt < max_retries:
+                if truncated:
+                    # 截斷造成的缺欄位：加大額度才有用（改提示沒用，模型本來就寫不完）
+                    current_max_tokens = min(current_max_tokens * 2, _MAX_TOKENS_CEILING)
+                    logger.info(
+                        "llm_helpers.retry_larger_budget",
+                        reason="truncated_schema_invalid",
+                        max_tokens=current_max_tokens,
+                    )
+                    continue
                 err_str = str(e)[:1500]  # 控制長度
                 current_user = (
                     user[: _MAX_USER_PROMPT_CHARS - 2000]

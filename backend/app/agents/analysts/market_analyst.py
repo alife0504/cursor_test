@@ -157,7 +157,7 @@ class MarketAnalyst(BaseAnalyst):
             user_prompt,
             MarketAnalysisResult,
             model=resolve_agent_model(state, self.name),
-            max_tokens=2048,
+            max_tokens=4096,  # 實測：本專案 schema(含中文 summary)+思考 token 需 ~2700，2048 會被截斷
             temperature=0.3,
         )
         latency_ms = int((time.monotonic() - t0) * 1000)
