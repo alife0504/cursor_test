@@ -5,13 +5,21 @@
 export interface LLMModelOption {
   id: string;
   label: string;
-  provider: "google" | "openai" | "anthropic";
+  provider: "google" | "openai" | "anthropic" | "minimax";
   inputPricePer1m: number; // USD
   outputPricePer1m: number;
   description: string;
 }
 
 export const LLM_MODELS: LLMModelOption[] = [
+  {
+    id: "MiniMax-M3",
+    label: "MiniMax M3",
+    provider: "minimax",
+    inputPricePer1m: 0.3,
+    outputPricePer1m: 1.2,
+    description: "MiniMax,推理型,1M 長上下文,性價比高(預設)",
+  },
   {
     id: "gemini-2.5-flash",
     label: "Gemini 2.5 Flash",

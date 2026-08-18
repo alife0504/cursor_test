@@ -164,10 +164,14 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: SecretStr | None = None
     OPENAI_API_KEY: SecretStr | None = None
     ANTHROPIC_API_KEY: SecretStr | None = None
-    LLM_DEFAULT_PROVIDER: Literal["google", "openai", "anthropic"] = "google"
+    MINIMAX_API_KEY: SecretStr | None = None
+    LLM_DEFAULT_PROVIDER: Literal["google", "openai", "anthropic", "minimax"] = "google"
     LLM_DEFAULT_MODEL: str = "gemini-2.5-flash"
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
     ANTHROPIC_DEFAULT_MODEL: str = "claude-haiku-4-5"
+    MINIMAX_DEFAULT_MODEL: str = "MiniMax-M3"
+    MINIMAX_BASE_URL: str = "https://api.minimax.io/v1"
+    """MiniMax OpenAI 相容端點。國際版 api.minimax.io；中國站為 api.minimaxi.com。"""
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
     LLM_MONTHLY_BUDGET_USD_DEFAULT: Decimal = Decimal("50.00")
     """用戶預設月預算（每用戶可個別覆寫）。"""

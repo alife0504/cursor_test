@@ -44,6 +44,16 @@ T = TypeVar("T", bound=BaseModel)
 
 _FENCE_RE = re.compile(r"```(?:json|JSON)?\s*\n(.+?)\n```", re.DOTALL)
 
+# 推理模型（MiniMax-M3、DeepSeek-R1 等）會把思考過程包在 <think>...</think> 內。
+# 思考段常含「草稿 JSON」，若不剝除，解析可能抓到半成品而非最終答案。
+# 允許未閉合（回應被截斷時 </think> 可能還沒輸出）→ 一併吃掉到結尾。
+_THINK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL | re.IGNORECASE)
+
+
+def strip_reasoning_blocks(text: str) -> str:
+    """移除推理模型的 <think>…</think> 區塊，只留最終答案。"""
+    return _THINK_RE.sub("", text or "")
+
 
 def extract_json_block(text: str) -> dict[str, Any] | list[Any]:
     """從 LLM 回應萃取 JSON block。
@@ -57,6 +67,9 @@ def extract_json_block(text: str) -> dict[str, Any] | list[Any]:
     Raises:
         ValueError: 找不到任何合法 JSON。
     """
+    # 0. 先剝掉推理模型的 <think> 區塊（M3 等），避免抓到思考過程中的草稿 JSON
+    text = strip_reasoning_blocks(text)
+
     # 1. 嘗試 code fence
     matches = _FENCE_RE.findall(text)
     if matches:
@@ -371,4 +384,5 @@ __all__ = [
     "llm_call_with_schema",
     "record_llm_usage",
     "record_llm_usage_sync",
+    "strip_reasoning_blocks",
 ]

@@ -38,9 +38,11 @@ logger = get_logger(__name__)
 
 # 第 14.4 章 fallback chain 定義
 FALLBACK_CHAIN: dict[str, list[str]] = {
-    "google": ["openai", "anthropic"],
-    "openai": ["google", "anthropic"],
-    "anthropic": ["google", "openai"],
+    "google": ["minimax", "openai", "anthropic"],
+    "openai": ["google", "minimax", "anthropic"],
+    "anthropic": ["google", "minimax", "openai"],
+    # MiniMax（M3）為主時，優先退到 google（本專案必配的 key），再退其他
+    "minimax": ["google", "openai", "anthropic"],
 }
 
 
@@ -86,7 +88,8 @@ def is_transient_llm_error(exc: BaseException) -> bool:
 def provider_for_model(model: str | None) -> str | None:
     """依 model id 前綴推斷對應 provider（per-agent 跨 provider 模型路由用）。
 
-    gemini* → google；gpt*/o1*/o3* → openai；claude* → anthropic；無法判斷 → None。
+    gemini* → google；gpt*/o1*/o3* → openai；claude* → anthropic；
+    minimax*/abab* → minimax；無法判斷 → None。
     """
     if not model:
         return None
@@ -97,6 +100,9 @@ def provider_for_model(model: str | None) -> str | None:
         return "openai"
     if m.startswith("claude"):
         return "anthropic"
+    # MiniMax：官方模型 id 如 "MiniMax-M3"（OpenAI 相容端點），舊系列為 abab*
+    if m.startswith(("minimax", "abab")):
+        return "minimax"
     return None
 
 

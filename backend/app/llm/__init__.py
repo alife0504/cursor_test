@@ -33,6 +33,7 @@ from app.llm.base_provider import (
 )
 from app.llm.fallback_chain import FALLBACK_CHAIN, LLMFallbackChain
 from app.llm.gemini_provider import GeminiProvider
+from app.llm.minimax_provider import MiniMaxProvider
 from app.llm.openai_provider import OpenAIProvider
 
 if TYPE_CHECKING:
@@ -81,11 +82,13 @@ def get_llm_chain(settings: Settings) -> LLMFallbackChain:
         providers["openai"] = OpenAIProvider(settings)
     if settings.ANTHROPIC_API_KEY:
         providers["anthropic"] = AnthropicProvider(settings)
+    if settings.MINIMAX_API_KEY:
+        providers["minimax"] = MiniMaxProvider(settings)
 
     if not providers:
         raise ValueError(
             "至少需配置一個 LLM provider 的 API key "
-            "(GOOGLE_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY)"
+            "(GOOGLE_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / MINIMAX_API_KEY)"
         )
 
     primary = settings.LLM_DEFAULT_PROVIDER

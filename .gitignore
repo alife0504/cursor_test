@@ -89,3 +89,5 @@ docs/dr_drills/*.log
 # 但保留 .gitkeep 讓目錄存在
 !docs/slo_reports/.gitkeep
 !docs/dr_drills/.gitkeep
+.env.bak*
+.env.*.bak
