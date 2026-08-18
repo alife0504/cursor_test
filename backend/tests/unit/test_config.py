@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import base64
+import re
 
 import pytest
 from pydantic import ValidationError
@@ -41,7 +42,9 @@ def _make_kwargs(**overrides: object) -> dict[str, object]:
 def test_settings_loads_from_env_via_kwargs() -> None:
     """直接傳 kwargs 應可建立 Settings。"""
     s = Settings(**_make_kwargs())  # type: ignore[arg-type]
-    assert s.APP_VERSION == "0.3.0"
+    # 不寫死版本號：APP_VERSION 會隨發版變動（曾寫死 0.3.0，升到 1.1.0 後此測試就壞），
+    # 本測試的目的是「kwargs 能建出 Settings」，故只驗格式為 x.y.z。
+    assert re.fullmatch(r"\d+\.\d+\.\d+", s.APP_VERSION), s.APP_VERSION
     assert s.LOG_LEVEL == "INFO"
     assert s.LOG_FORMAT == "json"
 

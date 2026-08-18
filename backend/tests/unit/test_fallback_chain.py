@@ -82,10 +82,14 @@ class _FakeProvider:
 
 
 def test_fallback_chain_map_matches_plan() -> None:
-    """PLAN 14.4：google → openai → anthropic（互相對稱）。"""
-    assert FALLBACK_CHAIN["google"] == ["openai", "anthropic"]
-    assert FALLBACK_CHAIN["openai"] == ["google", "anthropic"]
-    assert FALLBACK_CHAIN["anthropic"] == ["google", "openai"]
+    """PLAN 14.4 + MiniMax(M3)：每個 provider 都能退到其餘三家，且不含自己。"""
+    providers = {"google", "openai", "anthropic", "minimax"}
+    assert set(FALLBACK_CHAIN) == providers
+    for name, chain in FALLBACK_CHAIN.items():
+        assert name not in chain, f"{name} 不可退到自己"
+        assert set(chain) == providers - {name}, f"{name} 應能退到其餘所有 provider"
+    # minimax 為主時優先退到 google（本專案必配的 key）
+    assert FALLBACK_CHAIN["minimax"][0] == "google"
 
 
 @pytest.mark.asyncio

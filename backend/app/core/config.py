@@ -268,6 +268,7 @@ class Settings(BaseSettings):
                 "google": self.GOOGLE_API_KEY,
                 "openai": self.OPENAI_API_KEY,
                 "anthropic": self.ANTHROPIC_API_KEY,
+                "minimax": self.MINIMAX_API_KEY,
             }
             if not provider_key_map.get(self.LLM_DEFAULT_PROVIDER):
                 raise ValueError(
