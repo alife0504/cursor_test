@@ -140,11 +140,22 @@ function NewAnalysisInner() {
   const router = useRouter();
   const search = useSearchParams();
   const initialSymbol = search.get("symbol");
-  const [picked, setPicked] = useState<StockSummary | null>(
+  // 多檔：指定個股改為清單，可連續加入多檔（每檔送出時各建一筆分析）。
+  const [pickedList, setPickedList] = useState<StockSummary[]>(
     initialSymbol
-      ? { symbol: initialSymbol, market: "TW", name: "", is_active: true }
-      : null,
+      ? [{ symbol: initialSymbol, market: "TW", name: "", is_active: true }]
+      : [],
   );
+  const addPicked = (s: StockSummary) =>
+    setPickedList((list) =>
+      list.some((x) => x.symbol === s.symbol && x.market === s.market)
+        ? list
+        : [...list, s],
+    );
+  const removePicked = (s: StockSummary) =>
+    setPickedList((list) =>
+      list.filter((x) => !(x.symbol === s.symbol && x.market === s.market)),
+    );
   // 預設全選（台股 5 個分析師）；選到美股時下方 useEffect 會自動移除
   // 台股專屬的情緒面 / 籌碼面，剩技術面 / 基本面 / 新聞。
   const [analysts, setAnalysts] = useState<AnalystType[]>([
@@ -186,15 +197,15 @@ function NewAnalysisInner() {
 
   useEffect(() => {
     setIdemKey(uuidv4());
-  }, [picked?.symbol, screenLevel]);
+  }, [pickedList.length, screenLevel]);
 
   const market: "TW" | "US" = useMemo(() => {
-    if (!picked) return "TW"; // 自動選股固定台股（台股主）
-    const m = (picked.market || "TW").toUpperCase();
-    if (m === "NYSE" || m === "NASDAQ" || m === "AMEX" || m === "US")
-      return "US";
-    return "TW";
-  }, [picked]);
+    if (pickedList.length === 0) return "TW"; // 自動選股固定台股（台股主）
+    const isUS = (mk: string) =>
+      ["NYSE", "NASDAQ", "AMEX", "US"].includes((mk || "TW").toUpperCase());
+    // 全部都是美股才視為 US（移除台股專屬分析師）；混選或含台股 → 維持台股主
+    return pickedList.every((p) => isUS(p.market)) ? "US" : "TW";
+  }, [pickedList]);
 
   // 美股時移除台股專屬分析師（情緒面 + 籌碼面）
   useEffect(() => {
@@ -218,15 +229,17 @@ function NewAnalysisInner() {
 
   // 自動選股：篩出候選數（顯示）與「實際會建立分析的筆數」(受後端上限保護)分開
   const screenedApprox = screenLevel ? SCREEN_KEEP[screenLevel] : 0;
-  const analysisCount = picked
-    ? 1
+  const analysisCount = pickedList.length
+    ? pickedList.length
     : screenLevel
       ? Math.min(SCREEN_KEEP[screenLevel], SCREEN_MAX_DISPLAY)
       : 0;
 
   // 指定個股 或 選了自動選股等級，二擇一即可送出（且至少一個 analyst）
   const canSubmit =
-    (!!picked || !!screenLevel) && analysts.length > 0 && !create.isPending;
+    (pickedList.length > 0 || !!screenLevel) &&
+    analysts.length > 0 &&
+    !create.isPending;
 
   const buildAgentModels = (): Record<string, string> => {
     const out: Record<string, string> = {};
@@ -244,42 +257,51 @@ function NewAnalysisInner() {
       toast.error("請至少選一個 analyst");
       return;
     }
-    if (!picked && !screenLevel) {
+    if (pickedList.length === 0 && !screenLevel) {
       toast.error("請指定個股,或選一個自動選股等級");
       return;
     }
-    // 指定個股 vs 自動選股（未選股 → 帶 screen_level + market=TW，由後端批次篩選）
-    const body: AnalysisCreateBody = picked
-      ? {
-          symbol: picked.symbol,
-          analyst_types: analysts,
-          llm_model: defaultModel,
-          agent_models: buildAgentModels(),
-          debate_rounds: debateRounds,
-          risk_rounds: riskRounds,
-        }
-      : {
-          screen_level: screenLevel ?? undefined,
-          market: "TW",
-          analyst_types: analysts,
-          llm_model: defaultModel,
-          agent_models: buildAgentModels(),
-          debate_rounds: debateRounds,
-          risk_rounds: riskRounds,
-        };
+    const common = {
+      analyst_types: analysts,
+      llm_model: defaultModel,
+      agent_models: buildAgentModels(),
+      debate_rounds: debateRounds,
+      risk_rounds: riskRounds,
+    };
     try {
-      const res = await create.mutateAsync({ body, idempotencyKey: idemKey });
-      const count = res.count ?? 1;
-      const screened = res.screened_count ?? 0;
-      if (screened > 0) {
-        // 批次（自動選股）
+      if (pickedList.length > 0) {
+        // 指定個股：一檔建一筆分析（每筆各自的 idempotency key）
+        const ids: string[] = [];
+        for (const s of pickedList) {
+          const res = await create.mutateAsync({
+            body: { symbol: s.symbol, ...common } as AnalysisCreateBody,
+            idempotencyKey: uuidv4(),
+          });
+          if (res.analysis_id) ids.push(res.analysis_id);
+        }
+        if (ids.length === 1) {
+          toast.success("分析已送出");
+          router.push(`/analysis/${ids[0]}`);
+        } else {
+          toast.success(`已送出 ${ids.length} 檔分析`);
+          router.push("/analysis/history");
+        }
+      } else {
+        // 自動選股：帶 screen_level + market=TW，由後端批次篩選
+        const res = await create.mutateAsync({
+          body: {
+            screen_level: screenLevel ?? undefined,
+            market: "TW",
+            ...common,
+          } as AnalysisCreateBody,
+          idempotencyKey: idemKey,
+        });
+        const count = res.count ?? 1;
+        const screened = res.screened_count ?? 0;
         const extra =
           screened > count ? `(自 ${screened} 檔候選取前 ${count} 檔)` : "";
         toast.success(`自動選股完成,已建立 ${count} 筆分析${extra}`);
         router.push("/analysis/history");
-      } else {
-        toast.success("分析已送出");
-        router.push(`/analysis/${res.analysis_id}`);
       }
     } catch (e) {
       const msg = (e as Error).message || "送出失敗";
@@ -301,34 +323,53 @@ function NewAnalysisInner() {
       />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
         <div className="flex flex-col gap-4 lg:col-span-2">
-          <Card>
+          <Card className="overflow-visible">
             <CardHeader>
-              <CardTitle className="text-base">1. 選擇股票</CardTitle>
+              <CardTitle className="text-base">1. 選擇股票（可多檔）</CardTitle>
               <CardDescription>
                 {screenLevel
                   ? "已選自動選股(步驟 2);如需改為指定個股,請先取消下方等級"
-                  : "從股票池搜尋(支援代號或名稱);與下方自動選股二擇一"}
+                  : "從股票池搜尋(代號或名稱),可連續加入多檔;每檔各建一筆分析。與下方自動選股二擇一"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               <StockPicker
-                value={picked?.symbol ?? null}
-                triggerLabel={
-                  picked
-                    ? `${picked.symbol} ${picked.name || ""}`.trim()
-                    : undefined
-                }
-                onSelect={setPicked}
+                value={null}
+                onSelect={addPicked}
                 disabled={!!screenLevel}
+                placeholder="搜尋股票代號或名稱,可連續加入多檔"
               />
-              {picked ? (
-                <button
-                  type="button"
-                  onClick={() => setPicked(null)}
-                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  清除選擇
-                </button>
+              {pickedList.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {pickedList.map((s) => (
+                    <span
+                      key={`${s.market}:${s.symbol}`}
+                      className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs"
+                    >
+                      <span className="font-medium text-foreground">
+                        {s.symbol}
+                      </span>
+                      {s.name ? (
+                        <span className="text-muted-foreground">{s.name}</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={`移除 ${s.symbol}`}
+                        onClick={() => removePicked(s)}
+                        className="ml-0.5 rounded-full px-1 leading-none text-muted-foreground hover:bg-background hover:text-foreground"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setPickedList([])}
+                    className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    清除全部
+                  </button>
+                </div>
               ) : null}
             </CardContent>
           </Card>
@@ -339,8 +380,8 @@ function NewAnalysisInner() {
                 2. 自動選股篩選(未指定個股時啟用)
               </CardTitle>
               <CardDescription>
-                {picked
-                  ? `已指定 ${picked.symbol},將直接分析該股,略過自動篩選`
+                {pickedList.length > 0
+                  ? `已指定 ${pickedList.length} 檔個股,將直接分析,略過自動篩選`
                   : "步驟 1 未指定個股時,送出後依此等級自動選股 — 愈高愈嚴、留得愈少、愈省資源"}
               </CardDescription>
             </CardHeader>
@@ -355,7 +396,7 @@ function NewAnalysisInner() {
               <ScreenLevelChooser
                 value={screenLevel}
                 onChange={setScreenLevel}
-                disabled={!!picked}
+                disabled={pickedList.length > 0}
               />
             </CardContent>
           </Card>
@@ -493,7 +534,15 @@ function NewAnalysisInner() {
               <CardDescription>實際成本以後端 llm_usage 為準</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              {!picked && screenLevel ? (
+              {pickedList.length > 0 ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">指定個股</span>
+                  <span className="tabular-nums font-medium">
+                    {pickedList.length} 檔
+                  </span>
+                </div>
+              ) : null}
+              {pickedList.length === 0 && screenLevel ? (
                 <>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">篩選候選</span>
@@ -522,7 +571,7 @@ function NewAnalysisInner() {
                   約 {estimatedSeconds} 秒{analysisCount > 1 ? " / 檔" : ""}
                 </span>
               </div>
-              {!picked && screenLevel ? (
+              {pickedList.length === 0 && screenLevel ? (
                 <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
                   自動選股會篩出約 {screenedApprox} 檔候選,但只實際建立前{" "}
                   {analysisCount} 檔的完整分析(保護月配額);其餘為候選、未分析。
