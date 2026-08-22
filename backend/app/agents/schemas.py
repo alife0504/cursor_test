@@ -30,7 +30,7 @@ class MarketAnalysisResult(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    summary: str = Field(min_length=100, max_length=2000, description="技術面綜述（繁中）")
+    summary: str = Field(min_length=40, max_length=2000, description="技術面綜述（繁中）")
     trend: Literal["上升", "下降", "盤整", "反轉"]
     support_levels: list[Decimal] = Field(min_length=1, max_length=5)
     resistance_levels: list[Decimal] = Field(min_length=1, max_length=5)
@@ -48,7 +48,7 @@ class FundamentalAnalysisResult(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    summary: str = Field(min_length=100, max_length=2000)
+    summary: str = Field(min_length=40, max_length=2000)
     valuation: Literal["低估", "合理", "高估"]
     financial_strength: Literal["強", "中", "弱"]
     growth_outlook: str = Field(min_length=20, max_length=500)
@@ -75,7 +75,7 @@ class NewsAnalysisResult(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    summary: str = Field(min_length=100, max_length=2000)
+    summary: str = Field(min_length=40, max_length=2000)
     sentiment: Literal["極度正面", "正面", "中性", "負面", "極度負面"]
     key_topics: list[str] = Field(min_length=0, max_length=8)
     supporting_articles: list[NewsSupportingArticle] = Field(default_factory=list, max_length=8)
@@ -101,7 +101,7 @@ class ChipAnalysisResult(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    summary: str = Field(min_length=100, max_length=2000)
+    summary: str = Field(min_length=40, max_length=2000)
     institutional_flow: Literal["大量買超", "小量買超", "中性", "小量賣超", "大量賣超"]
     foreign_position_change: str = Field(min_length=10, max_length=500)
     margin_trading_signal: Literal["看多", "看空", "中性"]
@@ -120,7 +120,7 @@ class SentimentAnalysisResult(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    summary: str = Field(min_length=100, max_length=2000)
+    summary: str = Field(min_length=40, max_length=2000)
     market_sentiment: Literal["極度樂觀", "樂觀", "中性", "悲觀", "極度悲觀"]
     sentiment_score: Decimal = Field(
         ge=Decimal("-1"), le=Decimal("1"), description="綜合情緒分數（-1 極空 ~ +1 極多）"
