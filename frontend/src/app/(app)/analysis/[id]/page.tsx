@@ -17,6 +17,7 @@ import { StatusStepper } from "@/components/common/StatusStepper";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -126,15 +127,16 @@ export default function AnalysisDetailPage() {
         </div>
       </section>
 
+      {/* 分頁列橫向擺在「訊號摘要」與「綜合報告概要」之間：TabsList 全寬、觸發鍵等分佔滿 */}
       <Tabs defaultValue={defaultTab} className="w-full">
-        <TabsList>
+        <TabsList className="w-full">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="analysts">Analysts</TabsTrigger>
           <TabsTrigger value="debate">Debate</TabsTrigger>
           <TabsTrigger value="report">Report</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-3">
+        <TabsContent value="overview">
           {analysis.error_msg ? (
             <Card>
               <CardHeader>
@@ -150,17 +152,18 @@ export default function AnalysisDetailPage() {
             </Card>
           ) : (
             <Card>
-              <CardHeader>
+              <CardHeader className="border-b pb-3">
                 <CardTitle className="text-base">綜合報告概要</CardTitle>
+                <CardDescription>多智能體綜合結論</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-5">
                 {analysis.report_md ? (
-                  <ReportMarkdown
-                    source={analysis.report_md.slice(0, 600)}
-                  />
+                  <div className="mx-auto max-w-3xl leading-relaxed">
+                    <ReportMarkdown source={analysis.report_md} />
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    分析尚在進行 — 請切換到 Analysts 或 Debate 頁觀察進度
+                    分析尚在進行 — 請切換到 Analysts 或 Debate 觀察進度
                   </p>
                 )}
               </CardContent>
