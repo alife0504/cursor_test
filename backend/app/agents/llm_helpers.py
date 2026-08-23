@@ -112,6 +112,16 @@ _MAX_TOKENS_CEILING = 16384
 _TRUNCATED_REASONS = {"max_tokens", "length", "max_output_tokens", "model_length"}
 
 
+def _looks_like_schema(obj: Any) -> bool:
+    """判斷 parsed JSON 是否為「JSON Schema 定義本身」而非資料實例。
+
+    推理模型（如 MiniMax-M3）有時會把我們附的 schema 範本原樣回吐（含 type:object +
+    properties），導致所有必填欄位 missing。本專案的結果實例都是扁平物件、欄位為真實值，
+    絕不會有頂層 "properties"，故以此可靠區分。
+    """
+    return isinstance(obj, dict) and obj.get("type") == "object" and "properties" in obj
+
+
 def _is_truncated(resp: Any) -> bool:
     """回應是否因 max_tokens 上限被截斷（而非正常結束）。
 
@@ -156,7 +166,12 @@ async def llm_call_with_schema(
 
     # 把 schema 描述附在 system 末尾（不在每次重試重複加）
     schema_hint = (
-        "\n\n## 最後輸出必須為以下 JSON Schema（合法 JSON，置於 ```json``` 區塊）\n"
+        "\n\n## 輸出格式要求\n"
+        "最後請輸出**一個符合下列 JSON Schema 的實例**——即一個實際的 JSON 物件、"
+        "把每個必填欄位填入真實值，放在 ```json``` 區塊內。\n"
+        "⚠️ 要輸出的是「符合 schema 的資料」，**不是 schema 定義本身**：不要回傳含 "
+        '`"properties"` 或 `"type": "object"` 的 schema 結構，那是範本、不是答案。\n'
+        f"JSON Schema（僅供參考格式，勿原樣回傳）：\n"
         f"{json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=2)}"
     )
     system_with_schema = system + schema_hint
@@ -234,6 +249,21 @@ async def llm_call_with_schema(
                 )
                 continue
             raise
+
+        # 模型把 schema 定義原樣回吐（M3 常見）→ 針對性重試，別讓它變成一堆 "missing" 難懂錯誤
+        if _looks_like_schema(parsed_json):
+            last_error = ValueError("模型回傳了 JSON Schema 定義本身，而非符合 schema 的實例")
+            logger.warning("llm_helpers.schema_echoed", attempt=attempt + 1)
+            if attempt < max_retries:
+                current_user = (
+                    user[: _MAX_USER_PROMPT_CHARS - 800]
+                    + "\n\n[REPAIR] 上次你回傳的是 JSON Schema 定義本身"
+                    '（含 properties / "type": "object"）。那是範本、不是答案。'
+                    "請改為輸出一個**符合該 schema 的實際 JSON 物件**，每個欄位填入真實內容，"
+                    "放在 ```json``` 區塊。"
+                )
+                continue
+            raise last_error
 
         try:
             parsed: T = schema.model_validate(parsed_json)
