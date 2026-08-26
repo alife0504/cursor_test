@@ -154,20 +154,42 @@ class AuditRepository:
         result = await self.session.execute(text(sql), {"since_ts": since})
         rows = result.fetchall()
 
+        # re-baseline 基準：第一筆 checkpoint 的 last_id（append-only；見 _get_chain_baseline_id）。
+        # 基準（含）之前「prev 找不到」的良性鏈結斷裂——由先前 dev DB 清空重建刪除前驅列造成、
+        # 且 hash_ok=True（未竄改）——不再誤報 CRITICAL。安全性不減：
+        #   1) hash_ok 對「所有」列仍驗 → 任何內容/時間竄改照抓。
+        #   2) 任何刪列（含基準前）→ row_count 回退，由 detect_tail_truncation 錨定偵測。
+        #   3) 基準之後的新列仍強制鏈結 → 未來的鏈結破壞照抓。
+        baseline_id = await self._get_chain_baseline_id()
+
         broken: list[int] = []
         for row in rows:
             hash_ok = row.entry_hash == row.recomputed_hash
-            chain_ok = (row.prev_hash == zero_prev) or bool(row.prev_found)
-            if not (chain_ok and hash_ok):
+            prev_ok = (row.prev_hash == zero_prev) or bool(row.prev_found)
+            # 基準前的斷鏈視為已知良性（僅豁免「鏈結」，不豁免 hash 竄改）
+            linkage_ok = prev_ok or (baseline_id is not None and int(row.id) <= baseline_id)
+            if not (linkage_ok and hash_ok):
                 logger.warning(
                     "audit_chain.broken_row",
                     id=row.id,
-                    chain_ok=chain_ok,
+                    chain_ok=prev_ok,
                     hash_ok=hash_ok,
+                    before_baseline=baseline_id is not None and int(row.id) <= baseline_id,
                 )
                 broken.append(int(row.id))
 
         return (len(broken) == 0, broken)
+
+    async def _get_chain_baseline_id(self) -> int | None:
+        """re-baseline 基準 = 最早一筆 checkpoint 的 last_id；無 checkpoint 則 None（維持嚴格）。
+
+        鏈只會增長、last_id 單調遞增，故「第一筆 checkpoint」即為 re-baseline 當下的鏈尾。
+        以此界定「基準前的良性斷鏈可豁免鏈結檢查」（見 verify_chain 說明）。
+        """
+        r = await self.session.execute(
+            text("SELECT last_id FROM audit_checkpoints ORDER BY id ASC LIMIT 1")
+        )
+        return r.scalar()
 
     async def get_chain_tip(self) -> tuple[int, int | None, str | None]:
         """回傳目前鏈尾狀態 (row_count, last_id, last_entry_hash)。空表回 (0, None, None)。"""
