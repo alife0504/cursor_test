@@ -147,6 +147,57 @@ export function useAccuracyStats(horizonDays = 30, lookbackDays = 180) {
   };
 }
 
+// ── v1.1 真實回測（後端策略引擎，PIT 正確）──────────────────────
+
+export interface BacktestPoint {
+  date: string;
+  equity: number;
+  drawdown: number;
+}
+
+export interface BacktestMetrics {
+  total_return: number;
+  annualized_return: number;
+  sharpe: number;
+  max_drawdown: number;
+  win_rate: number;
+  num_trades: number;
+}
+
+export interface BacktestResponse {
+  symbol: string;
+  strategy: string;
+  period: string;
+  start_date: string;
+  end_date: string;
+  trading_days: number;
+  initial_capital: number;
+  curve: BacktestPoint[];
+  metrics: BacktestMetrics;
+  benchmark_curve: Array<{ date: string; equity: number }>;
+  benchmark_metrics: BacktestMetrics;
+  error?: string;
+}
+
+// 策略回測：對歷史日 K 跑策略（後端 PIT 引擎），附 Buy&Hold 基準
+export function useBacktest(
+  symbol: string | null,
+  strategy: string,
+  period: string,
+) {
+  return useQuery({
+    queryKey: ["statistics", "backtest", { symbol, strategy, period }],
+    enabled: !!symbol,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<BacktestResponse>>(
+        "/statistics/backtest",
+        { params: { symbol, strategy, period } },
+      );
+      return res.data.data;
+    },
+  });
+}
+
 export function useModelStats() {
   const q = useRecentCompletedAnalyses(200);
   const stats = useMemo(() => computeModelStats(q.items), [q.items]);

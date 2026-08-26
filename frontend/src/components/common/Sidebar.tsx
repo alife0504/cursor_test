@@ -84,7 +84,7 @@ const NAV: NavItem[] = [
     children: [
       { href: "/market/overview", labelKey: "nav.market.overview", icon: TrendingUp, implemented: true },
       { href: "/market/institutional", labelKey: "nav.market.institutional", icon: PieChart, implemented: true },
-      { href: "/market/calendar", labelKey: "nav.market.calendar", icon: CalendarDays, implemented: true, mock: true },
+      { href: "/market/calendar", labelKey: "nav.market.calendar", icon: CalendarDays, implemented: true },
     ],
   },
   {
@@ -98,7 +98,7 @@ const NAV: NavItem[] = [
         implemented: true,
       },
       { href: "/screener/filter", labelKey: "nav.screener.filter", icon: Filter, implemented: true },
-      { href: "/screener/compare", labelKey: "nav.screener.compare", icon: GitCompareArrows, implemented: true, mock: true },
+      { href: "/screener/compare", labelKey: "nav.screener.compare", icon: GitCompareArrows, implemented: true },
     ],
   },
   {
@@ -125,7 +125,7 @@ const NAV: NavItem[] = [
     children: [
       { href: "/statistics/accuracy", labelKey: "nav.statistics.accuracy", icon: TrendingUp, implemented: true },
       { href: "/statistics/models", labelKey: "nav.statistics.models", icon: ListChecks, implemented: true },
-      { href: "/statistics/backtest", labelKey: "nav.statistics.backtest", icon: Sparkles, implemented: true, mock: true },
+      { href: "/statistics/backtest", labelKey: "nav.statistics.backtest", icon: Sparkles, implemented: true },
     ],
   },
   {
@@ -176,7 +176,6 @@ const NAV: NavItem[] = [
         icon: Cog,
         adminOnly: true,
         implemented: true,
-        mock: true,
       },
       {
         href: "/admin/pipeline",

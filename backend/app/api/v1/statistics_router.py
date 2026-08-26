@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_current_user
 from app.core.database import get_ro_session
 from app.core.response_envelope import envelope_success
+from app.services.backtest_service import STRATEGIES, compute_backtest
 from app.services.statistics_service import compute_accuracy
 
 if TYPE_CHECKING:
@@ -42,6 +43,23 @@ async def get_accuracy(
         user_id=user.id,
         horizon_days=horizon_days,
         lookback_days=lookback_days,
+    )
+    return envelope_success(data, trace_id=_trace_id(request))
+
+
+@router.get("/backtest", summary="策略回測（歷史日 K，PIT 正確，附 Buy&Hold 基準）")
+async def get_backtest(
+    request: Request,
+    symbol: str = Query(
+        ..., min_length=1, max_length=20, description="標的代號（含指數 TAIEX/TPEX）"
+    ),
+    strategy: str = Query("buy_and_hold", description=f"策略：{', '.join(STRATEGIES)}"),
+    period: str = Query("3m", description="期間：1m/3m/6m/1y/all（受本地資料範圍限制）"),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_ro_session),
+) -> dict:
+    data = await compute_backtest(
+        session, symbol=symbol.strip().upper(), strategy=strategy, period=period
     )
     return envelope_success(data, trace_id=_trace_id(request))
 

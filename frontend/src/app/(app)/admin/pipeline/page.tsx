@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  Activity,
-  AlertCircle,
-  CheckCircle2,
-  Database,
-  Filter,
-  RefreshCw,
-} from "lucide-react";
+import { Activity, AlertCircle, Database, Filter, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -17,12 +10,7 @@ import { KpiCard } from "@/components/common/KpiCard";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  useDLQ,
-  useRequeueDLQ,
-  useResolveDLQ,
-} from "@/hooks/useSystem";
+import { useDLQ, useRequeueDLQ, useResolveDLQ } from "@/hooks/useSystem";
 import type { DLQItem } from "@/lib/api-types";
 
 // Phase 17 § P:資料管線管理
@@ -82,21 +70,14 @@ export default function AdminPipelinePage() {
         }
       />
 
-      {/* 摘要 KPI 帶 */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* 摘要 KPI 帶（皆由真實 DLQ 資料即時計算） */}
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <KpiCard
           title={showResolved ? "已解決 DLQ" : "待處理 DLQ"}
           value={dlqCount}
           subtitle="Dead Letter Queue"
           icon={AlertCircle}
           accent={!showResolved && dlqCount > 0 ? "warning" : "info"}
-        />
-        <KpiCard
-          title="監控資料源"
-          value={3}
-          subtitle="TWSE / Yahoo / News"
-          icon={Database}
-          accent="primary"
         />
         <KpiCard
           title="目前檢視"
@@ -112,36 +93,6 @@ export default function AdminPipelinePage() {
           icon={Activity}
           accent={healthy ? "info" : "warning"}
         />
-      </section>
-
-      {/* Source last success — 後端尚未提供,先顯示 placeholder */}
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {[
-          { name: "TWSE OHLCV", task: "sync_ohlcv_tw" },
-          { name: "US Yahoo OHLCV", task: "sync_ohlcv_us" },
-          { name: "News Ingest", task: "news_ingest" },
-        ].map((s) => (
-          <Card key={s.task}>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center justify-between text-sm">
-                {s.name}
-                <CheckCircle2 className="h-4 w-4 text-success" />
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">最後成功時間需 P19/P20 整合</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                disabled
-                title="v1.1 開放手動觸發"
-              >
-                觸發(v1.1)
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
       </section>
 
       {/* DLQ list */}

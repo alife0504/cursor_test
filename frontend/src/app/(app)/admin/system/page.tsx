@@ -1,73 +1,49 @@
 "use client";
 
-import { Activity, Clock, Cog, Cpu, Database, HardDrive, ListChecks } from "lucide-react";
+import { Cog, Cpu, ListChecks } from "lucide-react";
 import { useMemo } from "react";
 
-import { BarChart } from "@/components/common/BarChart";
-import { ChartContainer } from "@/components/common/ChartContainer";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
-import { MockBanner } from "@/components/common/MockBanner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useSystemInfo, useSystemMetrics } from "@/hooks/useSystem";
+import { useAnalysisList } from "@/hooks/useAnalysis";
+import { useSystemInfo } from "@/hooks/useSystem";
 
-// Phase 17 § O:系統監控
-//   - 卡片:API 可用性、平均延遲、今日分析次數、今日 LLM 成本、磁碟使用、佇列長度
-//   - 圖:過去 24h metrics 走勢(v1.0 mock,v1.1 接 prometheus)
-//   - PLAN 已知陷阱:/admin/system/metrics 目前只回 endpoint 指引,圖用 mock
-
-// 24h mock 序列(每小時一個點)
-function buildMock24h(base: number, jitter: number) {
-  return Array.from({ length: 24 }, (_, i) => ({
-    hour: `${i.toString().padStart(2, "0")}:00`,
-    value: Math.max(0, base + (Math.random() - 0.5) * jitter * 2),
-  }));
-}
+// Phase 17 § O（v1.1）：系統監控
+//   - 只顯示真實資料：今日分析數 / 今日 LLM 成本（由 /analysis 即時彙總）+ 系統資訊
+//   - 完整運維指標（可用性/延遲/磁碟/佇列走勢）需 Prometheus/Grafana（P19/P20），
+//     未接前不放假數字誤導 → 該區塊移除
 
 export default function AdminSystemPage() {
   const info = useSystemInfo();
-  const metrics = useSystemMetrics();
+  const q = useAnalysisList({ limit: 200 }, true);
 
-  // v1.0 mock series — health_check 會 grep "Mock"
-  const latencySeries = useMemo(() => buildMock24h(180, 60), []);
-  const queueSeries = useMemo(() => buildMock24h(8, 6), []);
+  const { todayCount, todayCost } = useMemo(() => {
+    const items = q.data?.items ?? [];
+    const today = new Date().toISOString().slice(0, 10);
+    let count = 0;
+    let cost = 0;
+    for (const it of items) {
+      if (it.created_at?.slice(0, 10) === today) {
+        count += 1;
+        cost += Number(it.total_cost_usd ?? 0);
+      }
+    }
+    return { todayCount: count, todayCost: cost };
+  }, [q.data]);
 
   const cards = [
     {
-      icon: Activity,
-      title: "API 可用性",
-      value: "99.9%",
-      hint: "近 24h",
-    },
-    {
-      icon: Clock,
-      title: "平均延遲",
-      value: "180 ms",
-      hint: "p50 latency",
-    },
-    {
       icon: ListChecks,
-      title: "今日分析",
-      value: "12",
-      hint: "completed",
+      title: "今日分析數",
+      value: String(todayCount),
+      hint: "今日建立的分析（近 200 筆內）",
     },
     {
       icon: Cpu,
       title: "今日 LLM 成本",
-      value: "$0.42",
-      hint: "USD",
-    },
-    {
-      icon: HardDrive,
-      title: "磁碟使用",
-      value: "42%",
-      hint: "data partition",
-    },
-    {
-      icon: Database,
-      title: "佇列長度",
-      value: "0",
-      hint: "celery default",
+      value: `$${todayCost.toFixed(4)}`,
+      hint: "今日分析 total_cost_usd 合計",
     },
   ];
 
@@ -76,19 +52,14 @@ export default function AdminSystemPage() {
       <PageHeader
         icon={Cog}
         title="系統監控"
-        description="API 可用性、延遲、磁碟、佇列等關鍵指標（/metrics 摘要）"
+        description="今日用量與系統資訊（即時運維指標見 v1.1 Prometheus 整合）"
       />
 
-      <MockBanner
-        title="本頁圖表為 Mock - v1.1 將接 Prometheus / Grafana"
-        trackingRef="運維整合 P19/P20"
-      />
-
-      {metrics.isLoading || info.isLoading ? (
+      {q.isLoading || info.isLoading ? (
         <LoadingSkeleton rows={4} />
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <section className="grid gap-3 sm:grid-cols-2">
             {cards.map((c) => {
               const Icon = c.icon;
               return (
@@ -100,31 +71,14 @@ export default function AdminSystemPage() {
                     <Icon className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold tabular-nums">{c.value}</p>
+                    <p className="num text-2xl font-bold tabular-nums">
+                      {c.value}
+                    </p>
                     <p className="text-xs text-muted-foreground">{c.hint}</p>
                   </CardContent>
                 </Card>
               );
             })}
-          </section>
-
-          <section className="grid gap-3 lg:grid-cols-2">
-            <ChartContainer title="平均延遲走勢(24h, mock)">
-              <BarChart
-                data={latencySeries}
-                xKey="hour"
-                series={[{ dataKey: "value", name: "延遲 (ms)", fill: "hsl(var(--chart-1))" }]}
-                showLegend={false}
-              />
-            </ChartContainer>
-            <ChartContainer title="Celery 佇列長度(24h, mock)">
-              <BarChart
-                data={queueSeries}
-                xKey="hour"
-                series={[{ dataKey: "value", name: "queue len", fill: "hsl(var(--chart-3))" }]}
-                showLegend={false}
-              />
-            </ChartContainer>
           </section>
 
           {info.data ? (
@@ -148,6 +102,11 @@ export default function AdminSystemPage() {
               </dl>
             </section>
           ) : null}
+
+          <p className="text-xs text-muted-foreground">
+            可用性、延遲、磁碟、佇列走勢等即時運維指標將於 v1.1 接入 Prometheus /
+            Grafana（P19/P20）；此頁目前僅呈現可由應用資料直接彙總的真實數字。
+          </p>
         </>
       )}
     </div>

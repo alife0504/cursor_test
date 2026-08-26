@@ -16,6 +16,7 @@ from app.core.cursor import build_page_response
 from app.core.database import get_rw_session
 from app.core.response_envelope import envelope_success
 from app.core.validators import validate_symbol
+from app.models.tw_specific import StockMetrics
 from app.schemas.stocks import (
     AnnouncementItem,
     FinancialStatementItem,
@@ -91,6 +92,36 @@ async def get_stock(
         fiscal_year_end=info.fiscal_year_end if info else None,
     )
     return envelope_success(detail.model_dump(mode="json"), trace_id=_trace_id(request))
+
+
+@router.get("/{symbol}/metrics", summary="個股關鍵指標（PE/PBR/殖利率/EPS成長/RSI/市值）")
+async def get_stock_metrics(
+    request: Request,
+    symbol: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_rw_session),
+) -> dict:
+    """多股比較用：回傳 stock_metrics（由每日 sync_stock_metrics_tw 物化）。
+
+    無資料欄位回 null（前端顯示 -）；不硬湊。
+    """
+    symbol = validate_symbol(symbol)
+    row = await session.get(StockMetrics, symbol)
+
+    def _f(v: object) -> float | None:
+        return float(v) if v is not None else None  # type: ignore[arg-type]
+
+    data = {
+        "symbol": symbol,
+        "as_of_date": row.as_of_date.isoformat() if row and row.as_of_date else None,
+        "pe_ratio": _f(row.pe_ratio) if row else None,
+        "pbr": _f(row.pbr) if row else None,
+        "dividend_yield": _f(row.dividend_yield) if row else None,
+        "market_cap": (row.market_cap if row else None),
+        "rsi14": _f(row.rsi14) if row else None,
+        "eps_growth": _f(row.eps_growth) if row else None,
+    }
+    return envelope_success(data, trace_id=_trace_id(request))
 
 
 # ════════════════ GET /stocks/{symbol}/ohlcv ════════════════
