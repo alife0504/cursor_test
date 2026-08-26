@@ -20,6 +20,7 @@ from app.core.cursor import Cursor, build_page_response, clamp_limit
 from app.core.database import get_rw_session
 from app.core.errors import QuotaExceededError, RateLimitError, ValidationError
 from app.core.idempotency import IdempotencyService, compute_request_hash
+from app.core.rate_limit import make_user_rate_limit_dependency
 from app.core.response_envelope import envelope_success
 from app.core.validators import validate_uuid
 from app.schemas.analysis import (
@@ -131,7 +132,12 @@ async def get_llm_providers(
 # ════════════════ POST / ════════════════
 
 
-@router.post("", status_code=201, summary="建立新分析（Idempotency-Key required）")
+@router.post(
+    "",
+    status_code=201,
+    summary="建立新分析（Idempotency-Key required）",
+    dependencies=[Depends(make_user_rate_limit_dependency())],  # L4：單一使用者 60/min（fail-open）
+)
 async def create_analysis(
     payload: AnalysisCreateRequest,
     request: Request,

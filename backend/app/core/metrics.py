@@ -57,6 +57,13 @@ DB_CONNECTIONS_USED = Gauge(
     ["pool"],
 )
 
+# ── Rate limit ────────────────────────────────────────
+RATE_LIMIT_REDIS_ERRORS = Counter(
+    "rate_limit_redis_errors_total",
+    "Rate limiter Redis 失敗次數（fail-open；升高代表限流暫時失效，需關注 Redis）",
+    ["layer"],
+)
+
 # ── Celery ────────────────────────────────────────────
 CELERY_QUEUE_LENGTH = Gauge(
     "celery_queue_length",
@@ -213,5 +220,6 @@ __all__ = [
     "LLM_TOKENS_TOTAL",
     "ORDERS_APPROVED_TOTAL",
     "ORDERS_REJECTED_TOTAL",
+    "RATE_LIMIT_REDIS_ERRORS",
     "collect_runtime_metrics",
 ]

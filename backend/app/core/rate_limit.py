@@ -20,6 +20,7 @@ L1-L5 由 RateLimitMiddleware 直接攔；L6 在 service 層另外處理（不�
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -111,7 +112,14 @@ class RateLimiter:
                 retry_after_sec=retry_after,
             )
         except Exception as e:  # pragma: no cover  - fail-open
+            # fail-open（保可用性：Redis 抖動不鎖死使用者），但計數上報 Prometheus 供告警：
+            # rate_limit_redis_errors_total 升高＝限流暫時失效，需關注 Redis。
             logger.warning("rate_limit.redis_error", key=key, error=str(e))
+            with contextlib.suppress(Exception):
+                from app.core.metrics import RATE_LIMIT_REDIS_ERRORS
+
+                layer = key.split(":")[1] if key.count(":") >= 1 else "unknown"
+                RATE_LIMIT_REDIS_ERRORS.labels(layer=layer).inc()
             return RateLimitResult(allowed=True, count=0, limit=limit, retry_after_sec=0)
 
 
@@ -285,38 +293,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return JSONResponse(status_code=429, content=body, headers=headers)
 
 
-# 給 endpoint dependency 用：
+# 給 endpoint dependency 用：對 authenticated user 套 L4 60/min（防單一使用者請求洪泛）。
+# 用法：@router.post("/foo", dependencies=[Depends(make_user_rate_limit_dependency())])
+# 依賴 get_current_user 取 user（保證 user 已解析、actor 可用，非空轉）；Redis 失敗 fail-open。
 def make_user_rate_limit_dependency():
-    """產生 endpoint dependency：對 authenticated user 套 L4 60/min。
+    from fastapi import Depends
 
-    在 endpoint 層使用：
-        @router.get("/foo", dependencies=[Depends(rate_limit_per_user())])
-    """
+    from app.api.dependencies import get_current_user
 
-    async def _check(request: Request) -> None:
-        from app.core.errors import RateLimitError as _RLE
-
-        user_id = getattr(request.state, "actor_id", None)
-        if not user_id:
-            return  # 沒 user 不擋
+    async def _check(user=Depends(get_current_user)) -> None:
         redis = await get_redis(RedisDB.RATELIMIT)
         limiter = RateLimiter(redis)
         r = await limiter.check(
-            f"{L4_USER.key_prefix}{user_id}",
+            f"{L4_USER.key_prefix}{user.id}",
             limit=L4_USER.limit,
             window_sec=L4_USER.window_sec,
         )
         if not r.allowed:
-            raise _RLE(
+            raise RateLimitError(
                 message_zh=f"L4 per-user 超量（{L4_USER.limit}/{L4_USER.window_sec}s）",
                 retry_after_sec=r.retry_after_sec,
             )
 
     return _check
-
-
-# 抑制 unused import
-_ = RateLimitError
 
 
 __all__ = [
