@@ -85,16 +85,115 @@ ORDERS_REJECTED_TOTAL = Counter(
 )
 
 
+# ── 抓取時即時計算的業務 gauge（pull 模型）────────────────────
+# 分析跑在 celery 程序、HTTP 在 backend 程序，in-memory counter 無法跨程序；
+# 這些數字改由 /metrics 被抓取時「即時查 DB/redis/pool」設定，保證與真實狀態一致。
+ANALYSES_TODAY = Gauge("analyses_today", "今日分析數（依 status）", ["status"])
+ANALYSES_RUNNING = Gauge("analyses_running", "目前進行中分析數")
+LLM_TOKENS_TODAY = Gauge("llm_tokens_today", "今日 LLM tokens 合計")
+DB_SIZE_BYTES = Gauge("db_size_bytes", "應用資料庫大小（bytes）")
+DLQ_PENDING = Gauge("dlq_pending_total", "未解決 Celery DLQ 筆數")
+
+
+async def collect_runtime_metrics(session: object) -> None:
+    """/metrics 被抓取時呼叫：即時從 DB / redis / pool 設定業務 gauge。
+
+    以 session（AsyncSession）查詢；任何子項失敗都被吞掉（不擋整體 /metrics）。
+    """
+    import contextlib
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from sqlalchemy import func, select, text
+
+    from app.models.analysis import AnalysisReport
+    from app.models.quota import LLMUsage
+
+    now_tpe = datetime.now(ZoneInfo("Asia/Taipei"))
+    today_start = now_tpe.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+    # 今日分析數（依 status）
+    with contextlib.suppress(Exception):
+        rows = await session.execute(  # type: ignore[attr-defined]
+            select(AnalysisReport.status, func.count())
+            .where(AnalysisReport.created_at >= today_start)
+            .group_by(AnalysisReport.status)
+        )
+        seen = set()
+        for status, cnt in rows:
+            ANALYSES_TODAY.labels(status=status).set(int(cnt))
+            seen.add(status)
+        # 確保常見 status 即使為 0 也有序列（Grafana 疊圖穩定）
+        for st in ("queued", "running", "completed", "failed", "cancelled"):
+            if st not in seen:
+                ANALYSES_TODAY.labels(status=st).set(0)
+
+    with contextlib.suppress(Exception):
+        running = await session.scalar(  # type: ignore[attr-defined]
+            select(func.count())
+            .select_from(AnalysisReport)
+            .where(AnalysisReport.status == "running")
+        )
+        ANALYSES_RUNNING.set(int(running or 0))
+
+    with contextlib.suppress(Exception):
+        cost = await session.scalar(  # type: ignore[attr-defined]
+            select(func.coalesce(func.sum(LLMUsage.cost_usd), 0)).where(
+                LLMUsage.created_at >= today_start
+            )
+        )
+        LLM_COST_TODAY.set(float(cost or 0))
+
+    with contextlib.suppress(Exception):
+        tokens = await session.scalar(  # type: ignore[attr-defined]
+            select(func.coalesce(func.sum(LLMUsage.total_tokens), 0)).where(
+                LLMUsage.created_at >= today_start
+            )
+        )
+        LLM_TOKENS_TODAY.set(int(tokens or 0))
+
+    with contextlib.suppress(Exception):
+        size = await session.scalar(text("SELECT pg_database_size(current_database())"))  # type: ignore[attr-defined]
+        DB_SIZE_BYTES.set(int(size or 0))
+
+    with contextlib.suppress(Exception):
+        dlq = await session.scalar(  # type: ignore[attr-defined]
+            text("SELECT count(*) FROM celery_dead_letters WHERE resolved = false")
+        )
+        DLQ_PENDING.set(int(dlq or 0))
+
+    # DB pool 使用中連線數
+    with contextlib.suppress(Exception):
+        from app.core.database import get_ro_engine, get_rw_engine
+
+        for name, eng in (("rw", get_rw_engine()), ("ro", get_ro_engine())):
+            with contextlib.suppress(Exception):
+                DB_CONNECTIONS_USED.labels(pool=name).set(eng.pool.checkedout())
+
+    # celery 佇列長度（broker redis db=CELERY 的 'celery' list）
+    with contextlib.suppress(Exception):
+        from app.core.redis_client import RedisDB, get_redis
+
+        r = await get_redis(RedisDB.CELERY)
+        CELERY_QUEUE_LENGTH.labels(queue="celery").set(int(await r.llen("celery")))
+
+
 __all__ = [
+    "ANALYSES_RUNNING",
+    "ANALYSES_TODAY",
     "ANALYSIS_DURATION",
     "ANALYSIS_TOTAL",
     "CELERY_DLQ_TOTAL",
     "CELERY_QUEUE_LENGTH",
     "DATA_PIPELINE_LAST_SUCCESS",
     "DB_CONNECTIONS_USED",
+    "DB_SIZE_BYTES",
+    "DLQ_PENDING",
     "HTTP_REQUEST_DURATION",
     "LLM_COST_TODAY",
+    "LLM_TOKENS_TODAY",
     "LLM_TOKENS_TOTAL",
     "ORDERS_APPROVED_TOTAL",
     "ORDERS_REJECTED_TOTAL",
+    "collect_runtime_metrics",
 ]

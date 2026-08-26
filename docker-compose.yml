@@ -266,6 +266,54 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # ── Prometheus（P19 監控；profile monitoring，預設不啟動）────────────
+  # 抓取 backend:8000/metrics（帶靜態 METRICS_TOKEN）。啟動：
+  #   docker compose --profile monitoring up -d
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: ta-prometheus
+    profiles: ["monitoring"]
+    environment:
+      METRICS_TOKEN: ${METRICS_TOKEN}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed "s|__METRICS_TOKEN__|$${METRICS_TOKEN}|g" /etc/prometheus/prometheus.tmpl.yml > /tmp/prometheus.yml
+        exec /bin/prometheus --config.file=/tmp/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d --web.enable-lifecycle
+    volumes:
+      - ./deploy/prometheus/prometheus.tmpl.yml:/etc/prometheus/prometheus.tmpl.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Grafana（P19 監控儀表板；profile monitoring）──────────────────
+  # 匿名可看（Viewer），儀表板與資料源自動 provision。管理登入預設 admin/admin。
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: ta-grafana
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tradingagents.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   timescaledb_data:
     name: tradingagents_timescaledb_data
@@ -273,3 +321,7 @@ volumes:
     name: tradingagents_redis_data
   qdrant_data:
     name: tradingagents_qdrant_data
+  prometheus_data:
+    name: tradingagents_prometheus_data
+  grafana_data:
+    name: tradingagents_grafana_data

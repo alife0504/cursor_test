@@ -59,6 +59,7 @@ from app.core.error_handlers import register_exception_handlers
 from app.core.errors import ExternalServiceError
 from app.core.logging_config import configure_logging, get_logger
 from app.core.market_dispatcher import MarketDispatcher
+from app.core.metrics_middleware import MetricsMiddleware
 from app.core.qdrant_client import (
     dispose_qdrant_client,
     test_qdrant_connection,
@@ -284,6 +285,7 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "Content-Type"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(MetricsMiddleware)  # 觀測 HTTP 耗時/狀態（Prometheus）
 app.add_middleware(RequestIDMiddleware)  # 必須最後 add（最外層）
 
 # 抑制 unused 變數警告（這個 list 只是文件化用）

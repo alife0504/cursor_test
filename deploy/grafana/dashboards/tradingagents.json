@@ -1,0 +1,116 @@
+{
+  "uid": "tradingagents-main",
+  "title": "TradingAgents 監控總覽",
+  "tags": ["tradingagents"],
+  "timezone": "Asia/Taipei",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "今日分析（完成）",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "analyses_today{status=\"completed\"}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "進行中分析",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "analyses_running", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "今日 LLM 成本",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "llm_cost_usd_today", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4, "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "今日 Tokens",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "llm_tokens_today", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 5, "type": "stat", "title": "Celery 佇列",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "celery_queue_length", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 20 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 6, "type": "stat", "title": "資料庫大小",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "db_size_bytes", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "HTTP 請求速率（req/s，依路由）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum by (path) (rate(http_request_duration_seconds_count[5m]))", "legendFormat": "{{path}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "HTTP 延遲 p50 / p95（秒）",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "HTTP 錯誤率 5xx (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "100 * sum(rate(http_request_duration_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_request_duration_seconds_count[5m])), 1)", "legendFormat": "5xx %", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "showPoints": "never" }, "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "今日分析（依 status）",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "analyses_today", "legendFormat": "{{status}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "DB 連線使用（依 pool）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "db_connections_used", "legendFormat": "{{pool}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "DLQ 待處理 / Celery 佇列",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "dlq_pending_total", "legendFormat": "DLQ 待處理", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "celery_queue_length", "legendFormat": "Celery 佇列", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ]
+}

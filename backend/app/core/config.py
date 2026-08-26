@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 768
     """Gemini text-embedding-004 維度。"""
 
+    # ── 監控（Prometheus /metrics 靜態 token；供 Prometheus 抓取用，非 JWT）──
+    # 設定後 /metrics 需帶 `Authorization: Bearer <token>`；未設定則 /metrics 停用（回 401）。
+    METRICS_TOKEN: SecretStr | None = None
+
     # ── 資料源 API key（P5/P6） ──────────────────────────────
     FINMIND_TOKEN: SecretStr | None = None
     ALPHA_VANTAGE_API_KEY: SecretStr | None = None

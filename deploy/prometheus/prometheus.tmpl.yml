@@ -1,0 +1,24 @@
+# Prometheus 抓取設定「範本」——容器啟動時由 entrypoint 用 sed 把 __METRICS_TOKEN__
+# 換成環境變數 METRICS_TOKEN 的實值，輸出到 /tmp/prometheus.yml 再啟動。
+# 如此可將真實 token 留在 .env（gitignored），此範本不含機密可安全入 git。
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    app: tradingagents-tw
+
+scrape_configs:
+  # 後端 FastAPI /metrics（HTTP 指標 + 抓取時即時算的業務 gauge）
+  - job_name: tradingagents-backend
+    metrics_path: /metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials: __METRICS_TOKEN__
+    static_configs:
+      - targets: [backend:8000]
+
+  # Prometheus 自身
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
