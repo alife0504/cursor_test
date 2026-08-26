@@ -147,7 +147,7 @@ class Settings(BaseSettings):
     # 啟用後 TW OHLCV 盤後資料直接查本地庫（priority=5 最優先），FinMind API 只當即時/備援。
     FINMIND_LOCAL_ENABLED: bool = False
     FINMIND_LOCAL_HOST: str = "host.docker.internal"
-    FINMIND_LOCAL_PORT: int = 15432
+    FINMIND_LOCAL_PORT: int = 7890  # fm-postgres host port（15432 為舊值，實際為 7890）
     FINMIND_LOCAL_DB: str = "finmind"
     FINMIND_LOCAL_USER: str = "postgres"
     FINMIND_LOCAL_PASSWORD: SecretStr | None = None

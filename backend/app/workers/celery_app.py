@@ -47,6 +47,7 @@ celery_app: Celery = Celery(
         "app.workers.tasks.sync_ohlcv",
         "app.workers.tasks.news_ingest",
         "app.workers.tasks.financial",
+        "app.workers.tasks.adjusted",
         "app.workers.tasks.cleanup",
         "app.workers.tasks.verify_audit",
         # P12: LangGraph 主分析任務
@@ -110,6 +111,12 @@ celery_app.conf.beat_schedule = {
     "tw-index-after-close": {
         "task": "app.workers.tasks.sync_ohlcv.sync_index_tw",
         "schedule": crontab(hour=14, minute=35, day_of_week="mon-fri"),
+    },
+    # 台股還原權值回填：OHLCV 同步後（15:00）跑，把 FinMind 官方還原價寫入 adjusted_close。
+    # 每日重跑因除權息會回溯重算歷史；週末也跑（回補假日新增的除息調整）。
+    "tw-adjusted-close-daily": {
+        "task": "app.workers.tasks.adjusted.sync_adjusted_close_tw",
+        "schedule": crontab(hour=15, minute=0, day_of_week="mon-fri"),
     },
     # 美股盤後（ET 16:00 = 台北 04:00 隔日 / 夏令 05:00）→ 5:30 拉
     "us-ohlcv-after-close": {

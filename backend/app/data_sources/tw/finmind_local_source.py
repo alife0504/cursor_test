@@ -99,14 +99,19 @@ class FinMindLocalSource(BaseDataSource):
         return [dict(r) for r in rows]
 
     async def fetch_ohlcv(self, symbol: str, start: date, end: date) -> pd.DataFrame:
-        cols = ["date", "open", "high", "low", "close", "volume", "turnover"]
+        # adjusted_close 取自 FinMind 官方還原價 taiwan_stock_price_adj（含息還原，back-adjust，
+        # 最新日錨定＝raw）。LEFT JOIN：無還原價的標的（指數/權證）該欄為 NULL，下游 COALESCE 退回 close。
+        cols = ["date", "open", "high", "low", "close", "adjusted_close", "volume", "turnover"]
         data = await self._query(
             """
-            SELECT date, open, max AS high, min AS low, close,
-                   "Trading_Volume" AS volume, "Trading_money" AS turnover
-            FROM bronze.taiwan_stock_price
-            WHERE stock_id = $1 AND date >= $2 AND date <= $3
-            ORDER BY date
+            SELECT p.date, p.open, p.max AS high, p.min AS low, p.close,
+                   a.close AS adjusted_close,
+                   p."Trading_Volume" AS volume, p."Trading_money" AS turnover
+            FROM bronze.taiwan_stock_price p
+            LEFT JOIN bronze.taiwan_stock_price_adj a
+                   ON a.stock_id = p.stock_id AND a.date = p.date
+            WHERE p.stock_id = $1 AND p.date >= $2 AND p.date <= $3
+            ORDER BY p.date
             """,
             symbol,
             start,
@@ -116,7 +121,7 @@ class FinMindLocalSource(BaseDataSource):
             return pd.DataFrame(columns=cols)
         df = pd.DataFrame(data)
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        for c in ("open", "high", "low", "close", "turnover"):
+        for c in ("open", "high", "low", "close", "adjusted_close", "turnover"):
             if c in df.columns:
                 df[c] = df[c].apply(_to_decimal_or_none)
         if "volume" in df.columns:
