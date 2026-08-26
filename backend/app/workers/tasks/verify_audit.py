@@ -81,10 +81,12 @@ def verify_chain() -> dict[str, Any]:
         }
 
     if result["ok"]:
+        # celery get_task_logger 是 stdlib logger，不吃任意 kwargs（傳了會 TypeError
+        # → 整個任務失敗進 DLQ）。改用 %-style 位置參數。
         logger.info(
-            "audit_chain.integrity_ok",
-            ran_at=started_at,
-            broken_count=0,
+            "audit_chain.integrity_ok ran_at=%s broken_count=%s",
+            started_at,
+            0,
         )
         return {
             "status": "ok",
@@ -94,13 +96,14 @@ def verify_chain() -> dict[str, Any]:
 
     # 斷裂（鏈結/hash 損壞 或 尾端截斷）→ CRITICAL log（P18 才接通知）
     logger.critical(
-        "audit_chain.broken",
-        chain_ok=result.get("chain_ok"),
-        tail_ok=result.get("tail_ok"),
-        tail_reason=result.get("tail_reason"),
-        broken_count=result["broken_count"],
-        broken_ids=result["broken_ids"],
-        ran_at=started_at,
+        "audit_chain.broken chain_ok=%s tail_ok=%s tail_reason=%s "
+        "broken_count=%s broken_ids=%s ran_at=%s",
+        result.get("chain_ok"),
+        result.get("tail_ok"),
+        result.get("tail_reason"),
+        result["broken_count"],
+        result["broken_ids"],
+        started_at,
     )
     return {
         "status": "broken",
