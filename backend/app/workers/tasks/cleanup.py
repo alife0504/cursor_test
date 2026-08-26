@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -42,25 +43,58 @@ def cleanup_orphans() -> dict[str, Any]:
     """每日 orphan cleanup（PLAN 15.4）。"""
     now = datetime.now(UTC)
     counts: dict[str, int] = {}
+    # running 孤兒中「可救回」的 (id, analyst_types, debate_rounds)；於交易 commit 後重派
+    recover: list[tuple[Any, Any, Any]] = []
 
     with sync_rw_session() as session:
-        # 1. analysis_reports running > 30 min → failed
-        stuck_threshold = now - timedelta(minutes=30)
+        # 1. analysis_reports running 孤兒（worker 被殺/redeploy）自癒。
+        #    判定：age > 45 min → 原執行必死（> 40 min 硬 time_limit；30 min soft limit 亦會讓
+        #    「活著但慢」的任務自行 raise→標 failed），故仍 running＝孤兒，重派無雙跑風險。
+        #    時間上限自癒（無需持久標記，因 _claim 會清 error_msg）：created_at 跨 claim 不變 →
+        #      - created < 3h：重設 queued + 重派一次（天然限制重派次數，避免無窮迴圈）。
+        #      - created >= 3h：已嘗試過久 → failed。
+        orphan_threshold = now - timedelta(minutes=45)
+        recover_cutoff = now - timedelta(hours=3)
+        # 1a. 過久（created >= 3h）→ failed
         result = session.execute(
             text(
                 """
                 UPDATE analysis_reports
                    SET status = 'failed',
                        error_msg = COALESCE(error_msg, '')
-                                 || ' [auto-failed by cleanup_orphans: stuck > 30min]',
+                                 || ' [auto-failed by cleanup_orphans: running orphan, created > 3h]',
                        updated_at = NOW()
                  WHERE status = 'running'
-                   AND COALESCE(started_at, created_at) < :threshold
+                   AND COALESCE(started_at, created_at) < :orphan
+                   AND created_at < :cutoff
                 """
             ),
-            {"threshold": stuck_threshold},
+            {"orphan": orphan_threshold, "cutoff": recover_cutoff},
         )
         counts["analysis_reports_failed"] = result.rowcount or 0
+        # 1b. 可救（created < 3h）→ 撈設定、重設 queued（commit 後重派 run_analysis）
+        rows = session.execute(
+            text(
+                """
+                SELECT id, analyst_types, debate_rounds
+                  FROM analysis_reports
+                 WHERE status = 'running'
+                   AND COALESCE(started_at, created_at) < :orphan
+                   AND created_at >= :cutoff
+                """
+            ),
+            {"orphan": orphan_threshold, "cutoff": recover_cutoff},
+        ).fetchall()
+        recover = [(r[0], r[1], r[2]) for r in rows]
+        if recover:
+            session.execute(
+                text(
+                    "UPDATE analysis_reports SET status = 'queued', updated_at = NOW() "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": [r[0] for r in recover]},
+            )
+        counts["analysis_reports_recovered"] = len(recover)
 
         # 1b. analysis_reports queued 過久 → failed（enqueue 失敗/worker 長期不在的兜底）。
         # ⚠️ 門檻必須 > 最壞批次排空時間：自動選股一次可 enqueue SCREEN_MAX_ANALYSES(30) 筆，每筆
@@ -145,6 +179,18 @@ def cleanup_orphans() -> dict[str, Any]:
         counts["announcements_deleted"] = result.rowcount or 0
 
         session.commit()
+
+    # commit 後才重派（確保 worker 認領時看到的是 queued）：把 running 孤兒重跑一次。
+    if recover:
+        from app.workers.tasks.run_analysis import run_analysis as _run_analysis
+
+        for aid, analyst_types, debate_rounds in recover:
+            kwargs: dict[str, Any] = {"debate_rounds": int(debate_rounds or 1), "risk_rounds": 0}
+            if analyst_types:
+                kwargs["analyst_types"] = list(analyst_types)
+            with contextlib.suppress(Exception):  # broker 不可用不應炸 cleanup
+                _run_analysis.apply_async(args=[str(aid)], kwargs=kwargs)
+        logger.info("cleanup_orphans.recovered_redispatched count=%d", len(recover))
 
     logger.info("cleanup_orphans.done counts=%s", counts)
     return counts
