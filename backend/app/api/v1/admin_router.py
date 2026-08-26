@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import admin_only
 from app.core.cursor import Cursor, build_page_response, clamp_limit
-from app.core.database import get_rw_session
+from app.core.database import get_ro_session, get_rw_session
 from app.core.response_envelope import envelope_success
 from app.core.validators import validate_uuid
 from app.schemas.admin import (
@@ -105,6 +105,68 @@ async def system_info(
             "version": settings.APP_VERSION,
             "env": settings.APP_ENV,
             "log_format": settings.LOG_FORMAT,
+        },
+        trace_id=_trace_id(request),
+    )
+
+
+@router.get("/system/stats", summary="即時系統統計：今日用量 / 佇列 / DB 大小（admin）")
+async def system_stats(
+    request: Request,
+    _admin: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_ro_session),
+) -> dict:
+    """即時真值（非時序）：今日分析數 / LLM 成本 / tokens、進行中分析、DB 大小、celery 佇列長度。
+
+    完整時序走勢（延遲/可用性歷史）需 Prometheus 抓取 /metrics + Grafana（本專案尚未部署）。
+    """
+    import contextlib
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from sqlalchemy import func, select, text
+
+    from app.core.redis_client import RedisDB, get_redis
+    from app.models.analysis import AnalysisReport
+    from app.models.quota import LLMUsage
+
+    now_tpe = datetime.now(ZoneInfo("Asia/Taipei"))
+    today_start = now_tpe.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+    analyses_today = await session.scalar(
+        select(func.count())
+        .select_from(AnalysisReport)
+        .where(AnalysisReport.created_at >= today_start)
+    )
+    analyses_running = await session.scalar(
+        select(func.count()).select_from(AnalysisReport).where(AnalysisReport.status == "running")
+    )
+    cost_today = await session.scalar(
+        select(func.coalesce(func.sum(LLMUsage.cost_usd), 0)).where(
+            LLMUsage.created_at >= today_start
+        )
+    )
+    tokens_today = await session.scalar(
+        select(func.coalesce(func.sum(LLMUsage.total_tokens), 0)).where(
+            LLMUsage.created_at >= today_start
+        )
+    )
+    db_size = await session.scalar(text("SELECT pg_database_size(current_database())"))
+
+    queue_len: int | None = None
+    with contextlib.suppress(Exception):
+        r = await get_redis(RedisDB.CELERY)
+        queue_len = int(await r.llen("celery"))
+
+    return envelope_success(
+        {
+            "as_of": now_tpe.isoformat(),
+            "analyses_today": int(analyses_today or 0),
+            "analyses_running": int(analyses_running or 0),
+            "llm_cost_today_usd": float(cost_today or 0),
+            "llm_tokens_today": int(tokens_today or 0),
+            "db_size_bytes": int(db_size or 0),
+            "celery_queue_len": queue_len,
         },
         trace_id=_trace_id(request),
     )

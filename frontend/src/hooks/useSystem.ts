@@ -38,6 +38,31 @@ export function useSystemInfo(enabled = true) {
   });
 }
 
+// 即時系統統計（真值，非時序）：GET /admin/system/stats
+export interface SystemStats {
+  as_of: string;
+  analyses_today: number;
+  analyses_running: number;
+  llm_cost_today_usd: number;
+  llm_tokens_today: number;
+  db_size_bytes: number;
+  celery_queue_len: number | null;
+}
+
+export function useSystemStats(enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "system", "stats"],
+    enabled,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<SystemStats>>(
+        "/admin/system/stats",
+      );
+      return res.data.data;
+    },
+  });
+}
+
 export interface UseDLQParams {
   resolved?: boolean | null;
   limit?: number;
