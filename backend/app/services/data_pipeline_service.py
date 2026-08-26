@@ -39,6 +39,19 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# 多源合併「提早結束」的內部缺口守衛：即使 max(merged)>=end，若合併結果在區間中間
+# 有 > 此天數的大洞（＝最高優先來源明顯落後/有整段缺漏，如 local 只回補到某日），
+# 就不提早結束、續問下一來源補洞。門檻取 15 天（> 台股最長假期農曆年約 9 天含週末），
+# 故正常假日不會誤觸；只抓「整段缺漏」的真問題。單日缺口偵測需交易日曆（另設計）。
+_MERGE_MAX_GAP_DAYS = 15
+
+
+def _max_internal_gap_days(sorted_dates: list) -> int:
+    """已排序日期序列中，相鄰兩日的最大間隔（日曆天）。空/單筆回 0。"""
+    if len(sorted_dates) < 2:
+        return 0
+    return max((sorted_dates[i] - sorted_dates[i - 1]).days for i in range(1, len(sorted_dates)))
+
 
 class DataPipelineService:
     """資料管線服務 — orchestrate fallback + repo upsert。"""
@@ -107,7 +120,11 @@ class DataPipelineService:
         merged: dict[Any, dict[str, Any]] = {}
         used_names: list[str] = []
         for src in sources:
-            if merged and max(merged) >= end:
+            if (
+                merged
+                and max(merged) >= end
+                and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
+            ):
                 break  # 已涵蓋到 end，不必再問後面的來源（省配額）
             try:
                 df = await src.fetch_ohlcv(symbol, start, end)
@@ -243,7 +260,11 @@ class DataPipelineService:
         merged: dict[Any, dict[str, Any]] = {}
         by_source: dict[str, list[dict[str, Any]]] = {}
         for src in sources:
-            if merged and max(merged) >= end:
+            if (
+                merged
+                and max(merged) >= end
+                and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
+            ):
                 break
             try:
                 df = await src.fetch_margin(symbol, start, end)
@@ -458,7 +479,11 @@ class DataPipelineService:
         merged: dict[Any, dict[str, Any]] = {}
         by_source: dict[str, list[dict[str, Any]]] = {}
         for src in sources:
-            if merged and max(merged) >= end:
+            if (
+                merged
+                and max(merged) >= end
+                and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
+            ):
                 break  # 已涵蓋到 end
             try:
                 df = await src.fetch_institutional(symbol, start, end)
