@@ -47,6 +47,8 @@ class _FakeSource(BaseDataSource):
         self.calls += 1
         if self.behavior == "ok":
             return f"ohlcv:{symbol}:{start}:{end} via {self.name}"
+        if self.behavior == "empty":
+            return []  # 空結果（本地庫無此標的/落後）
         if self.behavior == "not_supported":
             raise NotImplementedError
         raise RuntimeError(f"{self.name} pretend to fail")
@@ -83,6 +85,30 @@ async def test_falls_back_to_secondary_on_failure() -> None:
     assert secondary.calls == 1
     # primary 應該記錄 1 次失敗
     assert primary.cb.failure_count == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_result_falls_over_to_secondary() -> None:
+    """主源回空（非例外）→ 不當終點，應 failover 到次源拿真資料（修 lag bug）。"""
+    primary = _FakeSource(name="primary", priority=10, behavior="empty")
+    secondary = _FakeSource(name="secondary", priority=20, behavior="ok")
+    fb = DataSourceFallback([primary, secondary])
+    result = await fb.fetch_ohlcv("2330", date(2026, 4, 1), date(2026, 4, 5))
+    assert "via secondary" in result
+    assert primary.calls == 1 and secondary.calls == 1
+    # 空結果不算失敗，主源 CB 不應記失敗
+    assert primary.cb.failure_count == 0
+
+
+@pytest.mark.asyncio
+async def test_all_sources_empty_returns_empty() -> None:
+    """全部來源皆空 → 回空（查無資料是合法結果，非錯誤）。"""
+    primary = _FakeSource(name="primary", priority=10, behavior="empty")
+    secondary = _FakeSource(name="secondary", priority=20, behavior="empty")
+    fb = DataSourceFallback([primary, secondary])
+    result = await fb.fetch_ohlcv("2330", date(2026, 4, 1), date(2026, 4, 5))
+    assert result == []
+    assert primary.calls == 1 and secondary.calls == 1
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { DataTable } from "@/components/common/DataTable";
+import { DateFormat } from "@/components/common/DateFormat";
 import { PageHeader } from "@/components/common/PageHeader";
 import { PercentFormat } from "@/components/common/PercentFormat";
 import { PieChart } from "@/components/common/PieChart";
@@ -35,7 +36,7 @@ export default function StatisticsAccuracyPage() {
   // 預設 5 日：資料還很新時，長天期視窗尚未過完（全待計分）；短天期今天即可計分。
   // 隨著歷史累積，可切到 20/30 日看更穩健的命中率。
   const [horizon, setHorizon] = useState<number>(5);
-  const { stats, rows, isLoading } = useAccuracyStats(horizon);
+  const { stats, rows, isLoading, isError } = useAccuracyStats(horizon);
 
   const columns = useMemo<ColumnDef<AccuracyRow>[]>(
     () => [
@@ -44,7 +45,7 @@ export default function StatisticsAccuracyPage() {
         header: "建立時間",
         cell: ({ row }) => (
           <span className="text-xs tabular-nums">
-            {row.original.created_at?.slice(0, 16)}
+            <DateFormat value={row.original.created_at} mode="datetime" />
           </span>
         ),
       },
@@ -117,8 +118,14 @@ export default function StatisticsAccuracyPage() {
         description={`真實命中率：訊號對上「分析建立之後 ${horizon} 日」的實際報酬（含息、PIT 正確）`}
       />
 
+      {isError ? (
+        <p className="rounded-md border border-bear/30 bg-bear/5 p-3 text-xs text-bear">
+          無法載入準確率資料，請稍後重試或確認已登入。
+        </p>
+      ) : null}
+
       <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-        方法：進場＝決策日收盤，出場＝{horizon} 日後收盤（含息還原價）。
+        方法：進場＝決策日收盤，出場＝{horizon} 日後收盤（未還原收盤，除息跳空計入）。
         BUY 命中＝報酬 &gt; 0、SELL 命中＝報酬 &lt; 0。
         <span className="text-foreground">
           {" "}

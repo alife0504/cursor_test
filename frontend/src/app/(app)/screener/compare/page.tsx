@@ -67,8 +67,17 @@ export default function ScreenerComparePage() {
     })),
   });
 
-  const metricsBySymbol = new Map<string, StockMetricsData | undefined>();
-  selected.forEach((s, i) => metricsBySymbol.set(s.symbol, results[i]?.data));
+  const statusBySymbol = new Map<
+    string,
+    { data?: StockMetricsData; isLoading: boolean; isError: boolean }
+  >();
+  selected.forEach((s, i) =>
+    statusBySymbol.set(s.symbol, {
+      data: results[i]?.data,
+      isLoading: Boolean(results[i]?.isLoading),
+      isError: Boolean(results[i]?.isError),
+    }),
+  );
   const asOf = results.find((r) => r.data?.as_of_date)?.data?.as_of_date ?? null;
 
   const rows: Array<{ label: string; fmt: (m?: StockMetricsData) => string }> = [
@@ -165,14 +174,23 @@ export default function ScreenerComparePage() {
                 {rows.map((row) => (
                   <tr key={row.label} className="border-b">
                     <td className="p-2 text-muted-foreground">{row.label}</td>
-                    {selected.map((s) => (
-                      <td
-                        key={s.symbol}
-                        className="p-2 font-mono tabular-nums"
-                      >
-                        {row.fmt(metricsBySymbol.get(s.symbol))}
-                      </td>
-                    ))}
+                    {selected.map((s) => {
+                      const st = statusBySymbol.get(s.symbol);
+                      return (
+                        <td
+                          key={s.symbol}
+                          className="p-2 font-mono tabular-nums"
+                        >
+                          {st?.isLoading ? (
+                            <span className="text-muted-foreground">…</span>
+                          ) : st?.isError ? (
+                            <span className="text-xs text-bear">查詢失敗</span>
+                          ) : (
+                            row.fmt(st?.data)
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

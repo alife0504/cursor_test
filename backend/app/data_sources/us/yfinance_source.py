@@ -276,15 +276,19 @@ class YFinanceSource(BaseDataSource):
                 "High": "high",
                 "Low": "low",
                 "Close": "close",
-                "Adj Close": "adj_close",
+                "Adj Close": "adjusted_close",
                 "Volume": "volume",
             }
         )
-        # 只取需要的欄位
-        keep = [c for c in ("date", "open", "high", "low", "close", "volume") if c in out.columns]
+        # 只取需要的欄位（含還原收盤 adjusted_close，對齊 ohlcv_repo 期待的 key）
+        keep = [
+            c
+            for c in ("date", "open", "high", "low", "close", "adjusted_close", "volume")
+            if c in out.columns
+        ]
         out = out[keep].copy()
         out["date"] = pd.to_datetime(out["date"]).dt.date
-        for col in ("open", "high", "low", "close"):
+        for col in ("open", "high", "low", "close", "adjusted_close"):
             if col in out.columns:
                 out[col] = out[col].apply(_to_decimal_or_none)
         if "volume" in out.columns:

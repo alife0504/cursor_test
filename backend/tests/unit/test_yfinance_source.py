@@ -46,10 +46,21 @@ def _sample_ohlcv_df() -> pd.DataFrame:
 def test_normalize_ohlcv_columns() -> None:
     """_normalize_ohlcv 應產生統一欄位 + Decimal OHLC + int volume + 估算 turnover。"""
     df = YFinanceSource._normalize_ohlcv(_sample_ohlcv_df(), "AAPL")
-    assert list(df.columns) == ["date", "open", "high", "low", "close", "volume", "turnover"]
+    # adjusted_close 納入（US 已提供還原價；對齊 ohlcv_repo 期待的 key）
+    assert list(df.columns) == [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adjusted_close",
+        "volume",
+        "turnover",
+    ]
     assert df.iloc[0]["date"] == date(2026, 4, 1)
     assert df.iloc[0]["open"] == Decimal("180.0")
     assert df.iloc[0]["close"] == Decimal("181.0")
+    assert df.iloc[0]["adjusted_close"] == Decimal("181.0")
     assert df.iloc[0]["volume"] == 50_000_000
     # turnover = close * volume
     assert df.iloc[0]["turnover"] == Decimal("181.0") * 50_000_000

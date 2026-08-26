@@ -36,7 +36,8 @@ def _parse_news_dt(v: Any) -> Any:
 
     解析失敗回 None（caller 應略過該筆——published_at 不可為 NULL）。
     """
-    from datetime import UTC, datetime
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
     if not v:
         return None
@@ -44,7 +45,9 @@ def _parse_news_dt(v: Any) -> Any:
         dt = datetime.fromisoformat(str(v))
     except (ValueError, TypeError):
         return None
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
+    # FinMind 新聞時間為台北當地時間（naive）；標為 Asia/Taipei 才是正確 instant，
+    # 誤標 UTC 會使 published_at 早 8 小時（與 _parse_roc_datetime 的處理一致）。
+    return dt.replace(tzinfo=ZoneInfo("Asia/Taipei")) if dt.tzinfo is None else dt
 
 
 @register_data_source

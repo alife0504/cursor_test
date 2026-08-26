@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from prometheus_client import Counter, Gauge, Histogram
 
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 # ── 分析（analysis）────────────────────────────────────
 ANALYSIS_TOTAL = Counter(
     "analysis_total",
@@ -98,7 +102,9 @@ DLQ_PENDING = Gauge("dlq_pending_total", "未解決 Celery DLQ 筆數")
 async def collect_runtime_metrics(session: object) -> None:
     """/metrics 被抓取時呼叫：即時從 DB / redis / pool 設定業務 gauge。
 
-    以 session（AsyncSession）查詢；任何子項失敗都被吞掉（不擋整體 /metrics）。
+    以 session（AsyncSession）查詢；每個查詢獨立防護：失敗即 rollback，避免污染同一
+    session 的後續查詢（asyncpg 在錯誤後會進入 aborted transaction）。任何子項失敗都
+    不擋整體 /metrics（process 指標仍會輸出）。
     """
     import contextlib
     from datetime import UTC, datetime
@@ -112,8 +118,18 @@ async def collect_runtime_metrics(session: object) -> None:
     now_tpe = datetime.now(ZoneInfo("Asia/Taipei"))
     today_start = now_tpe.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
-    # 今日分析數（依 status）
-    with contextlib.suppress(Exception):
+    async def _guard(fn: object) -> None:
+        """跑單一查詢；失敗記 warning 並 rollback（避免污染 session 後續查詢）。"""
+        try:
+            await fn()  # type: ignore[operator]
+        except Exception as exc:
+            logger.warning(
+                "metrics.collect_failed op=%s error=%s", getattr(fn, "__name__", "?"), exc
+            )
+            with contextlib.suppress(Exception):
+                await session.rollback()  # type: ignore[attr-defined]
+
+    async def _analyses_by_status() -> None:
         rows = await session.execute(  # type: ignore[attr-defined]
             select(AnalysisReport.status, func.count())
             .where(AnalysisReport.created_at >= today_start)
@@ -123,44 +139,46 @@ async def collect_runtime_metrics(session: object) -> None:
         for status, cnt in rows:
             ANALYSES_TODAY.labels(status=status).set(int(cnt))
             seen.add(status)
-        # 確保常見 status 即使為 0 也有序列（Grafana 疊圖穩定）
         for st in ("queued", "running", "completed", "failed", "cancelled"):
             if st not in seen:
                 ANALYSES_TODAY.labels(status=st).set(0)
 
-    with contextlib.suppress(Exception):
-        running = await session.scalar(  # type: ignore[attr-defined]
+    async def _running() -> None:
+        r = await session.scalar(  # type: ignore[attr-defined]
             select(func.count())
             .select_from(AnalysisReport)
             .where(AnalysisReport.status == "running")
         )
-        ANALYSES_RUNNING.set(int(running or 0))
+        ANALYSES_RUNNING.set(int(r or 0))
 
-    with contextlib.suppress(Exception):
-        cost = await session.scalar(  # type: ignore[attr-defined]
+    async def _cost() -> None:
+        r = await session.scalar(  # type: ignore[attr-defined]
             select(func.coalesce(func.sum(LLMUsage.cost_usd), 0)).where(
                 LLMUsage.created_at >= today_start
             )
         )
-        LLM_COST_TODAY.set(float(cost or 0))
+        LLM_COST_TODAY.set(float(r or 0))
 
-    with contextlib.suppress(Exception):
-        tokens = await session.scalar(  # type: ignore[attr-defined]
+    async def _tokens() -> None:
+        r = await session.scalar(  # type: ignore[attr-defined]
             select(func.coalesce(func.sum(LLMUsage.total_tokens), 0)).where(
                 LLMUsage.created_at >= today_start
             )
         )
-        LLM_TOKENS_TODAY.set(int(tokens or 0))
+        LLM_TOKENS_TODAY.set(int(r or 0))
 
-    with contextlib.suppress(Exception):
-        size = await session.scalar(text("SELECT pg_database_size(current_database())"))  # type: ignore[attr-defined]
-        DB_SIZE_BYTES.set(int(size or 0))
+    async def _dbsize() -> None:
+        r = await session.scalar(text("SELECT pg_database_size(current_database())"))  # type: ignore[attr-defined]
+        DB_SIZE_BYTES.set(int(r or 0))
 
-    with contextlib.suppress(Exception):
-        dlq = await session.scalar(  # type: ignore[attr-defined]
+    async def _dlq() -> None:
+        r = await session.scalar(  # type: ignore[attr-defined]
             text("SELECT count(*) FROM celery_dead_letters WHERE resolved = false")
         )
-        DLQ_PENDING.set(int(dlq or 0))
+        DLQ_PENDING.set(int(r or 0))
+
+    for op in (_analyses_by_status, _running, _cost, _tokens, _dbsize, _dlq):
+        await _guard(op)
 
     # DB pool 使用中連線數
     with contextlib.suppress(Exception):

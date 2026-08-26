@@ -248,6 +248,16 @@ def run_backtest(
     # 顯示視窗起點：第一個 date >= window_start（無則用第 0 根）
     start_idx = next((i for i, d in enumerate(dates) if d >= window_start), 0)
 
+    # 防呆：視窗內至少要有 2 根 K 才算得出報酬；否則明確回 error 而非靜默回 0% 單點曲線
+    if start_idx >= len(dates) - 1:
+        return {
+            "error": "insufficient_data",
+            "curve": [],
+            "benchmark_curve": [],
+            "start_date": dates[start_idx].isoformat(),
+            "end_date": dates[-1].isoformat(),
+        }
+
     pos = _positions(strategy, closes)
     strat = _equity_and_metrics(dates, closes, pos, start_idx, initial_capital)
 
@@ -278,7 +288,8 @@ async def compute_backtest(
     """從 stock_prices 抓日 K（含 60 天暖身）並跑回測。
 
     - 以該標的「最新可得日」為終點；window_start = 最新日 - period 天。
-    - 報酬用 COALESCE(adjusted_close, close)（含息還原、基準一致）。
+    - 報酬用 COALESCE(adjusted_close, close)：有還原價＝含息；否則原始收盤（除息跳空計入）。
+      現況：美股已提供還原價、台股尚未回填（後續強化項）。基準一致、PIT 安全。
     """
     if strategy not in STRATEGIES:
         return {"error": "unknown_strategy", "curve": [], "benchmark_curve": []}
@@ -292,7 +303,14 @@ async def compute_backtest(
         return {"error": "no_data", "symbol": symbol, "curve": [], "benchmark_curve": []}
 
     period_days = PERIOD_DAYS.get(period, 90)
-    window_start = latest if period_days is None else latest - timedelta(days=period_days)
+    if period_days is None:
+        # "all"：全部可得 → 視窗起點取「最早可得日」，而非 latest（否則曲線退化成單點/0%）
+        earliest = await session.scalar(
+            select(func.min(StockPrice.date)).where(StockPrice.symbol == symbol)
+        )
+        window_start = earliest or latest
+    else:
+        window_start = latest - timedelta(days=period_days)
     fetch_from = window_start - timedelta(days=_WARMUP_DAYS)
 
     stmt = (

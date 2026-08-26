@@ -44,7 +44,10 @@ export default function StatisticsBacktestPage() {
   const [period, setPeriod] = useState<string>("3m");
 
   const { data, isLoading, isError } = useBacktest(symbol, strategy, period);
-  const noData = data?.error === "no_data" || data?.error === "unknown_strategy";
+  const noData =
+    data?.error === "no_data" ||
+    data?.error === "unknown_strategy" ||
+    data?.error === "insufficient_data";
 
   const m = data?.metrics;
   const bm = data?.benchmark_metrics;
