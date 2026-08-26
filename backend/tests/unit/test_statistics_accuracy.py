@@ -90,23 +90,31 @@ def test_no_data_when_symbol_missing() -> None:
     assert out["no_data"] == 1
 
 
-def test_gap_beyond_tolerance_is_no_data() -> None:
-    """出場目標日附近（容差窗）無 bar，但更遠處有資料 → 視為資料缺口 no_data，不亂抓遠 bar。"""
-    # 進場段 D0..D0+2，之後跳到 D0+60 才有資料（target=D0+30 附近容差 14 天內無 bar）
-    bars = _series(D0, [100.0, 101.0, 102.0])
-    bars += [(D0 + timedelta(days=60 + i), Decimal("200")) for i in range(5)]
-    prices = {"AAA": bars}
-    a = [{"id": "1", "symbol": "AAA", "signal": "BUY", "confidence": 0.8, "created_at": _dt(D0)}]
-    out = score_analyses(a, prices, horizon_days=30)
-    assert out["rows"][0]["status"] == "no_data"
-    assert out["no_data"] == 1
+def test_horizon_counts_trading_days_not_calendar() -> None:
+    """horizon 用「交易日」(bar)計數而非日曆天：日期間有假日缺口不影響 bar 數。"""
+    # 5 根 bar，日期不連續（含週末/假日跳空）；horizon=3 → 出場＝進場後第 3 根 bar（index 3）。
+    ds = [
+        D0,
+        D0 + timedelta(days=1),
+        D0 + timedelta(days=4),  # 跳過週末
+        D0 + timedelta(days=5),
+        D0 + timedelta(days=6),
+    ]
+    closes = [Decimal(c) for c in ("100", "101", "102", "103", "110")]
+    prices = {"AAA": list(zip(ds, closes, strict=True))}
+    a = [{"id": "1", "symbol": "AAA", "signal": "BUY", "confidence": 0.5, "created_at": _dt(D0)}]
+    out = score_analyses(a, prices, horizon_days=3)
+    row = out["rows"][0]
+    assert row["status"] == "scored"
+    assert row["entry_date"] == D0.isoformat()  # index 0
+    assert row["exit_date"] == (D0 + timedelta(days=5)).isoformat()  # index 3（非 D0+3 日曆）
+    assert abs(row["actual_return"] - (103.0 / 100.0 - 1)) < 1e-9
 
 
-def test_exit_picks_first_bar_at_or_after_target_within_tolerance() -> None:
-    """出場取 target 起容差窗內「第一根」；holiday 讓 target 當天無 bar 也能取次日。"""
-    # D0..D0+40 每日都有，但把 D0+30 當天挖掉（假日）→ 應取 D0+31
+def test_exit_is_nth_trading_bar_after_entry() -> None:
+    """出場＝進場後第 N 個交易 bar（index）；缺一天不影響 bar 計數。"""
     full = _series(D0, [100.0 + i for i in range(41)])
-    bars = [b for b in full if b[0] != D0 + timedelta(days=30)]
+    bars = [b for b in full if b[0] != D0 + timedelta(days=30)]  # 挖掉一天 → index 30 = D0+31
     prices = {"AAA": bars}
     a = [{"id": "1", "symbol": "AAA", "signal": "BUY", "confidence": 0.5, "created_at": _dt(D0)}]
     out = score_analyses(a, prices, horizon_days=30)
@@ -117,10 +125,13 @@ def test_exit_picks_first_bar_at_or_after_target_within_tolerance() -> None:
 
 def test_aggregate_hit_rate_and_avg_return() -> None:
     """兩檔 BUY：一命中(+10%)一失誤(-10%) → hit_rate=0.5、avg_return=0。"""
-    # 精準造 +10% / -10%：進場 100，出場(D0+30 那根) 110 / 90
+    # 31 根連續 bar；進場 index0=100、出場 index30=110/90（horizon=30 交易日）。
+    up_c = [Decimal("100")] * 30 + [Decimal("110")]
+    dn_c = [Decimal("100")] * 30 + [Decimal("90")]
+    ds = [D0 + timedelta(days=i) for i in range(31)]
     prices = {
-        "UP": [(D0, Decimal("100")), (D0 + timedelta(days=30), Decimal("110"))],
-        "DN": [(D0, Decimal("100")), (D0 + timedelta(days=30), Decimal("90"))],
+        "UP": list(zip(ds, up_c, strict=True)),
+        "DN": list(zip(ds, dn_c, strict=True)),
     }
     a = [
         {"id": "1", "symbol": "UP", "signal": "BUY", "confidence": 0.7, "created_at": _dt(D0)},

@@ -77,7 +77,7 @@ export default function StatisticsAccuracyPage() {
       },
       {
         accessorKey: "actual_return",
-        header: `實際報酬（${horizon}日）`,
+        header: `實際報酬（${horizon} 交易日）`,
         cell: ({ row }) =>
           row.original.actual_return === null ? (
             <span className="text-xs text-muted-foreground">—</span>
@@ -115,7 +115,7 @@ export default function StatisticsAccuracyPage() {
       <PageHeader
         icon={TrendingUp}
         title="準確率分析"
-        description={`真實命中率：訊號對上「分析建立之後 ${horizon} 日」的實際報酬（含息、PIT 正確）`}
+        description={`真實命中率：訊號對上「分析建立之後 ${horizon} 個交易日」的實際報酬（含息、PIT 正確）`}
       />
 
       {isError ? (
@@ -125,7 +125,7 @@ export default function StatisticsAccuracyPage() {
       ) : null}
 
       <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-        方法：進場＝決策日收盤，出場＝{horizon} 日後收盤（未還原收盤，除息跳空計入）。
+        方法：進場＝決策日收盤，出場＝進場後第 {horizon} 個交易日收盤（未還原收盤，除息跳空計入）。
         BUY 命中＝報酬 &gt; 0、SELL 命中＝報酬 &lt; 0。
         <span className="text-foreground">
           {" "}
@@ -148,7 +148,7 @@ export default function StatisticsAccuracyPage() {
                   : "rounded px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
               }
             >
-              {h} 日
+              {h} 交易日
             </button>
           ))}
         </div>
@@ -188,7 +188,7 @@ export default function StatisticsAccuracyPage() {
           <p className="text-xs text-muted-foreground">待計分</p>
           <p className="num text-2xl font-bold">{stats.pending}</p>
           <p className="text-xs text-muted-foreground">
-            視窗未滿 {horizon} 日{stats.no_data ? `／無資料 ${stats.no_data}` : ""}
+            未滿 {horizon} 交易日{stats.no_data ? `／無資料 ${stats.no_data}` : ""}
           </p>
         </div>
       </section>

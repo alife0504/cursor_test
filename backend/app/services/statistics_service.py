@@ -3,9 +3,10 @@
 PIT 原則（本專案第一原則）：
 - 報酬視窗**完全在分析建立時間之後**：用 T 之後的價格「評分」T 當下的決策，
   屬「實現結果」而非偷看未來（偷看未來＝拿 T 之後的資料去「做」決策）。
-- 視窗尚未過完（最新可得日 K < 目標出場日）→ 標記 pending，不硬湊。
-- 進場價＝決策日 D0 前 `entry_tol` 天內最近的收盤；出場價＝D0+N 起 `exit_tol`
-  天內第一根收盤。容差窗吸收假日／時區±1 天／資料缺口，避免抓到很遠的 bar 失真。
+- 視窗尚未過完（未來交易日 bar 不足 N 根）→ 標記 pending，不硬湊。
+- 進場價＝決策日 D0 前 `entry_tol` 天內最近的收盤（容差窗吸收假日／時區±1 天）；
+  出場價＝進場後第 N 個「交易日」（bar）的收盤——用交易日而非日曆天（finance 標準，
+  跳過週末/假日）。
 - 報酬用 `COALESCE(adjusted_close, close)`：有還原價時＝含息總報酬；否則退回原始收盤
   （價格報酬，除息跳空會計入）。**現況：美股 yfinance 已提供 adjusted_close；台股尚未
   回填還原價，故台股標的目前為未還原收盤——除息旺季 BUY 命中率可能略被低估。台股還原
@@ -16,7 +17,7 @@ PIT 原則（本專案第一原則）：
 
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
+from bisect import bisect_right
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_type
 from decimal import Decimal
@@ -46,27 +47,17 @@ def _pick_entry(dates: list[date_type], d0: date_type, entry_tol_days: int) -> i
     return hi
 
 
-def _pick_exit(
-    dates: list[date_type],
-    target: date_type,
-    exit_tol_days: int,
-    latest: date_type,
-) -> tuple[int | None, RowStatus]:
-    """回傳 target 起 exit_tol 天內「第一根」收盤的索引 + 狀態。
+def _pick_exit(entry_idx: int, horizon_bars: int, n_bars: int) -> tuple[int | None, RowStatus]:
+    """出場＝進場後第 `horizon_bars` 個「交易日」（bar），即 index = entry_idx + horizon_bars。
 
-    - 找到 → (idx, "scored")
-    - 最新可得日 < target（視窗未過完 / 資料未進） → (None, "pending")
-    - 有更後面的資料但容差窗內無 bar（資料缺口） → (None, "no_data")
+    用交易日（finance 標準）而非日曆天：跳過週末/假日，"20 日" ＝ 20 個交易 session。
+    - 足夠 bar → (idx, "scored")
+    - 尚無足夠交易日（未來 bar 不足） → (None, "pending")
     """
-    if latest < target:
+    xi = entry_idx + horizon_bars
+    if xi >= n_bars:
         return None, "pending"
-    # 第一個 date >= target
-    lo = bisect_left(dates, target)
-    if lo >= len(dates):
-        return None, "pending"
-    if dates[lo] > target + timedelta(days=exit_tol_days):
-        return None, "no_data"
-    return lo, "scored"
+    return xi, "scored"
 
 
 def score_analyses(
@@ -75,14 +66,13 @@ def score_analyses(
     *,
     horizon_days: int,
     entry_tol_days: int = 14,
-    exit_tol_days: int = 14,
 ) -> dict[str, Any]:
-    """純函數：把 signal 對上 D0+N 實際報酬，算命中率。
+    """純函數：把 signal 對上進場後 N 個「交易日」的實際報酬，算命中率。
 
     Args:
         analyses: [{id, symbol, signal('BUY'/'SELL'), confidence(float|None), created_at(datetime)}]
         prices_by_symbol: {symbol: [(date, px)]}（date 升冪；px 已 COALESCE 還原價）
-        horizon_days: 報酬視窗（日曆天）。
+        horizon_days: 持有期＝進場後第 N 個「交易日」（bar 數，非日曆天；finance 標準）。
     """
     rows: list[dict[str, Any]] = []
 
@@ -98,7 +88,6 @@ def score_analyses(
         signal = a["signal"]
         created = a["created_at"]
         d0 = created.astimezone(UTC).date() if isinstance(created, datetime) else created
-        target = d0 + timedelta(days=horizon_days)
 
         bars = prices_by_symbol.get(symbol) or []
         row: dict[str, Any] = {
@@ -123,7 +112,6 @@ def score_analyses(
             continue
 
         dates = [b[0] for b in bars]
-        latest = dates[-1]
 
         ei = _pick_entry(dates, d0, entry_tol_days)
         if ei is None:
@@ -131,7 +119,7 @@ def score_analyses(
             rows.append(row)
             continue
 
-        xi, status = _pick_exit(dates, target, exit_tol_days, latest)
+        xi, status = _pick_exit(ei, horizon_days, len(dates))
         if xi is None:
             row["status"] = status
             if status == "pending":
@@ -210,7 +198,6 @@ async def compute_accuracy(
     horizon_days: int = 30,
     lookback_days: int = 180,
     entry_tol_days: int = 14,
-    exit_tol_days: int = 14,
 ) -> dict[str, Any]:
     """從 DB 撈使用者自己的已完成分析 + 本地日 K，算真實命中率（user-scoped）。
 
@@ -253,13 +240,14 @@ async def compute_accuracy(
             {},
             horizon_days=horizon_days,
             entry_tol_days=entry_tol_days,
-            exit_tol_days=exit_tol_days,
         )
 
     symbols = sorted({a["symbol"] for a in analyses})
     d0s = [a["created_at"].astimezone(UTC).date() for a in analyses]
     range_lo = min(d0s) - timedelta(days=entry_tol_days)
-    range_hi = max(d0s) + timedelta(days=horizon_days + exit_tol_days)
+    # horizon 是「交易日」bar 數；需抓足夠日曆天才含 N 個交易 bar（週末/假日縮減交易日）。
+    # 用 2×horizon + buffer 日曆天，充分涵蓋（即使連假也夠）。
+    range_hi = max(d0s) + timedelta(days=horizon_days * 2 + entry_tol_days + 7)
 
     px_col = func.coalesce(StockPrice.adjusted_close, StockPrice.close)
     p_stmt = (
@@ -281,7 +269,6 @@ async def compute_accuracy(
         prices_by_symbol,
         horizon_days=horizon_days,
         entry_tol_days=entry_tol_days,
-        exit_tol_days=exit_tol_days,
     )
 
 
