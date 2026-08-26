@@ -3,7 +3,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { TrendingUp } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { DataTable } from "@/components/common/DataTable";
@@ -29,9 +29,13 @@ function HitCell({ row }: { row: AccuracyRow }) {
   );
 }
 
+const HORIZON_OPTIONS = [5, 10, 20, 30] as const;
+
 export default function StatisticsAccuracyPage() {
-  const { stats, rows, isLoading } = useAccuracyStats();
-  const horizon = stats.horizon_days;
+  // 預設 5 日：資料還很新時，長天期視窗尚未過完（全待計分）；短天期今天即可計分。
+  // 隨著歷史累積，可切到 20/30 日看更穩健的命中率。
+  const [horizon, setHorizon] = useState<number>(5);
+  const { stats, rows, isLoading } = useAccuracyStats(horizon);
 
   const columns = useMemo<ColumnDef<AccuracyRow>[]>(
     () => [
@@ -122,6 +126,26 @@ export default function StatisticsAccuracyPage() {
         </span>
         （避免偷看未來）。僅統計你自己的已完成分析。
       </p>
+
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">持有期</span>
+        <div className="inline-flex rounded-md border p-0.5">
+          {HORIZON_OPTIONS.map((h) => (
+            <button
+              key={h}
+              type="button"
+              onClick={() => setHorizon(h)}
+              className={
+                horizon === h
+                  ? "rounded px-3 py-1 text-xs font-medium bg-primary text-primary-foreground"
+                  : "rounded px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+              }
+            >
+              {h} 日
+            </button>
+          ))}
+        </div>
+      </div>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border bg-card p-3 card-hover">
