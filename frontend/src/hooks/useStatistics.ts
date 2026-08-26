@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { useAnalysisList } from "@/hooks/useAnalysis";
+import { api, type ApiEnvelope } from "@/lib/api";
 import type { AnalysisSummary } from "@/lib/api-types";
 
 // Phase 17 § G / § H:Statistics
-//   - 後端 P11 不擴大 endpoint(v7.0 規範)
-//   - 從 /api/v1/analysis 拉資料,前端 client-side 算準確率與模型比較
-//   - actual_return_30d 後端目前無 → accuracy 只用 confidence 推估;v1.1 補
+//   - 模型比較：從 /api/v1/analysis 拉資料，前端 client-side group by 模型（真實）
+//   - 準確率（v1.1）：改用後端 /api/v1/statistics/accuracy，
+//     以「分析建立之後 N 日實際報酬」計算真實命中率（PIT 正確），取代舊 confidence 粗估
 
 export interface AccuracyStats {
   total: number;
@@ -79,10 +81,70 @@ export function computeModelStats(rows: AnalysisSummary[]): ModelStats[] {
   return arr.sort((a, b) => b.total - a.total);
 }
 
-export function useAccuracyStats() {
-  const q = useRecentCompletedAnalyses(200);
-  const stats = useMemo(() => computeAccuracyFromAnalyses(q.items), [q.items]);
-  return { ...q, stats };
+// ── v1.1 真實命中率（後端 PIT 計算）────────────────────────────────
+
+export type AccuracyRowStatus = "scored" | "pending" | "no_data";
+
+export interface AccuracyRow {
+  id: string;
+  symbol: string;
+  signal: "BUY" | "SELL";
+  confidence: number | null;
+  created_at: string;
+  horizon_days: number;
+  entry_date: string | null;
+  entry_price: number | null;
+  exit_date: string | null;
+  exit_price: number | null;
+  actual_return: number | null; // 小數（0.1 = +10%）
+  hit: boolean | null;
+  status: AccuracyRowStatus;
+}
+
+export interface AccuracySide {
+  scored: number;
+  hits: number;
+  hit_rate: number; // 0..1
+  avg_return: number; // 小數
+}
+
+export interface AccuracyResponse {
+  horizon_days: number;
+  overall: { scored: number; hits: number; hit_rate: number };
+  buy: AccuracySide;
+  sell: AccuracySide;
+  pending: number;
+  no_data: number;
+  rows: AccuracyRow[];
+}
+
+const EMPTY_ACCURACY: AccuracyResponse = {
+  horizon_days: 30,
+  overall: { scored: 0, hits: 0, hit_rate: 0 },
+  buy: { scored: 0, hits: 0, hit_rate: 0, avg_return: 0 },
+  sell: { scored: 0, hits: 0, hit_rate: 0, avg_return: 0 },
+  pending: 0,
+  no_data: 0,
+  rows: [],
+};
+
+// 真實命中率：signal 對上「分析建立之後」N 日實際報酬（後端 user-scoped、PIT 正確）
+export function useAccuracyStats(horizonDays = 30, lookbackDays = 180) {
+  const q = useQuery({
+    queryKey: ["statistics", "accuracy", { horizonDays, lookbackDays }],
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<AccuracyResponse>>(
+        "/statistics/accuracy",
+        { params: { horizon_days: horizonDays, lookback_days: lookbackDays } },
+      );
+      return res.data.data ?? EMPTY_ACCURACY;
+    },
+  });
+  return {
+    ...q,
+    stats: q.data ?? EMPTY_ACCURACY,
+    rows: q.data?.rows ?? [],
+  };
 }
 
 export function useModelStats() {

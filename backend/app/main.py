@@ -40,6 +40,7 @@ from app.api.v1.orders_router import router as orders_router
 from app.api.v1.portfolio_router import router as portfolio_router
 from app.api.v1.reports_router import router as reports_router
 from app.api.v1.screener_router import router as screener_router
+from app.api.v1.statistics_router import router as statistics_router
 from app.api.v1.stocks_router import router as stocks_router
 from app.api.v1.users_router import router as users_router
 from app.api.v1.watchlist_router import router as watchlist_router
@@ -309,6 +310,7 @@ app.include_router(analysis_router)
 app.include_router(orders_router)
 app.include_router(portfolio_router)
 app.include_router(reports_router)
+app.include_router(statistics_router)
 app.include_router(exports_router)
 app.include_router(notifications_router)
 app.include_router(admin_router)

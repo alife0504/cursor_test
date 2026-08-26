@@ -123,7 +123,7 @@ const NAV: NavItem[] = [
     labelKey: "nav.statistics",
     icon: LineChart,
     children: [
-      { href: "/statistics/accuracy", labelKey: "nav.statistics.accuracy", icon: TrendingUp, implemented: true, mock: true },
+      { href: "/statistics/accuracy", labelKey: "nav.statistics.accuracy", icon: TrendingUp, implemented: true },
       { href: "/statistics/models", labelKey: "nav.statistics.models", icon: ListChecks, implemented: true },
       { href: "/statistics/backtest", labelKey: "nav.statistics.backtest", icon: Sparkles, implemented: true, mock: true },
     ],

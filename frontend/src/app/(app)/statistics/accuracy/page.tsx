@@ -7,22 +7,33 @@ import { useMemo } from "react";
 
 import { ChartContainer } from "@/components/common/ChartContainer";
 import { DataTable } from "@/components/common/DataTable";
-import { MockBanner } from "@/components/common/MockBanner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { PercentFormat } from "@/components/common/PercentFormat";
 import { PieChart } from "@/components/common/PieChart";
 import { SignalBadge } from "@/components/common/SignalBadge";
-import { useAccuracyStats } from "@/hooks/useStatistics";
-import type { AnalysisSummary } from "@/lib/api-types";
+import { type AccuracyRow, useAccuracyStats } from "@/hooks/useStatistics";
 
-// Phase 17 § G:準確率分析
-//   - v1.0 用 confidence>=0.6 視為「hit」(粗略估計,標 Mock)
-//   - v1.1 後端補 actual_return_30d 後改為真實命中
+// Phase 17 § G（v1.1）：真實準確率
+//   - 後端 /api/v1/statistics/accuracy 以「分析建立之後 N 日實際報酬」計命中率（PIT 正確）
+//   - BUY 命中＝報酬>0；SELL 命中＝報酬<0；視窗未過完 → 待計分（pending，不硬湊）
+
+function HitCell({ row }: { row: AccuracyRow }) {
+  if (row.status === "pending")
+    return <span className="text-xs text-muted-foreground">待計分</span>;
+  if (row.status === "no_data")
+    return <span className="text-xs text-muted-foreground">無資料</span>;
+  return row.hit ? (
+    <span className="font-medium text-bull">✓ 命中</span>
+  ) : (
+    <span className="font-medium text-bear">✗ 失誤</span>
+  );
+}
 
 export default function StatisticsAccuracyPage() {
-  const { items, stats, isLoading } = useAccuracyStats();
+  const { stats, rows, isLoading } = useAccuracyStats();
+  const horizon = stats.horizon_days;
 
-  const columns = useMemo<ColumnDef<AnalysisSummary>[]>(
+  const columns = useMemo<ColumnDef<AccuracyRow>[]>(
     () => [
       {
         accessorKey: "created_at",
@@ -49,10 +60,7 @@ export default function StatisticsAccuracyPage() {
         accessorKey: "signal",
         header: "訊號",
         cell: ({ row }) => (
-          <SignalBadge
-            signal={row.original.signal ?? null}
-            status={row.original.status}
-          />
+          <SignalBadge signal={row.original.signal} status="completed" />
         ),
       },
       {
@@ -63,34 +71,36 @@ export default function StatisticsAccuracyPage() {
         ),
       },
       {
-        accessorKey: "llm_model",
-        header: "模型",
-        cell: ({ row }) => row.original.llm_model ?? "-",
+        accessorKey: "actual_return",
+        header: `實際報酬（${horizon}日）`,
+        cell: ({ row }) =>
+          row.original.actual_return === null ? (
+            <span className="text-xs text-muted-foreground">—</span>
+          ) : (
+            <PercentFormat value={row.original.actual_return} colored />
+          ),
+      },
+      {
+        id: "hit",
+        header: "命中",
+        cell: ({ row }) => <HitCell row={row.original} />,
       },
     ],
-    [],
+    [horizon],
   );
 
-  // 紅漲綠跌：BUY=bull、SELL=bear（hsl token 化）
+  // 紅漲綠跌：BUY=bull、SELL=bear（僅計已計分者）
   const pieData = [
-    {
-      name: "BUY 命中",
-      value: stats.buy.hits,
-      fill: "hsl(var(--bull))",
-    },
+    { name: "BUY 命中", value: stats.buy.hits, fill: "hsl(var(--bull))" },
     {
       name: "BUY 失誤",
-      value: stats.buy.total - stats.buy.hits,
+      value: stats.buy.scored - stats.buy.hits,
       fill: "hsl(var(--bull) / 0.35)",
     },
-    {
-      name: "SELL 命中",
-      value: stats.sell.hits,
-      fill: "hsl(var(--bear))",
-    },
+    { name: "SELL 命中", value: stats.sell.hits, fill: "hsl(var(--bear))" },
     {
       name: "SELL 失誤",
-      value: stats.sell.total - stats.sell.hits,
+      value: stats.sell.scored - stats.sell.hits,
       fill: "hsl(var(--bear) / 0.35)",
     },
   ];
@@ -100,40 +110,59 @@ export default function StatisticsAccuracyPage() {
       <PageHeader
         icon={TrendingUp}
         title="準確率分析"
-        description="已完成分析的訊號統計（client-side 計算）"
+        description={`真實命中率：訊號對上「分析建立之後 ${horizon} 日」的實際報酬（含息、PIT 正確）`}
       />
 
-      <MockBanner
-        title="Mock 計算 — v1.1 將以 actual_return_30d 改為真實命中率"
-        trackingRef="後端待補 endpoint：GET /api/v1/analysis/{id}/actual-return"
-      />
+      <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+        方法：進場＝決策日收盤，出場＝{horizon} 日後收盤（含息還原價）。
+        BUY 命中＝報酬 &gt; 0、SELL 命中＝報酬 &lt; 0。
+        <span className="text-foreground">
+          {" "}
+          報酬視窗尚未過完者標「待計分」，不納入命中率
+        </span>
+        （避免偷看未來）。僅統計你自己的已完成分析。
+      </p>
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border bg-card p-3 card-hover">
-          <p className="text-xs text-muted-foreground">總分析數</p>
-          <p className="num text-2xl font-bold">{stats.total}</p>
+          <p className="text-xs text-muted-foreground">總命中率</p>
+          <p className="num text-2xl font-bold">
+            <PercentFormat value={stats.overall.hit_rate} />
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {stats.overall.hits} / {stats.overall.scored} 已計分
+          </p>
         </div>
         <div className="rounded-lg border bg-card p-3 card-hover">
-          <p className="text-xs text-muted-foreground">BUY 命中率（粗估）</p>
+          <p className="text-xs text-muted-foreground">BUY 命中率</p>
           <p className="num text-2xl font-bold text-bull">
-            <PercentFormat value={stats.buy.rate} />
+            <PercentFormat value={stats.buy.hit_rate} />
           </p>
           <p className="text-xs text-muted-foreground">
-            {stats.buy.hits} / {stats.buy.total}
+            {stats.buy.hits} / {stats.buy.scored}　平均{" "}
+            <PercentFormat value={stats.buy.avg_return} colored />
           </p>
         </div>
         <div className="rounded-lg border bg-card p-3 card-hover">
-          <p className="text-xs text-muted-foreground">SELL 命中率（粗估）</p>
+          <p className="text-xs text-muted-foreground">SELL 命中率</p>
           <p className="num text-2xl font-bold text-bear">
-            <PercentFormat value={stats.sell.rate} />
+            <PercentFormat value={stats.sell.hit_rate} />
           </p>
           <p className="text-xs text-muted-foreground">
-            {stats.sell.hits} / {stats.sell.total}
+            {stats.sell.hits} / {stats.sell.scored}　平均{" "}
+            <PercentFormat value={stats.sell.avg_return} colored />
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card p-3 card-hover">
+          <p className="text-xs text-muted-foreground">待計分</p>
+          <p className="num text-2xl font-bold">{stats.pending}</p>
+          <p className="text-xs text-muted-foreground">
+            視窗未滿 {horizon} 日{stats.no_data ? `／無資料 ${stats.no_data}` : ""}
           </p>
         </div>
       </section>
 
-      <ChartContainer title="訊號分佈" height={260}>
+      <ChartContainer title="訊號分佈（已計分）" height={260}>
         <PieChart data={pieData} />
       </ChartContainer>
 
@@ -141,7 +170,7 @@ export default function StatisticsAccuracyPage() {
         <h3 className="text-sm font-medium">分析記錄</h3>
         <DataTable
           columns={columns}
-          data={items}
+          data={rows}
           isLoading={isLoading}
           emptyText="尚無已完成分析"
         />
