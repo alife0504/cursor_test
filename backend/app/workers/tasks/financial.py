@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 from celery.utils.log import get_task_logger
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -471,7 +471,78 @@ async def _fan_out_generic(
     return {"task": task_name, "count": len(symbols), "batches": n_batches}
 
 
+# ─────────── 月營收成長率衍生（YoY / MoM / YTD）───────────
+
+
+@celery_app.task(
+    name="app.workers.tasks.financial.derive_monthly_revenue_growth_tw",
+    soft_time_limit=600,
+    time_limit=900,
+    max_retries=0,
+)
+def derive_monthly_revenue_growth_tw(since_year: int | None = None) -> dict[str, Any]:
+    """由 monthly_revenue.revenue 衍生 revenue_mom / revenue_yoy / ytd_revenue / ytd_yoy。
+
+    台股最重要月頻訊號（營收年增率）。FinMind 只給 revenue，成長率須自算：
+    - MoM = 對上月；YoY = 對去年同月；YTD = 今年 1..M 累計；YTD-YoY = 對去年同期累計。
+    - PIT 安全：全部只用「過去/同期」的 revenue（YoY 用 M-12、MoM 用 M-1），無前視。
+    - 冪等：只在數字有變動時更新；成長率為衍生欄位，隨 revenue 修正一併重算。
+
+    Args:
+        since_year: 只重算該年（含）之後；None＝全部回填。
+    """
+    return asyncio.run(_async_derive_revenue_growth(since_year))
+
+
+async def _async_derive_revenue_growth(since_year: int | None) -> dict[str, Any]:
+    engine, sm = _new_engine_sm()
+    upd = text(
+        """
+        UPDATE monthly_revenue m SET
+          -- 成長率欄為 Numeric(10,4)（max ±999999.9999%）；abs>=1e6 的是「基期近零」的無意義
+          -- 極端值（無法表示且不具訊號價值）→ NULL。round(_,2) 後再夾。
+          revenue_mom = (
+            SELECT CASE WHEN abs(round((m.revenue - p.revenue) / p.revenue * 100, 2)) < 1000000
+                        THEN round((m.revenue - p.revenue) / p.revenue * 100, 2) END
+            FROM monthly_revenue p
+            WHERE p.symbol = m.symbol AND p.revenue > 0
+              AND ((m.month > 1 AND p.year = m.year AND p.month = m.month - 1)
+                OR (m.month = 1 AND p.year = m.year - 1 AND p.month = 12))
+          ),
+          revenue_yoy = (
+            SELECT CASE WHEN abs(round((m.revenue - p.revenue) / p.revenue * 100, 2)) < 1000000
+                        THEN round((m.revenue - p.revenue) / p.revenue * 100, 2) END
+            FROM monthly_revenue p
+            WHERE p.symbol = m.symbol AND p.year = m.year - 1 AND p.month = m.month AND p.revenue > 0
+          ),
+          ytd_revenue = (
+            SELECT sum(p.revenue) FROM monthly_revenue p
+            WHERE p.symbol = m.symbol AND p.year = m.year AND p.month <= m.month
+          ),
+          ytd_yoy = (
+            SELECT CASE WHEN py.s > 0 AND abs(round((cur.s - py.s) / py.s * 100, 2)) < 1000000
+                        THEN round((cur.s - py.s) / py.s * 100, 2) END
+            FROM (SELECT sum(p.revenue) s FROM monthly_revenue p
+                    WHERE p.symbol = m.symbol AND p.year = m.year AND p.month <= m.month) cur,
+                 (SELECT sum(p.revenue) s FROM monthly_revenue p
+                    WHERE p.symbol = m.symbol AND p.year = m.year - 1 AND p.month <= m.month) py
+          )
+        WHERE (:since_year IS NULL OR m.year >= :since_year)
+        """
+    )
+    try:
+        async with sm() as session:
+            res = await session.execute(upd, {"since_year": since_year})
+            await session.commit()
+        updated = res.rowcount or 0
+        logger.info("monthly_revenue.growth_derived since_year=%s updated=%d", since_year, updated)
+        return {"since_year": since_year, "updated_rows": updated}
+    finally:
+        await engine.dispose()
+
+
 __all__ = [
+    "derive_monthly_revenue_growth_tw",
     "sync_company_info_one",
     "sync_company_info_tw",
     "sync_institutional_bulk_tw",

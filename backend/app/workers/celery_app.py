@@ -143,6 +143,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.financial.sync_monthly_revenue",
         "schedule": crontab(hour=9, minute=0, day_of_month=11),
     },
+    # 月營收成長率衍生（YoY/MoM/YTD）：月營收同步後 30 分跑（近 2 年即可涵蓋 YoY 回看）
+    "tw-monthly-revenue-growth": {
+        "task": "app.workers.tasks.financial.derive_monthly_revenue_growth_tw",
+        "schedule": crontab(hour=9, minute=30, day_of_month=11),
+    },
     # TW 三大法人每日 15:00（盤後 1.5 小時）—— bulk 全市場（逐檔 fan-out 有 IP ban 風險，
     # 且 finmind 未涵蓋者落 twse_openapi 會存 0；bulk 一次抓全市場、標準定義聚合）。
     "tw-institutional-daily": {
