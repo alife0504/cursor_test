@@ -16,13 +16,29 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from celery import Celery
+from celery import Celery, signals
 from celery.schedules import crontab
 
 from app.core.config import settings
-from app.core.logging_config import get_logger
+from app.core.logging_config import configure_logging, get_logger
 
 logger = get_logger(__name__)
+
+
+@signals.setup_logging.connect
+def _configure_worker_logging(**_kwargs: object) -> None:
+    """讓 worker/beat 行程套用 app 的 structlog 設定（等同 main.py 的 startup）。
+
+    為什麼必要：celery worker 跑的是 `celery -A ... worker`，從不執行 main.py，
+    故 configure_logging() 過去在 worker 端從未生效 → structlog 退回「無 level 過濾、
+    無敏感遮罩」的預設，導致：
+      1. logger.debug()（如 redis.pools.disposed）仍輸出 → 又被 celery 的
+         redirect_stdouts 重貼成 WARNING，灌爆日誌噪音；
+      2. _mask_sensitive_processor 未生效 + 洩密 HTTP logger（httpx 完整 URL 帶
+         apikey/token）未靜音 → worker 日誌可能明文外洩密鑰（安全隱患）。
+    連上 setup_logging 信號同時會讓 celery 不再覆寫 logging（官方指定作法）。
+    """
+    configure_logging()
 
 
 def _build_redis_url(db: int) -> str:
@@ -76,6 +92,9 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     # Celery 5→6 遷移：明確設定 startup 重連行為，消除 CPendingDeprecationWarning 噪音
     broker_connection_retry_on_startup=True,
+    # 不讓 celery 把 app 的 stdout（structlog 直寫）攔截後重貼成 WARNING；
+    # 我們已用 setup_logging 信號接管日誌，redirect 只會造成 level 錯貼與雙重輸出。
+    worker_redirect_stdouts=False,
     # Beat 防 schedule miss（PLAN 已知陷阱：beat 重啟漏跑）
     beat_max_loop_interval=60,
     # JSON serializer（不用 pickle，避免反序列化 RCE）
