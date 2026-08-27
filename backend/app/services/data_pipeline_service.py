@@ -14,8 +14,11 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import text
 
 from app.core.errors import ValidationError
 from app.core.logging_config import get_logger
@@ -53,6 +56,21 @@ def _max_internal_gap_days(sorted_dates: list) -> int:
     return max((sorted_dates[i] - sorted_dates[i - 1]).days for i in range(1, len(sorted_dates)))
 
 
+def _merge_complete(merged: dict, end: date, cal_days: set[date] | None) -> bool:
+    """判斷多源合併是否「已涵蓋完整」，可提早結束不再問後面來源。
+
+    - 有交易日曆(cal_days)：所有「實際交易日」(<=end) 都已在 merged → 精準完整（單日缺口都抓得到，
+      且颱風/臨時休市不在日曆內故不誤觸）。
+    - 無交易日曆(fallback)：max>=end 且無 >15 天大缺口（啟發式）。
+    """
+    if not merged:
+        return False
+    if cal_days:
+        expected = {d for d in cal_days if d <= end}
+        return expected.issubset(merged.keys())
+    return max(merged) >= end and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
+
+
 class DataPipelineService:
     """資料管線服務 — orchestrate fallback + repo upsert。"""
 
@@ -81,6 +99,19 @@ class DataPipelineService:
         self.news_repo = NewsRepository(session)
         self.financials_repo = FinancialsRepository(session)
         self.market_repo = MarketRepository(session)
+
+    async def _trading_days(self, start: date, end: date) -> set[date]:
+        """讀 trading_calendar（TW 實際交易日）於 [start, end]；失敗/空回 set()（fallback 啟發式）。"""
+        with contextlib.suppress(Exception):
+            rows = await self.session.execute(
+                text(
+                    "SELECT date FROM trading_calendar "
+                    "WHERE market = 'TW' AND date >= :s AND date <= :e"
+                ),
+                {"s": start, "e": end},
+            )
+            return {r[0] for r in rows}
+        return set()
 
     @classmethod
     def with_dispatcher(
@@ -117,14 +148,11 @@ class DataPipelineService:
         # 07-08 之後永遠拿不到，個股近期價格長期缺漏（finmind API 與 twse_openapi 都有到 07-15）。
         # 故逐一詢問各來源，每個日期由**優先序最高且有該日資料**的來源提供；
         # 一旦已涵蓋到請求上限即提早結束，本地庫補齊後就會退化成只打第一個來源。
+        cal_days = await self._trading_days(start, end)  # 實際交易日曆（精準缺口偵測）
         merged: dict[Any, dict[str, Any]] = {}
         used_names: list[str] = []
         for src in sources:
-            if (
-                merged
-                and max(merged) >= end
-                and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
-            ):
+            if _merge_complete(merged, end, cal_days):
                 break  # 已涵蓋到 end，不必再問後面的來源（省配額）
             try:
                 df = await src.fetch_ohlcv(symbol, start, end)
@@ -257,14 +285,11 @@ class DataPipelineService:
         if not sources:
             raise ValueError("DataPipelineService: 無 MARGIN source 註冊")
 
+        cal_days = await self._trading_days(start, end)  # 實際交易日曆（精準缺口偵測）
         merged: dict[Any, dict[str, Any]] = {}
         by_source: dict[str, list[dict[str, Any]]] = {}
         for src in sources:
-            if (
-                merged
-                and max(merged) >= end
-                and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
-            ):
+            if _merge_complete(merged, end, cal_days):
                 break
             try:
                 df = await src.fetch_margin(symbol, start, end)
@@ -476,14 +501,11 @@ class DataPipelineService:
         if not sources:
             raise ValueError("DataPipelineService: 無 INSTITUTIONAL source 註冊")
 
+        cal_days = await self._trading_days(start, end)  # 實際交易日曆（精準缺口偵測）
         merged: dict[Any, dict[str, Any]] = {}
         by_source: dict[str, list[dict[str, Any]]] = {}
         for src in sources:
-            if (
-                merged
-                and max(merged) >= end
-                and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
-            ):
+            if _merge_complete(merged, end, cal_days):
                 break  # 已涵蓋到 end
             try:
                 df = await src.fetch_institutional(symbol, start, end)

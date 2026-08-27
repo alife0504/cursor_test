@@ -112,6 +112,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.sync_ohlcv.sync_index_tw",
         "schedule": crontab(hour=14, minute=35, day_of_week="mon-fri"),
     },
+    # 台股實際交易日曆同步（OHLCV 後）：供資料缺口偵測與 N 交易日計算。
+    "tw-trading-calendar-daily": {
+        "task": "app.workers.tasks.sync_ohlcv.sync_trading_calendar_tw",
+        "schedule": crontab(hour=14, minute=45, day_of_week="mon-fri"),
+    },
     # 台股還原權值回填：OHLCV 同步後（15:00）跑，把 FinMind 官方還原價寫入 adjusted_close。
     # 每日重跑因除權息會回溯重算歷史；週末也跑（回補假日新增的除息調整）。
     "tw-adjusted-close-daily": {

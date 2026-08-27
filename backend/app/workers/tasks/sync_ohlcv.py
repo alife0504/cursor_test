@@ -240,6 +240,62 @@ async def _async_fan_out_market(
     return {"markets": markets, "count": len(symbols), "batches": n_batches}
 
 
+# ─────────── 交易日曆同步（實際交易日）───────────
+
+
+@celery_app.task(
+    name="app.workers.tasks.sync_ohlcv.sync_trading_calendar_tw",
+    soft_time_limit=300,
+    time_limit=600,
+    max_retries=0,
+)
+def sync_trading_calendar_tw() -> dict[str, Any]:
+    """同步台股「實際交易日」到 trading_calendar。
+
+    來源＝finmind-platform bronze.taiwan_stock_price 中「市場性有價格」(>500 檔)的日期，
+    自然排除颱風/臨時休市（那些日子全市場無成交）。供資料缺口偵測與 N 交易日計算。
+    """
+    return asyncio.run(_async_sync_trading_calendar())
+
+
+async def _async_sync_trading_calendar() -> dict[str, Any]:
+    if not settings.FINMIND_LOCAL_ENABLED or not settings.FINMIND_LOCAL_PASSWORD:
+        logger.warning("trading_calendar.skip finmind_local 未啟用")
+        return {"skipped": "finmind_local_disabled"}
+
+    from sqlalchemy import Date, bindparam, text
+    from sqlalchemy.dialects.postgresql import ARRAY
+
+    from app.data_sources.tw.finmind_local_source import FinMindLocalSource
+
+    fm = FinMindLocalSource(settings)
+    rows = await fm._query(
+        "SELECT date FROM bronze.taiwan_stock_price "
+        "GROUP BY date HAVING count(*) > 500 ORDER BY date"
+    )
+    dates = [r["date"] for r in rows]
+    if not dates:
+        return {"skipped": "no_trading_days"}
+
+    engine = create_async_engine(
+        settings.postgres_dsn_rw, pool_size=2, max_overflow=1, pool_pre_ping=True
+    )
+    sm = async_sessionmaker(engine, expire_on_commit=False)
+    ins = text(
+        "INSERT INTO trading_calendar (date, market) "
+        "SELECT unnest(:dates), 'TW' ON CONFLICT (date, market) DO NOTHING"
+    ).bindparams(bindparam("dates", type_=ARRAY(Date)))
+    try:
+        async with sm() as session:
+            res = await session.execute(ins, {"dates": dates})
+            await session.commit()
+        inserted = res.rowcount or 0
+        logger.info("trading_calendar.done trading_days=%d inserted=%d", len(dates), inserted)
+        return {"trading_days": len(dates), "inserted": inserted}
+    finally:
+        await engine.dispose()
+
+
 __all__ = [
     "BATCH_COUNTDOWN_STEP",
     "TW_BATCH_SIZE",
@@ -247,4 +303,5 @@ __all__ = [
     "sync_ohlcv_one",
     "sync_ohlcv_tw_all",
     "sync_ohlcv_us_all",
+    "sync_trading_calendar_tw",
 ]
