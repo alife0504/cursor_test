@@ -74,6 +74,8 @@ celery_app.conf.update(
     # 可靠性：late ack + reject on lost
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # Celery 5→6 遷移：明確設定 startup 重連行為，消除 CPendingDeprecationWarning 噪音
+    broker_connection_retry_on_startup=True,
     # Beat 防 schedule miss（PLAN 已知陷阱：beat 重啟漏跑）
     beat_max_loop_interval=60,
     # JSON serializer（不用 pickle，避免反序列化 RCE）

@@ -59,6 +59,23 @@ $ErrorActionPreference = $prevEAP
 if ($code -eq 0) {
     Write-Log "=== compose up 完成 (exit 0) ==="
 } else {
-    Write-Log "compose up 失敗 exit=$code"
-    exit 1
+    # 冷開機時 backend 較慢變 healthy（等 DB/redis/qdrant + 啟動探針），compose 可能先報依賴
+    # 失敗；但 restart:unless-stopped 會續拉起。等待後複檢最終狀態，全部在跑才視為成功，
+    # 避免 autostart 誤報 0x1（先前每次登入都失敗一次的根因）。
+    Write-Log "compose up 首次 exit=$code；等待 120s 讓 backend 變 healthy 後複檢…"
+    Start-Sleep -Seconds 120
+    $ErrorActionPreference = "Continue"
+    docker compose --profile frontend up -d 2>&1 | ForEach-Object { Write-Log "compose(retry): $_" }
+    Start-Sleep -Seconds 30
+    $expected = @("ta-timescaledb", "ta-redis", "ta-qdrant", "ta-backend",
+        "ta-celery-worker", "ta-celery-beat", "ta-frontend")
+    $running = @((docker ps --format "{{.Names}}") -split "`n" | ForEach-Object { $_.Trim() })
+    $missing = @($expected | Where-Object { $running -notcontains $_ })
+    $ErrorActionPreference = $prevEAP
+    if ($missing.Count -eq 0) {
+        Write-Log "=== 複檢:全部容器已在跑 (exit 0) ==="
+    } else {
+        Write-Log "複檢後仍缺:$($missing -join ', ') (exit 1)"
+        exit 1
+    }
 }

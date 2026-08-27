@@ -87,7 +87,8 @@ async def dispose_redis_pools() -> None:
     for db, pool in list(_pools.items()):
         await pool.aclose()
         del _pools[db]
-    logger.info("redis.pools.disposed")
+    # 例行清理（每個 intraday/analysis 任務都會呼叫）→ debug，避免灌爆 celery WARNING 日誌
+    logger.debug("redis.pools.disposed")
 
 
 __all__ = [
