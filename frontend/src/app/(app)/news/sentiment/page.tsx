@@ -8,7 +8,7 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
 import { SentimentBar } from "@/components/news/SentimentBar";
-import { useStockNews } from "@/hooks/useNews";
+import { useStockNews, useTwSentiment } from "@/hooks/useNews";
 
 // Phase 17 § L:新聞情緒
 //   - 後端僅有「個股 /stocks/{symbol}/news」endpoint
@@ -30,6 +30,10 @@ export default function NewsSentimentPage() {
   const { data, isLoading } = useStockNews({
     symbol,
     limit: 50,
+    enabled: Boolean(symbol),
+  });
+  const { data: twSent } = useTwSentiment({
+    symbol,
     enabled: Boolean(symbol),
   });
 
@@ -118,6 +122,47 @@ export default function NewsSentimentPage() {
           </div>
         </>
       )}
+
+      {symbol && (twSent?.length ?? 0) > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium">
+            每日情緒{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              （tw-hawk · 情緒分數/AI 摘要/討論熱度）
+            </span>
+          </h3>
+          <div className="overflow-x-auto rounded-lg border bg-card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50 text-left">
+                  <th className="p-2">日期</th>
+                  <th className="p-2">情緒分數</th>
+                  <th className="p-2">討論熱度</th>
+                  <th className="p-2">摘要</th>
+                </tr>
+              </thead>
+              <tbody>
+                {twSent?.map((s, i) => {
+                  const sc = s.sentiment_score ?? 0;
+                  const cls = sc > 0 ? "text-bull" : sc < 0 ? "text-bear" : "";
+                  return (
+                    <tr key={`${s.date}-${i}`} className="border-b">
+                      <td className="p-2 tabular-nums">{s.date}</td>
+                      <td className={`p-2 num tabular-nums ${cls}`}>
+                        {s.sentiment_score?.toFixed(2) ?? "-"}
+                      </td>
+                      <td className="p-2 tabular-nums text-muted-foreground">
+                        {s.discussion_volume ?? "-"}
+                      </td>
+                      <td className="p-2">{s.short_summary ?? "-"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

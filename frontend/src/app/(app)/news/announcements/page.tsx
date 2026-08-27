@@ -9,7 +9,22 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useStockAnnouncements } from "@/hooks/useNews";
+import { useMaterialEvents, useStockAnnouncements } from "@/hooks/useNews";
+
+// tw-hawk twofc_events 類型 → 中文
+const EVENT_LABEL: Record<string, string> = {
+  board_resolution: "董事會決議",
+  material_other: "其他重大訊息",
+  dividend_decision: "股利決議",
+  dividend_schedule: "除權息時程",
+  asset_disposal: "資產處分",
+  capital_increase: "增資",
+  exec_change: "經理人異動",
+  endorsement_guarantee: "背書保證",
+  subsidiary_notice: "子公司訊息",
+  earnings_call: "法說會",
+  shareholder_meeting: "股東會",
+};
 
 // Phase 17 § M:重大公告
 //   - 後端僅有個股 /stocks/{symbol}/announcements
@@ -24,6 +39,10 @@ export default function NewsAnnouncementsPage() {
   const { data, isLoading } = useStockAnnouncements({
     symbol,
     limit: 100,
+    enabled: Boolean(symbol),
+  });
+  const { data: events } = useMaterialEvents({
+    symbol,
     enabled: Boolean(symbol),
   });
 
@@ -136,6 +155,41 @@ export default function NewsAnnouncementsPage() {
           </table>
         </div>
       )}
+
+      {symbol && (events?.length ?? 0) > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium">
+            重大訊息{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              （tw-hawk · MOPS 重大訊息，含真實公告日）
+            </span>
+          </h3>
+          <div className="overflow-x-auto rounded-lg border bg-card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50 text-left">
+                  <th className="p-2">公告日</th>
+                  <th className="p-2">類型</th>
+                  <th className="p-2">主旨</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events?.map((e, i) => (
+                  <tr key={`${e.announced_at}-${i}`} className="border-b">
+                    <td className="p-2 tabular-nums">
+                      {e.announced_at?.slice(0, 10) ?? "-"}
+                    </td>
+                    <td className="p-2 text-muted-foreground">
+                      {EVENT_LABEL[e.event_type] ?? e.event_type}
+                    </td>
+                    <td className="p-2">{e.title}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

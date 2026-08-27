@@ -27,6 +27,7 @@ from app.schemas.stocks import (
     StockSummary,
 )
 from app.services.stock_service import StockService
+from app.services.twhawk_service import TwhawkService
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -121,6 +122,35 @@ async def get_stock_metrics(
         "rsi14": _f(row.rsi14) if row else None,
         "eps_growth": _f(row.eps_growth) if row else None,
     }
+    return envelope_success(data, trace_id=_trace_id(request))
+
+
+@router.get("/{symbol}/material-events", summary="重大公告（tw-hawk twofc_events，含真實公告日）")
+async def get_material_events(
+    request: Request,
+    symbol: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    _user: User = Depends(get_current_user),
+) -> dict:
+    """MOPS 重大訊息（tw-hawk 唯讀資料湖）：PIT 正確（只回已公告 announced_at<=now）。
+
+    tw-hawk 未掛載/未啟用時 graceful 回空。
+    """
+    sym = validate_symbol(symbol)
+    data = await TwhawkService().get_material_events(sym, limit=limit)
+    return envelope_success(data, trace_id=_trace_id(request))
+
+
+@router.get("/{symbol}/tw-sentiment", summary="tw-hawk 每日情緒（分數/摘要/討論熱度）")
+async def get_tw_sentiment(
+    request: Request,
+    symbol: str,
+    days: int = Query(default=30, ge=1, le=180),
+    _user: User = Depends(get_current_user),
+) -> dict:
+    """tw-hawk 每日情緒聚合訊號（唯讀）；未掛載/未啟用時 graceful 回空。"""
+    sym = validate_symbol(symbol)
+    data = await TwhawkService().get_daily_sentiment(sym, days=days)
     return envelope_success(data, trace_id=_trace_id(request))
 
 

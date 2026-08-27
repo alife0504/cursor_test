@@ -111,6 +111,68 @@ export function useStockAnnouncements({
   });
 }
 
+// ════════════════ tw-hawk 重大公告 & 每日情緒 ════════════════
+export interface MaterialEvent {
+  event_type: string;
+  event_subtype: string | null;
+  title: string;
+  event_date: string | null;
+  announced_at: string | null;
+  severity: number | null;
+  direction: string | null;
+}
+
+export interface TwSentiment {
+  date: string;
+  sentiment_score: number | null;
+  discussion_volume: number | null;
+  volume_spike_z: number | null;
+  attention_gap: number | null;
+  short_summary: string | null;
+}
+
+// 個股重大公告（tw-hawk twofc_events，含真實公告日；未啟用/無資料回空）
+export function useMaterialEvents({
+  symbol,
+  enabled = true,
+}: {
+  symbol: string;
+  enabled?: boolean;
+}) {
+  return useQuery({
+    queryKey: ["material-events", symbol],
+    enabled: enabled && Boolean(symbol),
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<MaterialEvent[]>>(
+        `/stocks/${encodeURIComponent(symbol)}/material-events`,
+      );
+      return res.data.data ?? [];
+    },
+  });
+}
+
+// 個股 tw-hawk 每日情緒（分數/摘要/討論熱度；未啟用/無資料回空）
+export function useTwSentiment({
+  symbol,
+  enabled = true,
+}: {
+  symbol: string;
+  enabled?: boolean;
+}) {
+  return useQuery({
+    queryKey: ["tw-sentiment", symbol],
+    enabled: enabled && Boolean(symbol),
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<TwSentiment[]>>(
+        `/stocks/${encodeURIComponent(symbol)}/tw-sentiment`,
+      );
+      return res.data.data ?? [];
+    },
+  });
+}
+
 // ════════════════ Calendar (market 全域,P17 mock) ════════════════
 export interface UseCalendarParams {
   from: string;
