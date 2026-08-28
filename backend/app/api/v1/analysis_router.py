@@ -234,7 +234,8 @@ async def create_analysis(
         is_batch = True
 
     # P12：service commit 後才推 celery task。
-    # P13：analyst_types + debate_rounds 透過 task kwargs 傳（DB 未存這兩欄位）。
+    # P13：analyst_types + debate_rounds 透過 task kwargs 傳。
+    # v1.1.1：risk_rounds + agent_models 亦持久化到 DB（供 orphan 自癒忠實還原，不再靜默降級）。
     reports = []
     for sym in symbols:
         report = await service.create_analysis(
@@ -244,6 +245,8 @@ async def create_analysis(
             llm_model=payload.llm_model,
             debate_rounds=payload.debate_rounds,
             risk_tolerance=payload.risk_tolerance,
+            risk_rounds=int(payload.risk_rounds),
+            agent_models=payload.agent_models,
             request_id=trace_id,
         )
         _enqueue_run_analysis(

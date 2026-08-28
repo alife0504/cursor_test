@@ -39,10 +39,13 @@ class AnalysisRepository(BaseRepository):
         analyst_types: list[str] | None = None,
         debate_rounds: int | None = None,
         risk_tolerance: str | None = None,
+        risk_rounds: int | None = None,
+        agent_models: dict[str, str] | None = None,
     ) -> AnalysisReport:
         """建立一筆 queued 分析（caller 負責 commit）。
 
         v1.0.1：保留 analyst_types / debate_rounds / risk_tolerance 給前端還原節點圖。
+        v1.1.1：持久化 risk_rounds / agent_models，供 orphan 自癒忠實還原派發參數。
         """
         report = AnalysisReport(
             user_id=user_id,
@@ -53,6 +56,8 @@ class AnalysisRepository(BaseRepository):
             analyst_types=analyst_types,
             debate_rounds=debate_rounds,
             risk_tolerance=risk_tolerance,
+            risk_rounds=risk_rounds,
+            agent_models=agent_models,
         )
         self.session.add(report)
         await self.session.flush()

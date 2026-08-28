@@ -76,7 +76,7 @@ def cleanup_orphans() -> dict[str, Any]:
         rows = session.execute(
             text(
                 """
-                SELECT id, analyst_types, debate_rounds
+                SELECT id, analyst_types, debate_rounds, risk_rounds, agent_models
                   FROM analysis_reports
                  WHERE status = 'running'
                    AND COALESCE(started_at, created_at) < :orphan
@@ -85,7 +85,8 @@ def cleanup_orphans() -> dict[str, Any]:
             ),
             {"orphan": orphan_threshold, "cutoff": recover_cutoff},
         ).fetchall()
-        recover = [(r[0], r[1], r[2]) for r in rows]
+        # 忠實還原派發參數（v1.1.1 起持久化 risk_rounds/agent_models）：舊列為 NULL 時退回保守預設。
+        recover = [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
         if recover:
             session.execute(
                 text(
@@ -184,10 +185,17 @@ def cleanup_orphans() -> dict[str, Any]:
     if recover:
         from app.workers.tasks.run_analysis import run_analysis as _run_analysis
 
-        for aid, analyst_types, debate_rounds in recover:
-            kwargs: dict[str, Any] = {"debate_rounds": int(debate_rounds or 1), "risk_rounds": 0}
+        for aid, analyst_types, debate_rounds, risk_rounds, agent_models in recover:
+            # 忠實還原：以持久化的 risk_rounds/agent_models 重派，避免把「完整風險架構 + 自訂模型」
+            # 的分析靜默降級成「無風險層、預設模型」重跑。舊列(NULL)退回保守預設(risk_rounds=0)。
+            kwargs: dict[str, Any] = {
+                "debate_rounds": int(debate_rounds or 1),
+                "risk_rounds": int(risk_rounds or 0),
+            }
             if analyst_types:
                 kwargs["analyst_types"] = list(analyst_types)
+            if agent_models:
+                kwargs["agent_models"] = dict(agent_models)
             with contextlib.suppress(Exception):  # broker 不可用不應炸 cleanup
                 _run_analysis.apply_async(args=[str(aid)], kwargs=kwargs)
         logger.info("cleanup_orphans.recovered_redispatched count=%d", len(recover))

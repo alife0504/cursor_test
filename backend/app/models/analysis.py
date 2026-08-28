@@ -90,6 +90,12 @@ class AnalysisReport(Base):
     """建立時的請求參數。"""
     risk_tolerance: Mapped[str | None] = mapped_column(String(20))
     """建立時的請求參數（保留欄位，v1.1 由 Agent 邏輯使用）。"""
+    # v1.1.1：持久化派發參數，供 orphan 自癒忠實還原（否則重派會硬編 risk_rounds=0、
+    # 遺失 agent_models → 完整風險架構分析被靜默降級重跑，見 cleanup.cleanup_orphans）。
+    risk_rounds: Mapped[int | None] = mapped_column(Integer)
+    """建立時的風險辯論輪數（>0 才接完整風險層 trader+verifier）；孤兒重派需忠實還原。"""
+    agent_models: Mapped[dict | None] = mapped_column(JSONB)
+    """建立時各 agent 的自訂模型 {agent→model}；孤兒重派需忠實還原。"""
 
     # 樂觀鎖（PLAN 15.2）
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")

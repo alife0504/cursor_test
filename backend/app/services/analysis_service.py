@@ -51,11 +51,14 @@ class AnalysisService:
         llm_model: str,
         debate_rounds: int,
         risk_tolerance: str | None = None,
+        risk_rounds: int = 0,
+        agent_models: dict[str, str] | None = None,
         request_id: str | None = None,
     ) -> AnalysisReport:
         """新建一筆 queued 分析。寫 DB + audit；推 celery task 是 stub。
 
         v1.0.1：保留 analyst_types / debate_rounds / risk_tolerance 給前端還原。
+        v1.1.1：持久化 risk_rounds / agent_models，供 orphan 自癒忠實還原（否則重派會靜默降級）。
         """
         market = await self._infer_market(symbol)
         report = await self.repo.create(
@@ -66,6 +69,8 @@ class AnalysisService:
             analyst_types=analyst_types,
             debate_rounds=debate_rounds,
             risk_tolerance=risk_tolerance,
+            risk_rounds=risk_rounds,
+            agent_models=agent_models,
         )
         await self.audit_repo.append(
             actor_id=user.id,
