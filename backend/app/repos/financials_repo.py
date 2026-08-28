@@ -275,10 +275,14 @@ class FinancialsRepository(BaseRepository):
             index_elements=["symbol", "year", "month"],
             set_={
                 "revenue": stmt.excluded.revenue,
-                "revenue_mom": stmt.excluded.revenue_mom,
-                "revenue_yoy": stmt.excluded.revenue_yoy,
-                "ytd_revenue": stmt.excluded.ytd_revenue,
-                "ytd_yoy": stmt.excluded.ytd_yoy,
+                # 成長率（mom/yoy/ytd）：FinMind 同步只給原始 revenue，這四欄恆為 None →
+                # 若無條件覆寫會把 derive_monthly_revenue_growth_tw 已算好的成長率就地抹成 NULL
+                # （與同檔 announced_at 的保護不一致的漏洞）。改用 coalesce：來源有值才覆寫，
+                # 否則保留既有衍生值，避免每次同步後到次月衍生前整段 NULL。
+                "revenue_mom": func.coalesce(stmt.excluded.revenue_mom, MonthlyRevenue.revenue_mom),
+                "revenue_yoy": func.coalesce(stmt.excluded.revenue_yoy, MonthlyRevenue.revenue_yoy),
+                "ytd_revenue": func.coalesce(stmt.excluded.ytd_revenue, MonthlyRevenue.ytd_revenue),
+                "ytd_yoy": func.coalesce(stmt.excluded.ytd_yoy, MonthlyRevenue.ytd_yoy),
                 # 同 upsert_statements：真公告日只在來源非 NULL 時覆寫，避免被例行 re-sync 抹除
                 "announced_at": func.coalesce(
                     stmt.excluded.announced_at, MonthlyRevenue.announced_at

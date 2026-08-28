@@ -125,7 +125,13 @@ async def test_hypertable_chunk_time_interval() -> None:
 
 
 async def test_retention_policies_set() -> None:
-    """6 個 retention policy 都該存在，notification_log 為 90 天，其他為 1 年。"""
+    """retention policy 對齊現行設計：
+
+    - stock_prices：5 年（migration 0020，回測需長歷史，非 1 年）
+    - notification_log：90 天
+    - celery_dead_letters / debate_history / llm_usage：1 年
+    - audit_logs：**無 retention**（migration 0019 移除，稽核鏈不可竄改、永久保存）
+    """
     conn = await _connect_superuser()
     try:
         rows = await conn.fetch(
@@ -134,15 +140,22 @@ async def test_retention_policies_set() -> None:
             "WHERE proc_name='policy_retention'"
         )
         d = {r["hypertable_name"]: r["drop_after"] for r in rows}
-        # 6 個 hypertable 全部要有 retention
-        assert len(d) >= 6, f"預期 ≥ 6 retention policy，實際 {len(d)}"
 
-        # notification_log 為 90 days，其餘為 1 year
+        # notification_log 為 90 days
         assert "90 days" in (d.get("notification_log") or ""), (
             f"notification_log retention 不對：{d.get('notification_log')}"
         )
-        for tbl in ("stock_prices", "audit_logs", "llm_usage"):
+        # stock_prices 為 5 年（0020）
+        assert "5 years" in (d.get("stock_prices") or ""), (
+            f"stock_prices retention 應為 5 years：{d.get('stock_prices')}"
+        )
+        # 這幾張為 1 年
+        for tbl in ("celery_dead_letters", "debate_history", "llm_usage"):
             assert "1 year" in (d.get(tbl) or ""), f"{tbl} retention 不是 1 year：{d.get(tbl)}"
+        # audit_logs 永久保存：不得有 retention policy（0019 移除，避免背景 job drop 舊 chunk）
+        assert "audit_logs" not in d, (
+            f"audit_logs 不應有 retention（稽核鏈永久保存）：{d.get('audit_logs')}"
+        )
     finally:
         await conn.close()
 

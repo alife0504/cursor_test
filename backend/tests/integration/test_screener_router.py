@@ -44,16 +44,22 @@ async def test_screener_default_returns_list(auth_client, make_test_user, login_
 async def test_screener_industry_filter(
     auth_client, make_test_user, login_helper, seed_stocks
 ) -> None:
+    # 用**專用測試產業名**（不與真實資料庫既有產業碰撞）：否則跑在有真實資料的庫上，
+    # limit 會被真實半導體股填滿而擠掉種子股，造成測試隔離失敗（非程式錯誤）。
+    ind_a = "測試半導體ZZ"
+    ind_b = "測試金融ZZ"
     await seed_stocks(
         [
-            {"symbol": "96001", "market": "TWSE", "name": "半導體A", "industry": "半導體"},
-            {"symbol": "96002", "market": "TWSE", "name": "金融A", "industry": "金融"},
+            {"symbol": "96001", "market": "TWSE", "name": "半導體A", "industry": ind_a},
+            {"symbol": "96002", "market": "TWSE", "name": "金融A", "industry": ind_b},
         ]
     )
     user, pwd = await make_test_user(must_change=False)
     access, _ = await login_helper(auth_client, user.email, pwd)
+    from urllib.parse import quote
+
     r = auth_client.get(
-        "/api/v1/screener?market=TW&industry=%E5%8D%8A%E5%B0%8E%E9%AB%94&limit=10",
+        f"/api/v1/screener?market=TW&industry={quote(ind_a)}&limit=10",
         headers={"Authorization": f"Bearer {access}"},
     )
     assert r.status_code == 200, r.text

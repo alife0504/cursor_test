@@ -628,6 +628,16 @@ def _safe_mark_failed(analysis_id: str, error: str) -> None:
             row = s.get(AnalysisReport, UUID(analysis_id))
             if row is None:
                 return
+            # 不覆寫終態：取消不 revoke celery task，任務會續跑到 SoftTimeLimit/例外，
+            # 若無條件標 failed 會把使用者已 cancelled（或已 completed）的分析回退成 failed，
+            # 狀態語義不一致（比照 _update_completed 的 cancelled 守衛）。
+            if row.status in ("cancelled", "completed"):
+                logger.info(
+                    "run_analysis.mark_failed.skip_terminal analysis_id=%s status=%s",
+                    analysis_id,
+                    row.status,
+                )
+                return
             row.status = "failed"
             row.completed_at = datetime.now(tz=UTC)
             row.error_msg = error[:8000]

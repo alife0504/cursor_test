@@ -41,6 +41,12 @@ dependencies = [
     "tzdata",
     # P5：資料源 Adapter / Repository（pandas + parsing + rate limit）
     "pandas>=2.2,<3.0",
+    # numpy 被 app/agents/indicators.py 直接 import（RSI/MACD 核心數學），須直接宣告並釘主版本
+    # 上限，否則只受 pandas 傳遞需求約束、lock 漂移時可能升到改變浮點語義/移除 API 的破壞性版本。
+    "numpy>=1.26,<3.0",
+    # starlette 被多個 middleware/router 直接 import（BaseHTTPMiddleware/Request/Response）；
+    # 釘與 fastapi 相容的範圍，讓直接相依可被本專案自身 lock 與審查（不只靠 fastapi 傳遞）。
+    "starlette>=0.40,<0.47",
     "pyarrow>=15,<22",
     "aiolimiter>=1.1,<2.0",
     "feedparser>=6.0,<7.0",

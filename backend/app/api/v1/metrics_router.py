@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import contextlib
+import secrets
 
 from fastapi import APIRouter, Depends, Request
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -37,7 +38,8 @@ async def metrics(
     token = settings.METRICS_TOKEN.get_secret_value() if settings.METRICS_TOKEN else None
     if not token:
         raise AuthError(message_zh="metrics 未啟用（未設定 METRICS_TOKEN）")
-    if request.headers.get("Authorization", "") != f"Bearer {token}":
+    # 常數時間比對，避免裸 `!=` 的逐位元組短路形成 timing side-channel（與 CSRF/密碼比對一致）。
+    if not secrets.compare_digest(request.headers.get("Authorization", ""), f"Bearer {token}"):
         raise AuthError(message_zh="metrics token 無效")
 
     # 抓取時即時把業務 gauge 從 DB/redis/pool 設好（失敗不擋 process 指標輸出）

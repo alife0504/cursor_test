@@ -35,7 +35,13 @@ class TWSEOpenAPISource(BaseDataSource):
     name = "twse_openapi"
     priority = 20  # 備源
     supported_regions = (MarketRegion.TW,)
-    supported_kinds = (DataKind.OHLCV, DataKind.INSTITUTIONAL)
+    # ⚠️ 不宣告 DataKind.INSTITUTIONAL：fetch_institutional 回傳 T86 的**中文欄位**
+    # （證券代號/外陸資買進股數…），未 pivot 成標準 foreign_buy/foreign_sell/… 英文欄名，
+    # 消費端 market_repo.upsert_institutional 以 int(r.get('foreign_buy') or 0) 取值會全部得 0
+    # → 靜默寫入「三大法人 0/0/0」假資料（比缺漏更糟，看似合法的零買賣超）。法人資料由
+    # finmind_local（priority 5）與 finmind API（bulk 全市場，標準 pivot）供應，twse 不入合併候選。
+    # 若未來要啟用，須先在 fetch_institutional 正確 pivot（外資=外陸資+外資自營、自營=自行+避險）。
+    supported_kinds = (DataKind.OHLCV,)
     rate_limit_per_sec = 1.0  # TWSE 公告建議
     base_url = "https://www.twse.com.tw"
     STOCK_DAY_PATH = "/exchangeReport/STOCK_DAY"

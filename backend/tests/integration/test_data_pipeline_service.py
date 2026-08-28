@@ -33,6 +33,11 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 async def rw_session():  # type: ignore[no-untyped-def]
+    # ⚠️ 安全閘門：本 fixture 的測試會對真實代號(2330/2317/6488)寫入並 DELETE 股價/月營收，
+    # 誤跑在正式/開發庫會清掉真實資料。只允許在專用測試庫或明確 opt-in 時執行。
+    from tests.integration.conftest import require_writable_test_db
+
+    require_writable_test_db()
     engine = create_async_engine(settings.postgres_dsn_rw)
     sm = async_sessionmaker(engine, expire_on_commit=False)
     async with sm() as session:

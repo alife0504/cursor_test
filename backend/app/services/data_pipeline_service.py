@@ -59,16 +59,30 @@ def _max_internal_gap_days(sorted_dates: list) -> int:
 def _merge_complete(merged: dict, end: date, cal_days: set[date] | None) -> bool:
     """判斷多源合併是否「已涵蓋完整」，可提早結束不再問後面來源。
 
-    - 有交易日曆(cal_days)：所有「實際交易日」(<=end) 都已在 merged → 精準完整（單日缺口都抓得到，
-      且颱風/臨時休市不在日曆內故不誤觸）。
+    - 有交易日曆(cal_days)且日曆已延伸到 end：所有「實際交易日」(<=end) 都已在 merged → 精準完整
+      （單日缺口都抓得到，且颱風/臨時休市不在日曆內故不誤觸）。
+    - ⚠️ 交易日曆落後 end（max(cal_days) < end）：trading_calendar 由 sync_trading_calendar_tw
+      寫入、來源是 bronze.taiwan_stock_price（與 finmind_local 同一張表），故本地資料湖落後幾天時
+      日曆也同步落後。此時**不能**只憑「補齊日曆已知的交易日」就判定完整——end 與 max(cal_days)
+      之間可能還有較新來源（finmind API / twse_openapi）才有的交易日。若在此仍回 True 就會提早結束、
+      永遠問不到比本地庫更新的資料（實測：本地/日曆到 08-27、finmind API 已有 08-28，卻整市場漏抓）。
+      故日曆落後時退回啟發式（須 merged 自身也達到 end），否則續問下一來源補最新日。
     - 無交易日曆(fallback)：max>=end 且無 >15 天大缺口（啟發式）。
     """
     if not merged:
         return False
+    heuristic_ok = (
+        max(merged) >= end and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
+    )
     if cal_days:
         expected = {d for d in cal_days if d <= end}
-        return expected.issubset(merged.keys())
-    return max(merged) >= end and _max_internal_gap_days(sorted(merged)) <= _MERGE_MAX_GAP_DAYS
+        cal_covered = expected.issubset(merged.keys())
+        # 日曆已涵蓋到 end → 精準判定即足夠（單日缺口都抓得到）
+        if max(cal_days) >= end:
+            return cal_covered
+        # 日曆落後 end → 須日曆已知交易日補齊「且」merged 自身達到 end，否則續問較新來源
+        return cal_covered and heuristic_ok
+    return heuristic_ok
 
 
 class DataPipelineService:

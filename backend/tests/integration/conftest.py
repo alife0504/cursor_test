@@ -160,6 +160,28 @@ def _docker_services_reachable() -> bool:
     return True
 
 
+def require_writable_test_db() -> None:
+    """破壞性 DB 測試的安全閘門：只允許在專用測試庫執行。
+
+    ⚠️ 部分整合測試會對**真實股票代號**（如 2330/2317/6488）寫入並 DELETE 股價/月營收，
+    若誤跑在正式或開發資料庫會清掉真實資料（本專案曾發生 dev DB 資料誤刪事故）。
+    故除非 POSTGRES_DB 名稱含 'test'（專用測試庫）或明確設 TA_ALLOW_DESTRUCTIVE_DB_TESTS=1，
+    否則直接 skip。任何會 commit 寫入/刪除真實代號的 fixture 都應在 setup 呼叫本函式。
+    """
+    import os
+
+    from app.core.config import settings
+
+    db = str(settings.POSTGRES_DB)
+    if "test" in db.lower() or os.environ.get("TA_ALLOW_DESTRUCTIVE_DB_TESTS") == "1":
+        return
+    pytest.skip(
+        f"跳過破壞性 DB 測試：POSTGRES_DB='{db}' 非專用測試庫。此測試會對真實代號寫入/DELETE，"
+        "可能清掉真實股價/月營收。請指向測試庫（名稱含 'test'）或設 "
+        "TA_ALLOW_DESTRUCTIVE_DB_TESTS=1 後再跑。"
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _skip_if_docker_down() -> None:
     """整批 auth integration tests 在 docker 不可達時 skip。"""
