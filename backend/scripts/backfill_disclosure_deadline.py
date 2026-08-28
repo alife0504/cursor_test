@@ -56,10 +56,14 @@ _REV_SQL = text(
     """  # noqa: S608 — 同上
 )
 
-#: 要逐一套用的類別。GENERAL 與 INSURER 的期限不同故必須分開跑。
+#: 要逐一套用的類別。三類期限不同故必須分開跑：
+#: - general：Q2 8/14、月營收 10 日
+#: - insurer：Q2 8/31、月營收 15 日(2026 起)
+#: - financial：Q2 8/31、月營收 10 日 —— 第一上市(櫃)/KY 股（SQL expr 依 -KY 後綴判定）
 _CATEGORIES: tuple[tuple[str, FilerCategory], ...] = (
     ("general", FilerCategory.GENERAL),
     ("insurer", FilerCategory.INSURER),
+    ("financial", FilerCategory.FINANCIAL),
 )
 
 

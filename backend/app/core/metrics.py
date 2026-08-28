@@ -105,6 +105,19 @@ LLM_TOKENS_TODAY = Gauge("llm_tokens_today", "今日 LLM tokens 合計")
 DB_SIZE_BYTES = Gauge("db_size_bytes", "應用資料庫大小（bytes）")
 DLQ_PENDING = Gauge("dlq_pending_total", "未解決 Celery DLQ 筆數")
 
+# 資料新鮮度/完整度 —— 兜底「不報錯只變空」的靜默失效（本輪深度審查兩個最痛的 confirmed
+# 缺陷：_merge_complete 落後時漏抓最新交易日、月營收成長率被同步抹成 NULL，都不拋例外、
+# 不進 DLQ、healthcheck 全綠，只是資料變舊/變空）。超閾值時由 Prometheus 告警。
+DATA_STALENESS_DAYS = Gauge(
+    "data_staleness_days",
+    "關鍵資料表最新日相對台北今日的落後天數（0=今日；持續>4 天=靜默停更，扣除週末後仍舊）",
+    ["table"],
+)
+MONTHLY_REVENUE_YOY_NULL_RATIO = Gauge(
+    "monthly_revenue_yoy_null_ratio",
+    "近 24 個月月營收 revenue_yoy 為 NULL 的比例（衍生 task 失敗/被覆寫時逼近 1）",
+)
+
 
 async def collect_runtime_metrics(session: object) -> None:
     """/metrics 被抓取時呼叫：即時從 DB / redis / pool 設定業務 gauge。
@@ -184,7 +197,42 @@ async def collect_runtime_metrics(session: object) -> None:
         )
         DLQ_PENDING.set(int(r or 0))
 
-    for op in (_analyses_by_status, _running, _cost, _tokens, _dbsize, _dlq):
+    async def _data_staleness() -> None:
+        # 靜態 SQL（表名不由變數拼接，避免 S608 誤報）：各關鍵表最新日相對台北今日的落後天數。
+        today = now_tpe.date()
+        staleness_queries = (
+            ("stock_prices", "SELECT max(date) FROM stock_prices"),
+            ("institutional_trading", "SELECT max(date) FROM institutional_trading"),
+            ("margin_trading", "SELECT max(date) FROM margin_trading"),
+        )
+        for table, sql in staleness_queries:
+            r = await session.scalar(text(sql))  # type: ignore[attr-defined]
+            if r is not None:
+                DATA_STALENESS_DAYS.labels(table=table).set(int((today - r).days))
+
+    async def _revenue_yoy_null() -> None:
+        cutoff = (now_tpe.year - 2) * 100 + now_tpe.month  # 近 24 個月（YYYYMM 比較）
+        r = await session.scalar(  # type: ignore[attr-defined]
+            text(
+                "SELECT count(*) FILTER (WHERE revenue_yoy IS NULL)::float "
+                "/ NULLIF(count(*), 0) FROM monthly_revenue "
+                "WHERE (year * 100 + month) >= :cutoff"
+            ),
+            {"cutoff": cutoff},
+        )
+        if r is not None:
+            MONTHLY_REVENUE_YOY_NULL_RATIO.set(float(r))
+
+    for op in (
+        _analyses_by_status,
+        _running,
+        _cost,
+        _tokens,
+        _dbsize,
+        _dlq,
+        _data_staleness,
+        _revenue_yoy_null,
+    ):
         await _guard(op)
 
     # DB pool 使用中連線數
@@ -211,6 +259,7 @@ __all__ = [
     "CELERY_DLQ_TOTAL",
     "CELERY_QUEUE_LENGTH",
     "DATA_PIPELINE_LAST_SUCCESS",
+    "DATA_STALENESS_DAYS",
     "DB_CONNECTIONS_USED",
     "DB_SIZE_BYTES",
     "DLQ_PENDING",
@@ -218,6 +267,7 @@ __all__ = [
     "LLM_COST_TODAY",
     "LLM_TOKENS_TODAY",
     "LLM_TOKENS_TOTAL",
+    "MONTHLY_REVENUE_YOY_NULL_RATIO",
     "ORDERS_APPROVED_TOTAL",
     "ORDERS_REJECTED_TOTAL",
     "RATE_LIMIT_REDIS_ERRORS",

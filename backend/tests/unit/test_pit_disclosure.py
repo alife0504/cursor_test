@@ -49,6 +49,37 @@ def test_general_industries_map_to_general(industry: str) -> None:
     assert filer_category_for(industry) is FilerCategory.GENERAL
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["鮮活果汁-KY", "美食-KY", "IKKA-KY", "慧洋-KY", "亞德客-KY"],
+)
+def test_first_listed_ky_maps_to_financial_not_general(name: str) -> None:
+    """第一上市(櫃)/KY 股（-KY 後綴）Q2 法定期限為 2 個月(8/31)，非一般 8/14。
+
+    KY 股全非金融產業（industry 落一般類），若只看 industry 會判 GENERAL → Q2 期限寫成
+    8/14 → 每年 Q2 偷看未來 17 天。修正後以股名 -KY 後綴判為 FINANCIAL（Q2 8/31，但月營收
+    仍 10 日，KY 非保險業）。此測試拿掉 KY 偵測就會紅。
+    """
+    # 產業別是一般類（食品/汽車/電機…），只有股名能識別 KY
+    cat = filer_category_for("食品工業", name)
+    assert cat is FilerCategory.FINANCIAL
+    # 且確實把 Q2 期限推到 8/31（比 GENERAL 的 8/14 晚 → 不偷看未來）
+    assert statement_deadline(2025, 2, category=cat) > statement_deadline(
+        2025, 2, category=FilerCategory.GENERAL
+    )
+    # 但月營收維持 10 日（非保險業，不吃 15 日延長）
+    from app.domain.disclosure_calendar import monthly_revenue_deadline
+
+    assert monthly_revenue_deadline(2026, 3, category=cat) == monthly_revenue_deadline(
+        2026, 3, category=FilerCategory.GENERAL
+    )
+
+
+def test_financial_ky_stays_insurer_most_conservative() -> None:
+    """金融關鍵字優先於 KY：金融 KY 仍取最保守 INSURER（涵蓋 KY 的 8/31 且月營收 15 日）。"""
+    assert filer_category_for("金融保險", "某金控-KY") is FilerCategory.INSURER
+
+
 @pytest.mark.parametrize("industry", [None, ""])
 def test_unknown_industry_falls_back_to_the_LATER_deadline(industry: str | None) -> None:
     """未知產業別 → INSURER 而非 GENERAL。

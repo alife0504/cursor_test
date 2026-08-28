@@ -140,13 +140,16 @@ class FinancialsRepository(BaseRepository):
             return {}
         rows = (
             await self.session.execute(
-                select(StockList.symbol, StockList.market, StockList.industry).where(
-                    StockList.symbol.in_(list(set(symbols)))
-                )
+                select(
+                    StockList.symbol, StockList.market, StockList.industry, StockList.name
+                ).where(StockList.symbol.in_(list(set(symbols))))
             )
         ).all()
         return {
-            r.symbol: (filer_category_for(r.industry) if r.market in self._TW_MARKETS else None)
+            r.symbol: (
+                # 帶入 name 以識別第一上市(櫃)/KY 股（Q2 期限 8/31，修 17 天 look-ahead）
+                filer_category_for(r.industry, r.name) if r.market in self._TW_MARKETS else None
+            )
             for r in rows
         }
 
