@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
+import { DateFormat } from "@/components/common/DateFormat";
 import { KpiCard } from "@/components/common/KpiCard";
 import { MarketBadge } from "@/components/common/MarketBadge";
 import { NumberFormat } from "@/components/common/NumberFormat";
@@ -52,10 +53,13 @@ export default function TradeHistoryPage() {
       {
         accessorKey: "created_at",
         header: "建立時間",
+        // 用 DateFormat 轉 Asia/Taipei，與全站一致；不可直接 slice UTC 字串（跨頁差 8 小時）
         cell: ({ row }) => (
-          <span className="tabular-nums text-xs">
-            {row.original.created_at?.slice(0, 16) ?? "-"}
-          </span>
+          <DateFormat
+            value={row.original.created_at}
+            mode="datetime"
+            className="text-xs"
+          />
         ),
       },
       {

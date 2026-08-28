@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
+import { ErrorState } from "@/components/common/ErrorState";
 import { KpiCard } from "@/components/common/KpiCard";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,18 @@ export default function InstitutionalPage() {
   const dealerSell = useInstitutional({ ...common, by: "dealer", order: "sell" });
 
   const usedDate = foreignBuy.data?.date ?? null;
+
+  // 後端故障且無資料時：KPI 會顯示「0 張」、榜單顯示空狀態，與「真實零交易」無法區分。
+  // 以排序基準查詢（foreignBuy）為準判定；六個查詢共用同一後端，任一存活即代表服務正常。
+  const instError = foreignBuy.isError && !foreignBuy.data;
+  const retryAll = () => {
+    void foreignBuy.refetch();
+    void foreignSell.refetch();
+    void trustBuy.refetch();
+    void trustSell.refetch();
+    void dealerBuy.refetch();
+    void dealerSell.refetch();
+  };
 
   // 三大法人淨額合計（本日，全市場）——用後端 SUM 全母體的 totals，
   // 不可拿榜單（截斷的 Top 10）加總，否則方向會與市場相反。
@@ -205,49 +218,61 @@ export default function InstitutionalPage() {
         }
       />
 
-      {/* 三大法人淨額合計 */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard
-          title="外資淨額合計"
-          value={kpiText(totals.f, totals.fAmt, unit)}
-          subtitle="紅買超 · 綠賣超"
-          icon={Globe}
-          accent={netAccent(totals.f)}
+      {instError ? (
+        // 後端故障時給明確錯誤 + 重試，而非靜默顯示「0 張」KPI 與空榜單（誤導成「今日零交易」）
+        <ErrorState
+          title="三大法人資料載入失敗"
+          description="請稍後再試，或確認後端服務是否正常。"
+          error={foreignBuy.error}
+          onRetry={retryAll}
         />
-        <KpiCard
-          title="投信淨額合計"
-          value={kpiText(totals.t, totals.tAmt, unit)}
-          subtitle="紅買超 · 綠賣超"
-          icon={Building2}
-          accent={netAccent(totals.t)}
-        />
-        <KpiCard
-          title="自營商淨額合計"
-          value={kpiText(totals.d, totals.dAmt, unit)}
-          subtitle="紅買超 · 綠賣超"
-          icon={Briefcase}
-          accent={netAccent(totals.d)}
-        />
-        <KpiCard
-          title="本日個股數"
-          value={totals.count}
-          subtitle="有三大法人資料"
-          icon={Layers}
-          accent="primary"
-        />
-      </section>
+      ) : (
+        <>
+          {/* 三大法人淨額合計 */}
+          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard
+              title="外資淨額合計"
+              value={kpiText(totals.f, totals.fAmt, unit)}
+              subtitle="紅買超 · 綠賣超"
+              icon={Globe}
+              accent={netAccent(totals.f)}
+            />
+            <KpiCard
+              title="投信淨額合計"
+              value={kpiText(totals.t, totals.tAmt, unit)}
+              subtitle="紅買超 · 綠賣超"
+              icon={Building2}
+              accent={netAccent(totals.t)}
+            />
+            <KpiCard
+              title="自營商淨額合計"
+              value={kpiText(totals.d, totals.dAmt, unit)}
+              subtitle="紅買超 · 綠賣超"
+              icon={Briefcase}
+              accent={netAccent(totals.d)}
+            />
+            <KpiCard
+              title="本日個股數"
+              value={totals.count}
+              subtitle="有三大法人資料"
+              icon={Layers}
+              accent="primary"
+            />
+          </section>
 
-      {sections.map((s) => (
-        <section key={s.title} className="space-y-2">
-          <h3 className="text-sm font-medium">{s.title}</h3>
-          <DataTable
-            columns={columns}
-            data={s.q.data?.rows ?? []}
-            isLoading={s.q.isLoading}
-            emptyText="該日期無三大法人資料"
-          />
-        </section>
-      ))}
+          {sections.map((s) => (
+            <section key={s.title} className="space-y-2">
+              <h3 className="text-sm font-medium">{s.title}</h3>
+              <DataTable
+                columns={columns}
+                data={s.q.data?.rows ?? []}
+                isLoading={s.q.isLoading}
+                emptyText="該日期無三大法人資料"
+              />
+            </section>
+          ))}
+        </>
+      )}
     </div>
   );
 }

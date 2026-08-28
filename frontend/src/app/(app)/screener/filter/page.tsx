@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { DataTable } from "@/components/common/DataTable";
+import { ErrorState } from "@/components/common/ErrorState";
 import { KpiCard } from "@/components/common/KpiCard";
 import { NumberFormat } from "@/components/common/NumberFormat";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -33,7 +34,10 @@ export default function ScreenerFilterPage() {
     if (last) setFilters(last);
   }, []);
 
-  const { data, isLoading } = useScreener({ ...filters, cursor });
+  const { data, isLoading, error, refetch } = useScreener({
+    ...filters,
+    cursor,
+  });
   const items = data?.items ?? [];
 
   const summary = useMemo(() => {
@@ -162,19 +166,33 @@ export default function ScreenerFilterPage() {
 
       <ScreenerForm initial={filters} onSubmit={handleSubmit} />
 
-      <DataTable
-        columns={columns}
-        data={items}
-        isLoading={isLoading}
-        emptyText="尚無符合條件的股票,請調整篩選條件"
-      />
+      {error && !data ? (
+        // 後端故障時給明確錯誤 + 重試，而非顯示「尚無符合條件的股票」（誤導成篩選條件太嚴）
+        <ErrorState
+          title="選股結果載入失敗"
+          description="請稍後再試，或確認後端服務是否正常。"
+          error={error}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      ) : (
+        <>
+          <DataTable
+            columns={columns}
+            data={items}
+            isLoading={isLoading}
+            emptyText="尚無符合條件的股票,請調整篩選條件"
+          />
 
-      <Pagination
-        hasMore={data?.hasMore ?? false}
-        onNext={handleNext}
-        onPrev={handlePrev}
-        canGoBack={cursorStack.length > 0}
-      />
+          <Pagination
+            hasMore={data?.hasMore ?? false}
+            onNext={handleNext}
+            onPrev={handlePrev}
+            canGoBack={cursorStack.length > 0}
+          />
+        </>
+      )}
     </div>
   );
 }

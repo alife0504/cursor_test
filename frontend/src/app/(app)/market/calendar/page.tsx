@@ -4,7 +4,9 @@ import { Banknote, CalendarDays, FileText, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { KpiCard } from "@/components/common/KpiCard";
+import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useMarketCalendar } from "@/hooks/useMarket";
@@ -107,8 +109,9 @@ export default function MarketCalendarPage() {
     () => monthRange(cursor.year, cursor.month),
     [cursor.year, cursor.month],
   );
-  const query = useMarketCalendar(from, to);
-  const events = useMemo(() => query.data ?? [], [query.data]);
+  // 區分載入中／故障／成功但空：不可把三者都畫成「本月無排程事件」空狀態（故障看起來像沒事件）
+  const { data, isLoading, error, refetch } = useMarketCalendar(from, to);
+  const events = useMemo(() => data ?? [], [data]);
 
   const counts = useMemo(
     () => ({
@@ -206,7 +209,18 @@ export default function MarketCalendarPage() {
         </div>
       </div>
 
-      {events.length === 0 ? (
+      {isLoading ? (
+        <LoadingSkeleton rows={6} />
+      ) : error ? (
+        <ErrorState
+          title="財報日曆載入失敗"
+          description="請稍後再試，或確認後端服務是否正常。"
+          error={error}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      ) : events.length === 0 ? (
         <EmptyState title="本月無排程事件" />
       ) : (
         <div className="grid grid-cols-7 gap-1 text-xs">

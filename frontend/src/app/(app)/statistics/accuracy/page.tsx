@@ -125,7 +125,7 @@ export default function StatisticsAccuracyPage() {
       ) : null}
 
       <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-        方法：進場＝決策日收盤，出場＝進場後第 {horizon} 個交易日收盤（未還原收盤，除息跳空計入）。
+        方法：進場＝決策日收盤，出場＝進場後第 {horizon} 個交易日收盤（採還原收盤，含息、除息不計為虧損）。
         BUY 命中＝報酬 &gt; 0、SELL 命中＝報酬 &lt; 0。
         <span className="text-foreground">
           {" "}

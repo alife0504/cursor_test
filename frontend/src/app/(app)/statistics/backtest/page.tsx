@@ -53,12 +53,13 @@ export default function StatisticsBacktestPage() {
   const bm = data?.benchmark_metrics;
 
   // 合併策略/基準權益（同日期序列）
+  // 基準其實是「同一標的 Buy&Hold（全程續抱）」，非大盤指數；用「續抱」命名避免誤導。
   const equityData = useMemo(() => {
     if (!data?.curve) return [];
     return data.curve.map((p, i) => ({
       date: p.date,
       策略: p.equity,
-      大盤: data.benchmark_curve[i]?.equity ?? null,
+      續抱: data.benchmark_curve[i]?.equity ?? null,
     }));
   }, [data]);
 
@@ -73,7 +74,7 @@ export default function StatisticsBacktestPage() {
           label: "總報酬",
           value: pctText(m.total_return),
           tone: m.total_return >= 0 ? "text-bull" : "text-bear",
-          sub: bm ? `大盤 ${pctText(bm.total_return)}` : undefined,
+          sub: bm ? `續抱 ${pctText(bm.total_return)}` : undefined,
         },
         {
           label: "年化報酬",
@@ -194,13 +195,20 @@ export default function StatisticsBacktestPage() {
             ))}
           </section>
 
-          <ChartContainer title="權益曲線（策略 vs 大盤 Buy&Hold）" height={300}>
+          <ChartContainer
+            title="權益曲線（策略 vs Buy&Hold 同標的續抱）"
+            height={300}
+          >
             <LineChart
               data={equityData}
               xKey="date"
               series={[
                 { dataKey: "策略", name: "策略", color: "#3b82f6" },
-                { dataKey: "大盤", name: "大盤(B&H)", color: "#94a3b8" },
+                {
+                  dataKey: "續抱",
+                  name: "Buy&Hold（同標的續抱）",
+                  color: "#94a3b8",
+                },
               ]}
               xTickFormatter={(v) => v.slice(5)}
               yTickFormatter={(v) => `${Math.round(v / 10000)}萬`}

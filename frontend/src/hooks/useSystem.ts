@@ -3,28 +3,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, type ApiEnvelope } from "@/lib/api";
-import type { DLQItem, SystemInfo, SystemMetricsSummary } from "@/lib/api-types";
+import type { DLQItem, SystemInfo } from "@/lib/api-types";
 
 // Phase 17 § O / § P:Admin 系統監控與資料管線
-//   - GET /admin/system/metrics
 //   - GET /admin/system/info
+//   - GET /admin/system/stats
 //   - GET /admin/pipeline/dlq
 //   - POST /admin/pipeline/dlq/{id}/resolve
 //   - POST /admin/pipeline/dlq/{id}/requeue
-
-export function useSystemMetrics(enabled = true) {
-  return useQuery({
-    queryKey: ["admin", "system", "metrics"],
-    enabled,
-    refetchInterval: 30_000,
-    queryFn: async () => {
-      const res = await api.get<ApiEnvelope<SystemMetricsSummary>>(
-        "/admin/system/metrics",
-      );
-      return res.data.data;
-    },
-  });
-}
+// 註：舊有 useSystemMetrics（/admin/system/metrics）為死碼——全前端零引用，
+// 且型別與後端 stub 回應不符，已移除避免未來誤用顯示 undefined。
 
 export function useSystemInfo(enabled = true) {
   return useQuery({

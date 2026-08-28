@@ -518,16 +518,6 @@ export interface NotificationLog {
 }
 
 // Admin / system
-export interface SystemMetricsSummary {
-  api_availability?: number | null;
-  avg_latency_ms?: number | null;
-  analyses_today?: number | null;
-  llm_cost_today_usd?: string | number | null;
-  disk_usage_pct?: number | null;
-  queue_length?: number | null;
-  [k: string]: unknown;
-}
-
 export interface SystemInfo {
   version: string;
   env: string;

@@ -4,6 +4,7 @@ import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { DateFormat } from "@/components/common/DateFormat";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Pagination } from "@/components/common/Pagination";
@@ -282,7 +283,8 @@ function NotificationLogsTable() {
               {data.items.map((log) => (
                 <tr key={log.id} className="border-b">
                   <td className="p-2 text-xs tabular-nums">
-                    {log.sent_at?.slice(0, 16)}
+                    {/* 用 DateFormat 轉 Asia/Taipei，與全站一致；不可直接 slice UTC 字串 */}
+                    <DateFormat value={log.sent_at} mode="datetime" />
                   </td>
                   <td className="p-2 font-mono text-xs">{log.channel}</td>
                   <td className="p-2 text-xs text-muted-foreground">{log.event_type}</td>

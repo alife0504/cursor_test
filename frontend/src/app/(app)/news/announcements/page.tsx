@@ -4,6 +4,7 @@ import { ExternalLink, Megaphone } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StockPicker } from "@/components/common/StockPicker";
@@ -36,7 +37,7 @@ export default function NewsAnnouncementsPage() {
   const [from, setFrom] = useState<string>("");
   const [to, setTo] = useState<string>("");
 
-  const { data, isLoading } = useStockAnnouncements({
+  const { data, isLoading, error, refetch } = useStockAnnouncements({
     symbol,
     limit: 100,
     enabled: Boolean(symbol),
@@ -116,6 +117,16 @@ export default function NewsAnnouncementsPage() {
         />
       ) : isLoading ? (
         <LoadingSkeleton rows={5} />
+      ) : error ? (
+        // 已選股但後端故障：給明確錯誤 + 重試，而非顯示「該條件下無公告」（誤導成該股無公告）
+        <ErrorState
+          title="公告載入失敗"
+          description="請稍後再試，或確認後端服務是否正常。"
+          error={error}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
       ) : filtered.length === 0 ? (
         <EmptyState title="該條件下無公告" />
       ) : (
