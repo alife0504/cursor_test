@@ -111,6 +111,8 @@ class FundamentalAnalyst(BaseAnalyst):
             gross_margin=_fmt(ratios.get("gross_margin_pct")),
             op_margin=_fmt(ratios.get("op_margin_pct")),
             revenue_yoy_latest=_fmt(ratios.get("revenue_yoy_pct")),
+            # #2 月營收動能（併入基本面）：由 PIT 可見月營收就地衍生，供 LLM 引用（非改決策邏輯）
+            revenue_momentum=_format_revenue_momentum(_derive_revenue_momentum(monthly)),
             fcf_ttm=_fmt(ratios.get("fcf_ttm"), int_=True),
         )
         system_prompt = load_prompt("fundamental_analyst_system")
@@ -262,6 +264,58 @@ def _fmt(v: Any, *, int_: bool = False) -> str:
         return f"{float(v):,.2f}"
     except (TypeError, ValueError):
         return str(v)
+
+
+def _derive_revenue_momentum(monthly_revenue: list[dict[str, Any]]) -> dict[str, Any]:
+    """由 PIT 可見的月營收序列衍生「營收動能」訊號（純算術、PIT 安全）。
+
+    monthly_revenue 由 get_monthly_revenue 回傳（已由 available_at<=pit 閘門過濾、由舊到新）。
+    衍生皆為對已公告過去月的統計，不偷看未來：
+    - 連續同向月數：最新月 YoY 為正→往回數連續正成長月數（負則數連續衰退）。
+    - 近 3 月平均 YoY：短期動能強度。
+    - 動能方向：最新 YoY 相對上一個可得 YoY（加速 / 減速 / 持平）。
+    無足夠資料時回空 dict（呼叫端顯示「資料不足」）。
+    """
+    seq = [(_d(m.get("revenue_yoy"))) for m in monthly_revenue]
+    yoys = [y for y in seq if y is not None]
+    if not yoys:
+        return {}
+    latest = yoys[-1]
+    sign = 1 if latest > 0 else (-1 if latest < 0 else 0)
+    streak = 0
+    if sign != 0:
+        for y in reversed(yoys):
+            if (sign > 0 and y > 0) or (sign < 0 and y < 0):
+                streak += 1
+            else:
+                break
+    last3 = yoys[-3:]
+    avg3 = (sum(last3) / len(last3)) if last3 else None
+    trend = None
+    if len(yoys) >= 2:
+        prev = yoys[-2]
+        trend = "加速" if latest > prev else ("減速" if latest < prev else "持平")
+    return {
+        "yoy_latest": latest,
+        "streak_months": streak,
+        "streak_dir": "成長" if sign > 0 else ("衰退" if sign < 0 else "持平"),
+        "yoy_3m_avg": avg3,
+        "trend": trend,
+    }
+
+
+def _format_revenue_momentum(mo: dict[str, Any]) -> str:
+    """把 _derive_revenue_momentum 的結果格式化成一行中文（給 LLM 引用）。"""
+    if not mo:
+        return "資料不足"
+    parts = [f"最新月 YoY {_fmt(mo.get('yoy_latest'))}%"]
+    if mo.get("streak_months"):
+        parts.append(f"連續 {mo['streak_months']} 個月{mo.get('streak_dir')}")
+    if mo.get("yoy_3m_avg") is not None:
+        parts.append(f"近3月均 YoY {_fmt(mo.get('yoy_3m_avg'))}%")
+    if mo.get("trend"):
+        parts.append(f"動能{mo['trend']}")
+    return "；".join(parts)
 
 
 def _format_financials_table(rows: list[dict[str, Any]]) -> str:

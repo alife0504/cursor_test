@@ -20,6 +20,7 @@
 - 毛利率（最近季）：{gross_margin}%
 - 營業利益率：{op_margin}%
 - 營收年增率（最近月）：{revenue_yoy_latest}%
+- 月營收動能：{revenue_momentum}
 - 自由現金流量（近 4 季合計）：{fcf_ttm}
 
 ## 你的任務

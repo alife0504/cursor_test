@@ -113,6 +113,8 @@ class ChipAnalyst(BaseAnalyst):
             short_balance_end=_fmt(agg.get("short_balance_end"), int_=True),
             short_balance_change=_fmt(agg.get("short_balance_change"), int_=True),
             short_to_margin_ratio=_fmt(agg.get("short_to_margin_ratio")),
+            # #3 籌碼動能（併入籌碼面）：由日級序列就地衍生，供 LLM 引用（非改決策邏輯）
+            chip_momentum=_format_chip_momentum(_derive_chip_momentum(institutional, margin)),
             margin_table=_format_margin_table(margin[-10:]),
             latest_month=(
                 f"{monthly[-1].get('year')}-{int(monthly[-1].get('month') or 0):02d}"
@@ -218,6 +220,67 @@ def _aggregate(
         if mb_e > 0:
             out["short_to_margin_ratio"] = sb_e / mb_e * Decimal("100")
     return out
+
+
+def _derive_chip_momentum(
+    institutional: list[dict[str, Any]],
+    margin: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """由日級籌碼序列衍生「籌碼動能」訊號（純算術、PIT 安全）。
+
+    institutional / margin 由 get_* 回傳（由舊到新，皆為 <= 今日的已發生資料）：
+    - 外資 / 投信「連續買超（或賣超）天數」：主力進出的持續性。
+    - 外資近 5 日淨買賣超合計：短期資金動向強度。
+    - 融資餘額趨勢：散戶槓桿的方向（增→追高、減→退場）。
+    無足夠資料的欄位回 None（呼叫端顯示「資料不足」）。
+    """
+    out: dict[str, Any] = {}
+
+    def _streak(key: str) -> tuple[int | None, str | None]:
+        vals = [v for v in (_d(r.get(key)) for r in institutional) if v is not None]
+        if not vals:
+            return None, None
+        latest = vals[-1]
+        sign = 1 if latest > 0 else (-1 if latest < 0 else 0)
+        s = 0
+        if sign != 0:
+            for v in reversed(vals):
+                if (sign > 0 and v > 0) or (sign < 0 and v < 0):
+                    s += 1
+                else:
+                    break
+        return s, ("買超" if sign > 0 else ("賣超" if sign < 0 else "持平"))
+
+    if institutional:
+        fs, fdir = _streak("foreign_net")
+        ts, tdir = _streak("trust_net")
+        out["foreign_streak"], out["foreign_streak_dir"] = fs, fdir
+        out["trust_streak"], out["trust_streak_dir"] = ts, tdir
+        last5 = [(_d(r.get("foreign_net")) or Decimal("0")) for r in institutional[-5:]]
+        out["foreign_net_5d"] = sum(last5) if last5 else None
+
+    if len(margin) >= 2:
+        mb_e = _d(margin[-1].get("margin_balance"))
+        mb_s = _d(margin[0].get("margin_balance"))
+        if mb_e is not None and mb_s is not None:
+            out["margin_trend"] = "增加" if mb_e > mb_s else ("減少" if mb_e < mb_s else "持平")
+    return out
+
+
+def _format_chip_momentum(mo: dict[str, Any]) -> str:
+    """把 _derive_chip_momentum 結果格式化成一行中文（給 LLM 引用）。"""
+    if not mo:
+        return "資料不足"
+    parts: list[str] = []
+    if mo.get("foreign_streak"):
+        parts.append(f"外資連續 {mo['foreign_streak']} 日{mo.get('foreign_streak_dir')}")
+    if mo.get("trust_streak"):
+        parts.append(f"投信連續 {mo['trust_streak']} 日{mo.get('trust_streak_dir')}")
+    if mo.get("foreign_net_5d") is not None:
+        parts.append(f"外資近5日淨額 {_fmt(mo.get('foreign_net_5d'), int_=True)}")
+    if mo.get("margin_trend"):
+        parts.append(f"融資餘額{mo['margin_trend']}")
+    return "；".join(parts) if parts else "資料不足"
 
 
 def _d(v: Any) -> Decimal | None:

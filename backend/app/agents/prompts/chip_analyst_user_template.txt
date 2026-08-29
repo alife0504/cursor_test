@@ -8,6 +8,7 @@
 - 投信：累積 {trust_net} 張（買 {trust_buy} / 賣 {trust_sell}）
 - 自營商：累積 {dealer_net} 張（買 {dealer_buy} / 賣 {dealer_sell}）
 - 三大法人合計淨買賣超：{total_net} 張
+- 籌碼動能：{chip_momentum}
 
 ### 三大法人逐日明細（近 10 個交易日）
 {institutional_table}
