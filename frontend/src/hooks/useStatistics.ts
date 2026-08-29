@@ -162,6 +162,7 @@ export interface BacktestMetrics {
   max_drawdown: number;
   win_rate: number;
   num_trades: number;
+  profit_factor?: number | null;
 }
 
 export interface BacktestResponse {
@@ -174,8 +175,12 @@ export interface BacktestResponse {
   initial_capital: number;
   curve: BacktestPoint[];
   metrics: BacktestMetrics;
+  // 同標的 Buy&Hold（續抱）基準
   benchmark_curve: Array<{ date: string; equity: number }>;
   benchmark_metrics: BacktestMetrics;
+  // 真大盤(TAIEX)基準：資料足夠時才附（策略 vs 大盤）
+  market_benchmark_curve?: Array<{ date: string; equity: number }>;
+  market_benchmark_metrics?: BacktestMetrics;
   error?: string;
 }
 

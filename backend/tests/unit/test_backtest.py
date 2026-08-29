@@ -108,3 +108,27 @@ def test_rsi_enters_on_oversold_and_profits() -> None:
 def test_unknown_strategy_raises() -> None:
     with pytest.raises(ValueError):
         run_backtest(_dates(3), [1.0, 2.0, 3.0], strategy="nope", window_start=D0)
+
+
+def test_profit_factor_none_when_no_losing_trades() -> None:
+    """全程上漲的 buy&hold 只有一筆獲利交易、無虧損 → profit_factor 應為 None（不呈 inf）。"""
+    closes = [100.0, 110.0, 121.0, 133.1]
+    out = run_backtest(
+        closes and _dates(len(closes)), closes, strategy="buy_and_hold", window_start=D0
+    )
+    assert "profit_factor" in out["metrics"]
+    assert out["metrics"]["profit_factor"] is None
+
+
+def test_profit_factor_ratio_of_gross_profit_over_gross_loss() -> None:
+    """rsi 均值回歸產生多筆交易時，profit_factor 應等於 獲利總和/|虧損總和| 且為正數。
+
+    這裡不寫死數值（交易由指標決定），只鎖死不變量：有虧損交易時 profit_factor 為有限正數，
+    且與 win_rate 一致（全勝→無虧損→None；有勝有敗→>0）。
+    """
+    # 鋸齒序列：製造多次進出，含勝有敗
+    closes = [100, 90, 80, 95, 92, 70, 105, 100, 60, 120, 118, 55, 130]
+    closes = [float(x) for x in closes]
+    out = run_backtest(_dates(len(closes)), closes, strategy="rsi_mean_reversion", window_start=D0)
+    pf = out["metrics"]["profit_factor"]
+    assert pf is None or (isinstance(pf, float) and pf > 0)

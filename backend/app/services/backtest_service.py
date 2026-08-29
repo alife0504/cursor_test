@@ -204,6 +204,11 @@ def _equity_and_metrics(
     max_dd = min((c["drawdown"] for c in curve), default=0.0) / 100.0
     wins = sum(1 for t in trades if t > 0)
     win_rate = (wins / len(trades)) if trades else 0.0
+    # 盈虧比（profit factor）＝ 獲利交易報酬總和 / |虧損交易報酬總和|。
+    # >1 代表整體賺、<1 賠；無虧損交易時給 None（避免除以 0 呈現 inf）。
+    gross_profit = sum(t for t in trades if t > 0)
+    gross_loss = -sum(t for t in trades if t < 0)
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
 
     return {
         "curve": curve,
@@ -214,6 +219,7 @@ def _equity_and_metrics(
             "max_drawdown": max_dd,
             "win_rate": win_rate,
             "num_trades": len(trades),
+            "profit_factor": profit_factor,
         },
     }
 
@@ -274,6 +280,44 @@ def run_backtest(
         "metrics": strat["metrics"],
         "benchmark_curve": [{"date": c["date"], "equity": c["equity"]} for c in bench["curve"]],
         "benchmark_metrics": bench["metrics"],
+    }
+
+
+#: 大盤基準代號（加權指數）。TAIEX B&H 作為「策略 vs 大盤」的市場基準。
+_MARKET_INDEX_SYMBOL = "TAIEX"
+
+
+async def _market_benchmark(
+    session: AsyncSession,
+    window_start: date_type,
+    latest: date_type,
+    initial_capital: float,
+) -> dict[str, Any] | None:
+    """大盤(TAIEX) Buy&Hold 基準：equity = 初始資金 × TAIEX_t / TAIEX_起點。
+
+    資料不足（無 TAIEX 或視窗內 <2 根）時回 None（graceful，不擋回測主結果）。
+    與個股同用 COALESCE(adjusted_close, close) 與同一視窗，口徑一致、PIT 安全。
+    """
+    px_col = func.coalesce(StockPrice.adjusted_close, StockPrice.close)
+    rows = (
+        await session.execute(
+            select(StockPrice.date, px_col.label("px"))
+            .where(
+                StockPrice.symbol == _MARKET_INDEX_SYMBOL,
+                StockPrice.date >= window_start,
+                StockPrice.date <= latest,
+            )
+            .order_by(StockPrice.date)
+        )
+    ).all()
+    if len(rows) < 2:
+        return None
+    dates = [r.date for r in rows]
+    closes = [float(r.px) for r in rows]
+    bh = _equity_and_metrics(dates, closes, [1] * len(closes), 0, initial_capital)
+    return {
+        "curve": [{"date": c["date"], "equity": c["equity"]} for c in bh["curve"]],
+        "metrics": bh["metrics"],
     }
 
 
@@ -338,6 +382,15 @@ async def compute_backtest(
     )
     result["symbol"] = symbol
     result["period"] = period
+
+    # 真大盤(TAIEX)基準：讓「策略 vs 大盤」成立（原本只有同標的 B&H＝續抱基準）。
+    # 用回測實際區間 [start_date, end_date] 對齊；資料不足則不附（前端據 in 判斷是否顯示）。
+    if not result.get("error"):
+        actual_start = date_type.fromisoformat(result["start_date"])
+        market = await _market_benchmark(session, actual_start, latest, initial_capital)
+        if market:
+            result["market_benchmark_curve"] = market["curve"]
+            result["market_benchmark_metrics"] = market["metrics"]
     return result
 
 

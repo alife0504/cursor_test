@@ -51,15 +51,21 @@ export default function StatisticsBacktestPage() {
 
   const m = data?.metrics;
   const bm = data?.benchmark_metrics;
+  const mkt = data?.market_benchmark_metrics;
 
   // 合併策略/基準權益（同日期序列）
-  // 基準其實是「同一標的 Buy&Hold（全程續抱）」，非大盤指數；用「續抱」命名避免誤導。
+  // - 續抱：同一標的 Buy&Hold（全程續抱），非大盤指數。
+  // - 大盤：真 TAIEX Buy&Hold（資料足夠時才有；用日期對映，因大盤序列日期可能與個股略異）。
   const equityData = useMemo(() => {
     if (!data?.curve) return [];
+    const mktByDate = new Map(
+      (data.market_benchmark_curve ?? []).map((p) => [p.date, p.equity]),
+    );
     return data.curve.map((p, i) => ({
       date: p.date,
       策略: p.equity,
       續抱: data.benchmark_curve[i]?.equity ?? null,
+      大盤: mktByDate.get(p.date) ?? null,
     }));
   }, [data]);
 
@@ -74,7 +80,12 @@ export default function StatisticsBacktestPage() {
           label: "總報酬",
           value: pctText(m.total_return),
           tone: m.total_return >= 0 ? "text-bull" : "text-bear",
-          sub: bm ? `續抱 ${pctText(bm.total_return)}` : undefined,
+          sub: [
+            bm ? `續抱 ${pctText(bm.total_return)}` : null,
+            mkt ? `大盤 ${pctText(mkt.total_return)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined,
         },
         {
           label: "年化報酬",
@@ -95,7 +106,10 @@ export default function StatisticsBacktestPage() {
           label: "勝率",
           value: pctText(m.win_rate),
           tone: "",
-          sub: `${m.num_trades} 筆交易`,
+          sub:
+            m.profit_factor != null
+              ? `${m.num_trades} 筆 · 盈虧比 ${m.profit_factor.toFixed(2)}`
+              : `${m.num_trades} 筆交易`,
         },
         {
           label: "期末資金",
@@ -196,7 +210,7 @@ export default function StatisticsBacktestPage() {
           </section>
 
           <ChartContainer
-            title="權益曲線（策略 vs Buy&Hold 同標的續抱）"
+            title="權益曲線（策略 vs 同標的續抱 vs 大盤）"
             height={300}
           >
             <LineChart
@@ -209,6 +223,10 @@ export default function StatisticsBacktestPage() {
                   name: "Buy&Hold（同標的續抱）",
                   color: "#94a3b8",
                 },
+                // 大盤(TAIEX) 基準：資料足夠時才有值；無值時該線不顯示
+                ...(mkt
+                  ? [{ dataKey: "大盤", name: "大盤(TAIEX)", color: "#f59e0b" }]
+                  : []),
               ]}
               xTickFormatter={(v) => v.slice(5)}
               yTickFormatter={(v) => `${Math.round(v / 10000)}萬`}
