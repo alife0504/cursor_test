@@ -135,7 +135,10 @@ async def compute_freshness(session: Any) -> dict[str, Any]:
             )
             or 0
         )
-        dlq_status = "ok" if dlq_pending == 0 else ("warn" if dlq_pending < 50 else "critical")
+        # 閾值容忍正常 fan-out 噪音：全市場逐檔同步(~1800 檔)每次會有少量 per-symbol「無資料/
+        # 暫時性」失敗(如新上市/下市/未申報標的),屬正常。<=10 視為 ok、11~50 warn、>50 critical,
+        # 避免每次 sync 後 banner 就誤報。
+        dlq_status = "ok" if dlq_pending <= 10 else ("warn" if dlq_pending <= 50 else "critical")
     except Exception as exc:
         logger.warning("freshness.dlq_failed error=%s", exc)
         with __import__("contextlib").suppress(Exception):

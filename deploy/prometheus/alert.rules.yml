@@ -43,9 +43,9 @@ groups:
 
   - name: tradingagents-pipeline-health
     rules:
-      # DLQ 未解決任務堆積
+      # DLQ 未解決任務堆積（>10 才告警：容忍 fan-out 正常的少量 per-symbol 無資料失敗）
       - alert: DLQPending
-        expr: dlq_pending_total > 0
+        expr: dlq_pending_total > 10
         for: 30m
         labels: { severity: warning }
         annotations:
