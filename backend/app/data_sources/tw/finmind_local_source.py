@@ -91,12 +91,37 @@ class FinMindLocalSource(BaseDataSource):
         )
 
     async def _query(self, sql: str, *params: Any) -> list[dict[str, Any]]:
-        conn = await self._connect()
-        try:
-            rows = await conn.fetch(sql, *params)
-        finally:
-            await conn.close()
-        return [dict(r) for r in rows]
+        # 對暫時性連線錯誤重試一次（fresh connection）：fm-postgres 與 finmind-platform 的 Dagster
+        # ETL 共用，其忙碌時偶有「connection is closed / timeout」的瞬時失敗。重試一次可把資料留在
+        # 本地主源（避免不必要地 failover 到 FinMind API 耗配額、或進 DLQ），仍失敗才交由 fallback 鏈。
+        # 註：不用 process-wide asyncpg pool——celery 每任務用獨立 event loop(asyncio.run)，
+        # 跨 loop 共用 pool 會出錯；且每任務多為單次查詢、worker concurrency=4 已限並發連線數。
+        import asyncio
+
+        import asyncpg
+
+        # 暫時性連線類錯誤（含 asyncpg「connection is closed」InterfaceError、連線中斷、逾時）才重試；
+        # SQL/資料錯誤不重試（重試也不會過）。
+        transient = (
+            OSError,
+            asyncio.TimeoutError,
+            asyncpg.InterfaceError,
+            asyncpg.PostgresConnectionError,
+        )
+        for attempt in range(2):
+            conn = await self._connect()
+            try:
+                rows = await conn.fetch(sql, *params)
+                return [dict(r) for r in rows]
+            except transient as exc:
+                if attempt == 0:
+                    logger.warning("finmind_local.query_retry error=%s", str(exc)[:100])
+                    continue
+                raise
+            finally:
+                with __import__("contextlib").suppress(Exception):
+                    await conn.close()
+        return []  # pragma: no cover
 
     async def fetch_ohlcv(self, symbol: str, start: date, end: date) -> pd.DataFrame:
         # adjusted_close 取自 FinMind 官方還原價 taiwan_stock_price_adj（含息還原，back-adjust，

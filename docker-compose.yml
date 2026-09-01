@@ -33,6 +33,8 @@ services:
   timescaledb:
     image: timescale/timescaledb:2.16.1-pg16
     container_name: ta-timescaledb
+    labels:
+      autoheal: "true"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
@@ -64,6 +66,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ta-redis
+    labels:
+      autoheal: "true"
     ports:
       - "${REDIS_PORT:-6379}:6379"
     # maxmemory-policy=volatile-lru：只逐出「有設 TTL」的 key（快取）。Celery broker(db1) 的
@@ -98,6 +102,8 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.9.5
     container_name: ta-qdrant
+    labels:
+      autoheal: "true"
     ports:
       - "${QDRANT_PORT:-6333}:6333"
       - "${QDRANT_GRPC_PORT:-6334}:6334"
@@ -130,6 +136,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: ta-backend
+    labels:
+      autoheal: "true"
     image: tradingagents-backend:dev
     ports:
       - "8000:8000"
@@ -183,6 +191,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: ta-celery-worker
+    labels:
+      autoheal: "true"
     image: tradingagents-backend:dev
     env_file:
       - .env
@@ -237,6 +247,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: ta-celery-beat
+    labels:
+      autoheal: "true"
     image: tradingagents-backend:dev
     env_file:
       - .env
@@ -295,6 +307,8 @@ services:
         # rewrites() 在 build 時烤死後端位址 → 必須 build-time 給內網 service 名
         BACKEND_INTERNAL_URL: http://backend:8000
     container_name: ta-frontend
+    labels:
+      autoheal: "true"
     image: tradingagents-frontend:dev
     profiles: ["frontend"]
     ports:
@@ -394,6 +408,28 @@ services:
       resources:
         limits:
           memory: 384m
+
+  # ── Autoheal（自動重啟 unhealthy 容器）──────────────────────
+  # Docker 的 restart policy 只對「程序退出」生效，對「healthcheck 判 unhealthy 但程序卡死
+  # (hang/deadlock/event loop 卡住)」不會重啟。autoheal 監看 docker socket，將帶
+  # autoheal=true label 且轉 unhealthy 的容器自動 docker restart，補上這道自癒缺口。
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: ta-autoheal
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "30"
+      # 容器啟動後 300s 才開始監看，避開冷啟(backend start_period 120s / beat 180s)期間誤重啟
+      AUTOHEAL_START_PERIOD: "300"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "30"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 128m
 
 volumes:
   timescaledb_data:
