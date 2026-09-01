@@ -1,7 +1,8 @@
 import { AuthBootstrap } from "@/components/common/AuthBootstrap";
 import { CommandPalette } from "@/components/common/CommandPalette";
-import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { RouteResetErrorBoundary } from "@/components/common/RouteResetErrorBoundary";
 import { MobileSidebar, Sidebar } from "@/components/common/Sidebar";
+import { SystemHealthBanner } from "@/components/common/SystemHealthBanner";
 import { Topbar } from "@/components/common/Topbar";
 
 // 已登入 App 主版型：Sidebar（桌機）+ MobileSidebar（手機 Sheet）+ Topbar + main
@@ -20,10 +21,13 @@ export default function AppLayout({
         <Topbar />
         <main className="flex-1 overflow-y-auto bg-app-mesh">
           <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6 lg:px-8">
-            <ErrorBoundary>
+            {/* 全站資料異常警示：置於內容最上方、錯誤邊界之外，頁面出錯時仍看得到 */}
+            <SystemHealthBanner />
+            {/* key={pathname} 讓導頁時錯誤邊界重置，避免單頁錯誤黏住全站 */}
+            <RouteResetErrorBoundary>
               <AuthBootstrap />
               {children}
-            </ErrorBoundary>
+            </RouteResetErrorBoundary>
           </div>
         </main>
       </div>

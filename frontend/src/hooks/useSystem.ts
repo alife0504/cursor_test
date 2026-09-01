@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, type ApiEnvelope } from "@/lib/api";
-import type { DLQItem, SystemInfo } from "@/lib/api-types";
+import type { DataFreshness, DLQItem, SystemInfo } from "@/lib/api-types";
 
 // Phase 17 § O / § P:Admin 系統監控與資料管線
 //   - GET /admin/system/info
@@ -46,6 +46,29 @@ export function useSystemStats(enabled = true) {
       const res = await api.get<ApiEnvelope<SystemStats>>(
         "/admin/system/stats",
       );
+      return res.data.data;
+    },
+  });
+}
+
+/**
+ * 全站資料新鮮度 / 系統健康：GET /system/data-freshness（認證使用者可讀）。
+ *
+ * 供全站頂端的 SystemHealthBanner 消費——後端集中判定各關鍵表落後天數與 DLQ 狀態，
+ * status 為 warn/critical 時前端顯示警示條，避免使用者在「看似正常實則過期」的資料上做判斷。
+ *
+ * 與全 API 一致採 envelope 包裝（res.data.data 為 DataFreshness）。
+ * refetchInterval 90s：資料新鮮度變動慢，低頻輪詢即可讓長開分頁自動反映最新健康狀態。
+ */
+export function useDataFreshness(enabled = true) {
+  return useQuery({
+    queryKey: ["system", "data-freshness"],
+    enabled,
+    refetchInterval: 90_000,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const res = await api.get<ApiEnvelope<DataFreshness>>("/system/data-freshness");
       return res.data.data;
     },
   });

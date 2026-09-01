@@ -295,12 +295,21 @@ export function useIntraday(symbol: "TAIEX" | "TXF", enabled = true) {
 // 讓退回路徑至少會動（盤後資料本來就不會每 5 秒變，30 秒足夠且不浪費）。
 const EOD_FALLBACK_POLL_MS = 30_000;
 
+// 收盤後的「低頻心跳」間隔（5 分鐘）。當日最終 EOD 是傍晚（收盤數小時後）才寫入 DB，
+// 若收盤分支回 false 就永久停輪詢 → 長開分頁看不到當日最終資料，得手動重整。改為 5 分鐘
+// 心跳：成本極低，卻能讓長開分頁在傍晚資料落庫後自動更新，也能在隔日開盤時自動升回 30 秒。
+const EOD_CLOSED_HEARTBEAT_MS = 5 * 60_000;
+
 export function useMarketOverview(market = "TW", enabled = true) {
   return useQuery({
     queryKey: ["market", "overview", market],
     enabled,
     staleTime: 60_000,
-    refetchInterval: () => (isTwMarketOpen() ? EOD_FALLBACK_POLL_MS : false),
+    // 盤中 30 秒兜底；收盤後 5 分鐘心跳（讓長開分頁看得到傍晚寫入的當日最終 EOD）。
+    refetchInterval: () =>
+      isTwMarketOpen() ? EOD_FALLBACK_POLL_MS : EOD_CLOSED_HEARTBEAT_MS,
+    // 切回分頁一律重抓：收盤心跳頻率低，靠 focus 重抓補足「回來就想看到最新」。
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<MarketOverview>>(
         "/market/overview",
@@ -321,8 +330,10 @@ export function useMarketMovers(
     queryKey: ["market", "movers", { type, market, limit }],
     enabled,
     staleTime: 60_000,
-    // 同 useMarketOverview：即時榜取不到時的退回路徑，盤中至少 30 秒動一次
-    refetchInterval: () => (isTwMarketOpen() ? EOD_FALLBACK_POLL_MS : false),
+    // 同 useMarketOverview：盤中 30 秒兜底、收盤後 5 分鐘心跳（傍晚最終 EOD 落庫後自動反映）。
+    refetchInterval: () =>
+      isTwMarketOpen() ? EOD_FALLBACK_POLL_MS : EOD_CLOSED_HEARTBEAT_MS,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const res = await api.get<ApiEnvelope<MoverRow[]>>("/market/movers", {
         params: { type, market, limit },

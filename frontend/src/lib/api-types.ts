@@ -542,6 +542,37 @@ export interface DLQItem {
   resolution_notes?: string | null;
 }
 
+// 資料新鮮度 / 系統健康（對齊 backend/app/services/freshness_service.py compute_freshness）
+//   ⚠️ 此端點 GET /system/data-freshness 直接回傳物件本體，
+//      **不經 envelope_success 包裹**（與其他 admin 端點不同），前端讀 res.data 即為此形狀。
+export type FreshnessStatus = "ok" | "warn" | "critical" | "unknown";
+
+export interface FreshnessCheck {
+  /** 表 key（如 stock_prices / monthly_revenue） */
+  key: string;
+  /** 中文顯示名（如「台股日K」「月營收」） */
+  label: string;
+  /** 該表最新資料日（ISO date）；查無或查詢失敗為 null */
+  as_of: string | null;
+  /** 落後天數（今日 - 最新資料日）；null 表無法判定 */
+  staleness_days: number | null;
+  warn_days: number;
+  crit_days: number;
+  status: FreshnessStatus;
+}
+
+export interface DataFreshness {
+  /** 整體狀態（取所有 check 與 DLQ 的最差） */
+  status: FreshnessStatus;
+  checks: FreshnessCheck[];
+  /** 未解決的 Celery 死信佇列筆數；查詢失敗為 null */
+  dlq_pending: number | null;
+  dlq_status: FreshnessStatus;
+  /** 精簡異常摘要（僅列 warn/critical 者），如「選股指標(6天)、月營收(92天)」；正常時為空字串 */
+  problem_summary: string;
+  generated_at: string;
+}
+
 // 對齊 backend/app/schemas/market.py CalendarItem（v1.1 接真實資料用；目前 calendar 頁仍用本地 mock）
 // 對齊 backend/app/services/market_service.py get_calendar（真實資料，非 mock）
 //   filing_deadline    ：法定申報期限（依證交法 §36 推算，全市場共通 → 無 symbol）
