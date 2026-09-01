@@ -58,6 +58,10 @@ COPY backend/scripts /app/scripts
 # 給 app user 權限
 RUN chown -R app:app /app && chmod +x /app/scripts/wait-for-services.sh
 
+# celery_beat 的 schedule 持久化目錄：建成 app-owned，讓 fresh named volume 掛載時繼承此擁有權
+# （否則 Docker 預設建 root-owned → beat 以 uid 1000 寫不了 schedule 而 crash-loop）。
+RUN mkdir -p /var/lib/celerybeat && chown -R app:app /var/lib/celerybeat
+
 USER app
 
 ENV PATH="/app/.venv/bin:${PATH}" \
