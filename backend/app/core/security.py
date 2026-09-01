@@ -202,7 +202,18 @@ class TokenBlacklist:
     async def is_blacklisted(self, jti: str) -> bool:
         if not jti:
             return False
-        return bool(await self.redis.exists(self._key(jti)))
+        try:
+            return bool(await self.redis.exists(self._key(jti)))
+        except Exception as exc:
+            # fail-open：Redis 不可用時放行，而非讓每個已登入請求回 500 拖垮全站（可用性 SPOF）。
+            # 安全兜底：access token 本身有短 exp 會自然過期；黑名單只擋「已顯式登出/輪替」的 token，
+            # Redis 恢復後即恢復撤銷檢查。與 rate_limit / idempotency 的 fail-open 降級一致。
+            logger.warning("token_blacklist.redis_unavailable_fail_open", error=str(exc))
+            with __import__("contextlib").suppress(Exception):
+                from app.core.metrics import AUTH_BLACKLIST_REDIS_ERRORS
+
+                AUTH_BLACKLIST_REDIS_ERRORS.inc()
+            return False
 
 
 def ttl_seconds_from_exp(exp: int) -> int:

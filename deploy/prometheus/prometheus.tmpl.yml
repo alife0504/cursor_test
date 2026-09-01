@@ -7,6 +7,11 @@ global:
   external_labels:
     app: tradingagents-tw
 
+# 告警規則（資料新鮮度 / pipeline 健康 / 可用性）。fire 後見 /alerts 與 Grafana；
+# 主動通知需另接 Alertmanager（見交付報告 needs_human）。
+rule_files:
+  - /etc/prometheus/alert.rules.yml
+
 scrape_configs:
   # 後端 FastAPI /metrics（HTTP 指標 + 抓取時即時算的業務 gauge）
   - job_name: tradingagents-backend

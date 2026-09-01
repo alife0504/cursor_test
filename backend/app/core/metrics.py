@@ -64,6 +64,12 @@ RATE_LIMIT_REDIS_ERRORS = Counter(
     ["layer"],
 )
 
+# ── Auth（JWT 黑名單）────────────────────────────────
+AUTH_BLACKLIST_REDIS_ERRORS = Counter(
+    "auth_blacklist_redis_errors_total",
+    "JWT 黑名單檢查 Redis 失敗次數（fail-open 放行；升高代表撤銷檢查暫時失效，需關注 Redis）",
+)
+
 # ── Celery ────────────────────────────────────────────
 CELERY_QUEUE_LENGTH = Gauge(
     "celery_queue_length",
@@ -77,12 +83,9 @@ CELERY_DLQ_TOTAL = Counter(
     ["task_name"],
 )
 
-# ── Data pipeline ────────────────────────────────────
-DATA_PIPELINE_LAST_SUCCESS = Gauge(
-    "data_pipeline_last_success_seconds_ago",
-    "資料管線上次成功距今秒數（依 worker 名稱）",
-    ["worker"],
-)
+# 註：原 DATA_PIPELINE_LAST_SUCCESS gauge 已移除——它宣告後全專案從未 .set()，是會誤導的
+# 「假監控」死指標。pipeline 停更改由 data_staleness_days{table} 覆蓋（各關鍵表落後天數，
+# 見 freshness_service），該指標有真實資料且已接 Prometheus alert rules。
 
 # ── Orders ────────────────────────────────────────────
 ORDERS_APPROVED_TOTAL = Counter(
@@ -198,17 +201,15 @@ async def collect_runtime_metrics(session: object) -> None:
         DLQ_PENDING.set(int(r or 0))
 
     async def _data_staleness() -> None:
-        # 靜態 SQL（表名不由變數拼接，避免 S608 誤報）：各關鍵表最新日相對台北今日的落後天數。
-        today = now_tpe.date()
-        staleness_queries = (
-            ("stock_prices", "SELECT max(date) FROM stock_prices"),
-            ("institutional_trading", "SELECT max(date) FROM institutional_trading"),
-            ("margin_trading", "SELECT max(date) FROM margin_trading"),
-        )
-        for table, sql in staleness_queries:
-            r = await session.scalar(text(sql))  # type: ignore[attr-defined]
-            if r is not None:
-                DATA_STALENESS_DAYS.labels(table=table).set(int((today - r).days))
+        # 用共用 freshness 服務（單一真相來源）：涵蓋所有關鍵表（含原本被個股遮蔽的大盤指數、
+        # 財報/月營收/選股指標/交易日曆/新聞/公告），與 /system/data-freshness 端點、alert
+        # rules 同一份閾值與判定，避免各處各自為政。
+        from app.services.freshness_service import compute_freshness
+
+        health = await compute_freshness(session)  # type: ignore[arg-type]
+        for c in health.get("checks", []):
+            if c.get("staleness_days") is not None:
+                DATA_STALENESS_DAYS.labels(table=c["key"]).set(int(c["staleness_days"]))
 
     async def _revenue_yoy_null() -> None:
         cutoff = (now_tpe.year - 2) * 100 + now_tpe.month  # 近 24 個月（YYYYMM 比較）
@@ -258,7 +259,6 @@ __all__ = [
     "ANALYSIS_TOTAL",
     "CELERY_DLQ_TOTAL",
     "CELERY_QUEUE_LENGTH",
-    "DATA_PIPELINE_LAST_SUCCESS",
     "DATA_STALENESS_DAYS",
     "DB_CONNECTIONS_USED",
     "DB_SIZE_BYTES",

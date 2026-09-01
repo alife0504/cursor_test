@@ -74,11 +74,20 @@ def _get_url() -> str:
     return settings.postgres_dsn_migration
 
 
+# 以「手寫 raw-SQL migration 建立、無對應 ORM model」的表：不在 Base.metadata 中，若不排除，
+# autogenerate 會判成 drop_table → 一次疏忽即永久刪除交易日曆 / 稽核鏈尾錨（audit_checkpoints
+# 已 REVOKE UPDATE/DELETE 為不可竄改設計，被 drop 等同湮滅稽核能力）。明確保護，絕不誤刪。
+_RAW_SQL_TABLES: frozenset[str] = frozenset({"trading_calendar", "audit_checkpoints"})
+
+
 def _include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-untyped-def]
-    """排除 timescaledb 內部 schema 表，避免 autogenerate 誤判 drop。"""
+    """排除 timescaledb 內部 schema 表 + 無 ORM model 的 raw-SQL 表，避免 autogenerate 誤判 drop。"""
     if type_ == "table" and name.startswith("_timescaledb"):
         return False
     if type_ == "table" and name in ("hypertable", "chunk"):
+        return False
+    # 無 ORM model 的手寫表：排除以防 autogenerate 產生 drop_table 的資料遺失地雷
+    if type_ == "table" and name in _RAW_SQL_TABLES:
         return False
     # timescaledb_information 是 view schema
     schema = getattr(obj, "schema", None)

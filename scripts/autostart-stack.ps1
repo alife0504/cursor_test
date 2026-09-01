@@ -53,7 +53,7 @@ Write-Log "Docker 引擎就緒"
 Set-Location $root
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-docker compose --profile frontend up -d 2>&1 | ForEach-Object { Write-Log "compose: $_" }
+docker compose --profile frontend --profile monitoring up -d 2>&1 | ForEach-Object { Write-Log "compose: $_" }
 $code = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
 if ($code -eq 0) {
@@ -65,7 +65,7 @@ if ($code -eq 0) {
     Write-Log "compose up 首次 exit=$code；等待 120s 讓 backend 變 healthy 後複檢…"
     Start-Sleep -Seconds 120
     $ErrorActionPreference = "Continue"
-    docker compose --profile frontend up -d 2>&1 | ForEach-Object { Write-Log "compose(retry): $_" }
+    docker compose --profile frontend --profile monitoring up -d 2>&1 | ForEach-Object { Write-Log "compose(retry): $_" }
     Start-Sleep -Seconds 30
     $expected = @("ta-timescaledb", "ta-redis", "ta-qdrant", "ta-backend",
         "ta-celery-worker", "ta-celery-beat", "ta-frontend")

@@ -127,6 +127,55 @@ def sync_ohlcv_us_all(days_back: int = 7) -> dict[str, Any]:
     return asyncio.run(_async_fan_out_market(["NASDAQ", "NYSE", "AMEX"], US_BATCH_SIZE, days_back))
 
 
+@celery_app.task(
+    name="app.workers.tasks.sync_ohlcv.detect_and_fill_ohlcv_gaps_tw",
+    soft_time_limit=120,
+    time_limit=180,
+)
+def detect_and_fill_ohlcv_gaps_tw() -> dict[str, Any]:
+    """長停機自癒：偵測 stock_prices 相對 trading_calendar 的缺口，超過日更窗(7天)就動態放大回補。
+
+    背景：日更 sync_ohlcv_tw_all 只回抓 7 天；若平台停機 >7 個交易日(長假/停電/硬體/與
+    finmind-platform 共用 Docker 的長維護)，中間交易日會留永久缺口、日更永遠碰不到。本任務
+    每日盤後跑：比對「最新交易日」與「stock_prices 最新個股資料日」，缺口 >7 天則以
+    days_back=缺口+5 觸發一次全市場回補（正常無缺口時 no-op、零成本）。
+    """
+    return asyncio.run(_async_detect_and_fill_gaps_tw())
+
+
+async def _async_detect_and_fill_gaps_tw() -> dict[str, Any]:
+    from sqlalchemy import text
+
+    engine, sm = _new_async_engine_and_sessionmaker()
+    try:
+        async with sm() as session:
+            latest_price = await session.scalar(
+                text("SELECT max(date) FROM stock_prices WHERE symbol ~ '^[0-9]'")
+            )
+            latest_cal = await session.scalar(
+                text("SELECT max(date) FROM trading_calendar WHERE market = 'TW'")
+            )
+        if latest_price is None or latest_cal is None:
+            return {"gap_days": None, "action": "skip_no_data"}
+        gap_days = (latest_cal - latest_price).days
+        # 缺口在日更窗(7天)內 → 日更會自然補上，不動作
+        if gap_days <= 7:
+            return {"gap_days": gap_days, "action": "no_gap"}
+        # 缺口超過日更窗 → 動態放大回補（+5 天緩衝）。上限 400 天避免異常值觸發過重回補。
+        days_back = min(gap_days + 5, 400)
+        logger.warning(
+            "ohlcv.gap_detected latest_price=%s latest_cal=%s gap_days=%d → backfill days_back=%d",
+            latest_price,
+            latest_cal,
+            gap_days,
+            days_back,
+        )
+        result = await _async_fan_out_market(["TWSE", "TPEX"], TW_BATCH_SIZE, days_back)
+        return {"gap_days": gap_days, "action": "backfilled", "days_back": days_back, **result}
+    finally:
+        await engine.dispose()
+
+
 # 大盤指數：我方 symbol → 上游查詢用 data_id。
 # FinMind 的櫃買指數是 `TPEx`（大小寫敏感，查 `TPEX` 會回空陣列）；我方 stock_prices /
 # market_service 統一用 `TPEX`，故查詢與儲存代號需分離。

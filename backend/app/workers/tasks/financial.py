@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 from celery.utils.log import get_task_logger
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -198,6 +199,12 @@ async def _async_quarterly_one(
 
 @celery_app.task(
     name="app.workers.tasks.financial.sync_monthly_revenue",
+    # orchestrator 讀 stock_list 後 fan-out；DB 暫時性錯誤重試，避免稀疏排程(月一次)單次失敗
+    # 就整週期零派發、整月資料不更新。
+    autoretry_for=(OperationalError, DBAPIError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
     soft_time_limit=120,
     time_limit=180,
 )
@@ -214,6 +221,10 @@ def sync_monthly_revenue() -> dict[str, Any]:
 
 @celery_app.task(
     name="app.workers.tasks.financial.sync_institutional_tw",
+    autoretry_for=(OperationalError, DBAPIError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
     soft_time_limit=120,
     time_limit=180,
 )
@@ -263,6 +274,10 @@ async def _async_institutional_bulk(days_back: int) -> dict[str, Any]:
 
 @celery_app.task(
     name="app.workers.tasks.financial.sync_margin_tw",
+    autoretry_for=(OperationalError, DBAPIError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
     soft_time_limit=120,
     time_limit=180,
 )
@@ -315,6 +330,10 @@ async def _async_margin_bulk(days_back: int) -> dict[str, Any]:
 
 @celery_app.task(
     name="app.workers.tasks.financial.sync_stock_metrics_tw",
+    autoretry_for=(OperationalError, DBAPIError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
     soft_time_limit=300,
     time_limit=420,
 )
@@ -338,6 +357,10 @@ async def _async_stock_metrics() -> dict[str, Any]:
 
 @celery_app.task(
     name="app.workers.tasks.financial.sync_company_info_tw",
+    autoretry_for=(OperationalError, DBAPIError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
     soft_time_limit=120,
     time_limit=180,
 )
@@ -354,6 +377,10 @@ def sync_company_info_tw() -> dict[str, Any]:
 
 @celery_app.task(
     name="app.workers.tasks.financial.sync_quarterly_financial_tw",
+    autoretry_for=(OperationalError, DBAPIError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
     soft_time_limit=180,
     time_limit=300,
 )

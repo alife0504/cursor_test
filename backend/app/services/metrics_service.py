@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -303,13 +303,20 @@ class MetricsService:
         for i in range(0, len(rows), 1000):
             chunk = rows[i : i + 1000]
             stmt = pg_insert(StockMetrics).values(chunk)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["symbol"],
-                set_={
-                    **{c: getattr(stmt.excluded, c) for c in _METRIC_COLS},
-                    "updated_at": text("NOW()"),
-                },
-            )
+            # 外部雙源欄位（fm-postgres / FinMind）用 COALESCE 保護：兩源同時短暫失敗時傳入 None，
+            # 若無條件覆寫會把既有好值抹成 NULL → 選股篩選器「PE≤15 / 市值≥X」靜默排除全部股票。
+            # 改為「有新值才覆寫、否則保留既有」；app 自有欄(rsi14/eps_growth/as_of_date)照常更新。
+            _external_cols = ("pe_ratio", "pbr", "dividend_yield", "market_cap")
+            update_set: dict[str, Any] = {}
+            for c in _METRIC_COLS:
+                if c in _external_cols:
+                    update_set[c] = func.coalesce(
+                        getattr(stmt.excluded, c), getattr(StockMetrics, c)
+                    )
+                else:
+                    update_set[c] = getattr(stmt.excluded, c)
+            update_set["updated_at"] = text("NOW()")
+            stmt = stmt.on_conflict_do_update(index_elements=["symbol"], set_=update_set)
             await self.session.execute(stmt)
             written += len(chunk)
         await self.session.commit()

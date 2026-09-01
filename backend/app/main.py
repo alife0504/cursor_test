@@ -42,6 +42,7 @@ from app.api.v1.reports_router import router as reports_router
 from app.api.v1.screener_router import router as screener_router
 from app.api.v1.statistics_router import router as statistics_router
 from app.api.v1.stocks_router import router as stocks_router
+from app.api.v1.system_router import router as system_router
 from app.api.v1.users_router import router as users_router
 from app.api.v1.watchlist_router import router as watchlist_router
 from app.api.v1.ws_router import router as ws_router
@@ -152,22 +153,24 @@ async def lifespan(app: FastAPI):
             logger.critical("redis.startup_probe_failed", error=str(e))
             raise ExternalServiceError(message_zh="Redis 連線失敗", source="redis") from e
 
+        # Qdrant 為「可降級」依賴（非核心）：僅 RAG 決策記憶會用到，agents/memory.py 全程對
+        # Qdrant 失敗優雅降級（retrieve 回空、store no-op）。故啟動時 Qdrant 不可用**不阻斷**
+        # 整個後端啟動——否則 Qdrant 一掛，連登入/看盤/報表等完全不碰 Qdrant 的網頁也全部無法
+        # 服務（本不必要的 SPOF）。改為記錄 + 標記 app.state.qdrant_ready 供 /health/ready 回報。
+        app.state.qdrant_ready = False
         try:
             await _probe_with_retry(
                 test_qdrant_connection, name="qdrant", retries=_retries, delay_s=_delay
             )
-        except Exception as e:
-            logger.critical("qdrant.startup_probe_failed", error=str(e))
-            raise ExternalServiceError(message_zh="Qdrant 連線失敗", source="qdrant") from e
-
-        # P4：確保 Qdrant 7 個 collections 存在（idempotent）
-        try:
+            # P4：確保 Qdrant 7 個 collections 存在（idempotent）
             await ensure_collections()
+            app.state.qdrant_ready = True
         except Exception as e:
-            logger.critical("qdrant.ensure_collections_failed", error=str(e))
-            raise ExternalServiceError(
-                message_zh="Qdrant collections 初始化失敗", source="qdrant"
-            ) from e
+            logger.critical(
+                "qdrant.startup_degraded",
+                error=str(e),
+                note="Qdrant 不可用，後端仍啟動；決策記憶(RAG)降級，其餘功能不受影響",
+            )
 
     # P6：建立跨市場 dispatcher（即使 PYTEST_RUNNING 也建，但不打網路）
     try:
@@ -318,6 +321,7 @@ app.include_router(notifications_router)
 app.include_router(admin_router)
 app.include_router(ws_router)
 app.include_router(metrics_router)
+app.include_router(system_router)
 
 
 # ════════════════ Health endpoints ════════════════
@@ -365,13 +369,13 @@ async def health_ready(request: Request) -> JSONResponse:
         deps["redis"] = f"error: {type(e).__name__}"
         all_ok = False
 
-    # Qdrant
+    # Qdrant：可降級依賴。不可用時標 degraded 但**不翻 not_ready**（後端仍能服務所有非 RAG 功能，
+    # 決策記憶降級）。與啟動時 Qdrant 非致命的設計一致；監控可據 degraded 告警。
     try:
         await test_qdrant_connection()
         deps["qdrant"] = "ok"
     except Exception as e:
-        deps["qdrant"] = f"error: {type(e).__name__}"
-        all_ok = False
+        deps["qdrant"] = f"degraded: {type(e).__name__}"
 
     body = envelope_success(
         {"status": "ready" if all_ok else "not_ready", "dependencies": deps},

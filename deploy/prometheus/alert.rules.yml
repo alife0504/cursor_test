@@ -1,0 +1,82 @@
+# Prometheus 告警規則 —— 讓 backend 匯出的 gauge 真的會「告警」，而非只被儲存。
+# 閾值對齊 app.services.freshness_service 的 crit_days（單一真相來源）。
+#
+# 註：規則 fire 後會顯示在 Prometheus /alerts 與 Grafana；若要 email/Discord/Slack 主動通知，
+#     需另接 Alertmanager（通知管道屬委託人裁定，見交付報告 needs_human）。前端 SystemHealthBanner
+#     已提供「網頁顯示警示」的使用者面告警（委託人收尾第一重點）。
+groups:
+  - name: tradingagents-data-freshness
+    rules:
+      # 日頻資料表停更（超過 crit_days=8 天且持續 6h）→ pipeline 靜默停擺
+      - alert: DataStalenessDaily
+        expr: data_staleness_days{table=~"stock_prices|index|institutional_trading|margin_trading|stock_metrics|trading_calendar"} > 8
+        for: 6h
+        labels: { severity: critical }
+        annotations:
+          summary: "資料表 {{ $labels.table }} 已 {{ $value }} 天未更新"
+          description: "日頻資料表停更超過 8 天，pipeline 可能靜默停擺，請檢查 celery worker/beat 與資料源。"
+
+      # 月營收停更（缺兩個月以上；月頻天生落後 ~60 天，故閾值 110）
+      - alert: DataStalenessMonthlyRevenue
+        expr: data_staleness_days{table="monthly_revenue"} > 110
+        for: 12h
+        labels: { severity: warning }
+        annotations:
+          summary: "月營收已 {{ $value }} 天未更新（缺兩個月以上）"
+          description: "月營收 pipeline 可能失敗；檢查 sync_monthly_revenue 與 derive 任務。"
+
+      # 新聞停更
+      - alert: DataStalenessNews
+        expr: data_staleness_days{table="news"} > 5
+        for: 3h
+        labels: { severity: warning }
+        annotations:
+          summary: "新聞已 {{ $value }} 天未更新"
+
+      # 月營收成長率大面積 NULL（衍生 task 失敗或被覆寫）
+      - alert: MonthlyRevenueYoYNull
+        expr: monthly_revenue_yoy_null_ratio > 0.3
+        for: 6h
+        labels: { severity: warning }
+        annotations:
+          summary: "月營收 YoY 有 {{ $value | humanizePercentage }} 為 NULL"
+
+  - name: tradingagents-pipeline-health
+    rules:
+      # DLQ 未解決任務堆積
+      - alert: DLQPending
+        expr: dlq_pending_total > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Celery DLQ 有 {{ $value }} 筆未解決失敗任務"
+      - alert: DLQPendingHigh
+        expr: dlq_pending_total > 50
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Celery DLQ 堆積 {{ $value }} 筆（>50）—— pipeline 大量失敗"
+
+      # Rate limiter / 黑名單 Redis 降級（fail-open 生效中，限流/撤銷檢查暫時失效）
+      - alert: RateLimitRedisErrors
+        expr: increase(rate_limit_redis_errors_total[10m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Rate limiter Redis 失敗（fail-open 放行中），請檢查 Redis"
+      - alert: AuthBlacklistRedisErrors
+        expr: increase(auth_blacklist_redis_errors_total[10m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "JWT 黑名單 Redis 失敗（fail-open 放行中），撤銷檢查暫時失效，請檢查 Redis"
+
+  - name: tradingagents-availability
+    rules:
+      # 後端 /metrics 抓不到 → 後端 down 或 metrics token 失效
+      - alert: BackendDown
+        expr: up{job="tradingagents-backend"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "後端 /metrics 抓取失敗（backend 可能當機或 METRICS_TOKEN 失效）"
