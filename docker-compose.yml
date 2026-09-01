@@ -24,8 +24,9 @@ x-logging: &default-logging
     max-file: "5"
 
 # 資源上限（防單一容器記憶體暴衝觸發 host OOM killer 拖垮同台 finmind-platform）。
-# 這些是「寬鬆上限」：正常運作遠低於此、不會誤殺，只封住記憶體洩漏/失控的 runaway。
-# ⚠️ 數值需依 NUC 實際總 RAM 與 finmind-platform 共存策略微調（見交付報告 needs_human）。
+# 依主機實際總 RAM 18.9GB（與 finmind-platform 共用）校準：ta-* 上限總和約 11GB，留約 7.5GB
+# 給 finmind（fm-postgres 實測 ~4.5GB）+ 其他專案 + OS。實測 ta-* 正常用量僅 ~2.3GB，故這些
+# 上限對正常運作是 4~8 倍餘裕、不會誤殺，只封住記憶體洩漏/失控的 runaway。
 # 註：docker compose v2（本專案 autostart 用的）於 `up` 時會套用 deploy.resources.limits。
 
 services:
@@ -58,7 +59,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3g
+          memory: 2g
 
   redis:
     image: redis:7-alpine
@@ -91,8 +92,8 @@ services:
     deploy:
       resources:
         limits:
-          # redis maxmemory 設 1gb，容器上限給 1.5g 含 AOF/overhead 餘裕
-          memory: 1536m
+          # redis maxmemory 設 1gb，容器上限給 1.2g 含 AOF/overhead 餘裕
+          memory: 1200m
 
   qdrant:
     image: qdrant/qdrant:v1.9.5
@@ -121,7 +122,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 1g
 
   # ── Backend FastAPI（P3 加）────────────────────────────
   backend:
@@ -172,7 +173,7 @@ services:
       resources:
         limits:
           # 含 Playwright chromium（PDF 匯出）+ uvicorn；寬鬆上限，正常遠低於此
-          memory: 3g
+          memory: 2g
 
   # ── Celery Worker（P7 加）────────────────────────────
   # 與 backend 共用 image；command 改跑 celery worker；
@@ -226,8 +227,8 @@ services:
     deploy:
       resources:
         limits:
-          # LangGraph 多 agent + LLM context + concurrency=4 + chromium；給最高寬限避免誤殺大分析
-          memory: 6g
+          # LangGraph 多 agent + LLM context + concurrency=4 + chromium；ta-* 中最高(實測用 ~0.5g)
+          memory: 3g
 
   # ── Celery Beat（P7 加）────────────────────────────
   # Beat 是 schedule trigger；單 instance（多 instance 會重複觸發）。
@@ -281,7 +282,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: 512m
 
   # ── Frontend Next.js（P15 加，用 profile 避免預設啟動）─────────────
   # 預設不啟動;只在 `docker compose --profile frontend up` 時才會起來。
@@ -322,7 +323,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: 640m
 
   # ── Prometheus（P19 監控；profile monitoring，預設不啟動）────────────
   # 抓取 backend:8000/metrics（帶靜態 METRICS_TOKEN）。啟動：
@@ -359,7 +360,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: 640m
 
   # ── Grafana（P19 監控儀表板；profile monitoring）──────────────────
   # 匿名可看（Viewer），儀表板與資料源自動 provision。管理登入預設 admin/admin。
@@ -392,7 +393,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: 384m
 
 volumes:
   timescaledb_data:
