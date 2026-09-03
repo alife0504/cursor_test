@@ -33,7 +33,7 @@ from app.agents.streaming import (
 )
 from app.agents.tools import ToolRegistry
 from app.core.config import settings
-from app.core.database import sync_rw_session
+from app.core.database import make_worker_engine, sync_rw_session
 from app.llm import get_llm_chain
 from app.llm.fallback_chain import LLMFallbackChain
 from app.models.analysis import AnalysisReport, DebateMessage
@@ -656,15 +656,9 @@ def _build_tool_registry() -> tuple[ToolRegistry, Any]:
 
     跨 task 不共用 engine（避免跨 event loop 衝突，PLAN 14.7 已知陷阱）。
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    engine = create_async_engine(
-        settings.postgres_dsn_ro,
-        echo=False,
-        pool_size=2,
-        max_overflow=1,
-        pool_pre_ping=True,
-    )
+    engine = make_worker_engine(settings.postgres_dsn_ro, name="run_analysis")
     sm = async_sessionmaker(engine, expire_on_commit=False)
     return ToolRegistry(sm), engine
 

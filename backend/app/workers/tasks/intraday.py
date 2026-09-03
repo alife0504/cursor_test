@@ -25,7 +25,15 @@ logger = get_logger(__name__)
 )
 def accumulate_intraday_tw() -> dict[str, Any]:
     """每 10 秒（beat）累積加權/台指全一點；休息時段內部自動略過。"""
-    return asyncio.run(_async_accumulate())
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    try:
+        return asyncio.run(_async_accumulate())
+    except SoftTimeLimitExceeded:
+        # fire-and-forget：某 tick 因即時源(FinMind realtime)慢而逾時屬正常噪音，下一 tick(10s 後)
+        # 即重試。優雅回收、**不讓例外傳播進 DLQ**（否則盤中每次慢就污染 DLQ、觸發前端警示 banner）。
+        logger.warning("intraday.soft_timeout_skipped")
+        return {"ok": False, "skipped": "soft_timeout"}
 
 
 async def _async_accumulate() -> dict[str, Any]:

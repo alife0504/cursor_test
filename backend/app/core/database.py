@@ -78,6 +78,39 @@ def _create_engine(dsn: str, pool_size: int, *, name: str) -> AsyncEngine:
     return engine
 
 
+def make_worker_engine(dsn: str, *, name: str = "worker") -> AsyncEngine:
+    """給 celery 批次任務用的 async engine（每任務新建，避免跨 event loop 衝突）。
+
+    與互動式 API 連線的關鍵差異：把 idle_in_transaction_session_timeout 從 ta_service_rw role
+    預設的 60s 覆寫為 300s。批次任務(如 sync_ohlcv)會**先開交易再去慢抓外部源**(finmind_local
+    與 finmind Dagster ETL 共用、忙碌時 >60s)，60s 太短會在抓取途中被 PG 砍連線(「connection is
+    closed」)→ upsert 失敗進 DLQ + 觸發資料源熔斷器發手機告警。批次非互動、抓取期間 holds txn
+    屬正常，300s 足以涵蓋；仍受 celery task time_limit(通常 <=900s) 兜底,不會無限持有。
+    """
+    engine = create_async_engine(
+        dsn,
+        echo=False,
+        pool_size=2,
+        max_overflow=1,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+
+    @listens_for(engine.sync_engine, "connect")
+    def _set_worker_timeouts(dbapi_conn, _conn_record):  # type: ignore[no-untyped-def]
+        try:
+            cur = dbapi_conn.cursor()
+            cur.execute(f"SET statement_timeout = '{settings.STATEMENT_TIMEOUT_MS}ms'")
+            cur.execute(f"SET lock_timeout = '{settings.LOCK_TIMEOUT_MS}ms'")
+            # 覆寫 role 的 60s：批次抓取期間佔交易屬正常，避免慢抓被砍連線
+            cur.execute("SET idle_in_transaction_session_timeout = '300s'")
+            cur.close()
+        except Exception as e:  # pragma: no cover
+            logger.debug("worker_db.connect_listener.skipped", error=str(e))
+
+    return engine
+
+
 # ── 全域 engine（lazy 初始化）────────────────────────────
 
 _rw_engine: AsyncEngine | None = None

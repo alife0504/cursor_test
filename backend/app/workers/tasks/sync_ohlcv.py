@@ -19,9 +19,10 @@ from typing import Any
 import httpx
 from celery.utils.log import get_task_logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import settings
+from app.core.database import make_worker_engine
 from app.data_sources.base import DataKind
 from app.data_sources.tw import get_tw_sources
 from app.data_sources.us import get_us_sources
@@ -42,13 +43,7 @@ BATCH_COUNTDOWN_STEP = 5
 
 def _new_async_engine_and_sessionmaker():
     """每個 task 新建 async engine + sessionmaker（避免跨 event loop 衝突）。"""
-    engine = create_async_engine(
-        settings.postgres_dsn_rw,
-        echo=False,
-        pool_size=2,
-        max_overflow=1,
-        pool_pre_ping=True,
-    )
+    engine = make_worker_engine(settings.postgres_dsn_rw, name="sync_ohlcv")
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -326,9 +321,7 @@ async def _async_sync_trading_calendar() -> dict[str, Any]:
     if not dates:
         return {"skipped": "no_trading_days"}
 
-    engine = create_async_engine(
-        settings.postgres_dsn_rw, pool_size=2, max_overflow=1, pool_pre_ping=True
-    )
+    engine = make_worker_engine(settings.postgres_dsn_rw, name="sync_calendar")
     sm = async_sessionmaker(engine, expire_on_commit=False)
     ins = text(
         "INSERT INTO trading_calendar (date, market) "

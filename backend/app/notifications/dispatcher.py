@@ -52,6 +52,32 @@ class _ResolvedTarget:
     quiet_hours_end: str | None
 
 
+# 系統廣播告警冷卻去重：同一則告警(event_type+title)在冷卻期內只發一次，避免熔斷器/資料源
+# 反覆失敗時轟炸手機。使用者專屬通知(分析完成/訂單，user_id 非 None)不節流，逐則送達。
+_ALERT_COOLDOWN: dict[str, float] = {}
+_ALERT_COOLDOWN_SECONDS = 1800  # 30 分鐘
+
+
+def _should_throttle_alert(event: NotifyEvent) -> bool:
+    # 只節流系統廣播(user_id is None，如 system.alert 熔斷器告警)；使用者專屬通知不節流。
+    if getattr(event, "user_id", None) is not None:
+        return False
+    import time as _time
+
+    key = f"{event.event_type}:{event.title}"
+    now = _time.monotonic()
+    last = _ALERT_COOLDOWN.get(key)
+    if last is not None and (now - last) < _ALERT_COOLDOWN_SECONDS:
+        return True
+    _ALERT_COOLDOWN[key] = now
+    # 防無限成長：超過 200 筆時清掉過期項
+    if len(_ALERT_COOLDOWN) > 200:
+        for k, ts in list(_ALERT_COOLDOWN.items()):
+            if now - ts >= _ALERT_COOLDOWN_SECONDS:
+                _ALERT_COOLDOWN.pop(k, None)
+    return False
+
+
 def _parse_hhmm(s: str | None) -> time | None:
     if not s or len(s) != 5 or s[2] != ":":
         return None
@@ -102,10 +128,14 @@ class NotificationDispatcher:
     async def dispatch(self, event: NotifyEvent) -> list[NotifyResult]:
         """async 主入口。
 
+        - 系統告警冷卻去重（避免熔斷器等 flapping 事件轟炸手機）
         - 先在 thread 中查 DB（避免 block event loop）
         - 並行送到所有 target
         - log / DLQ 寫入也走 thread
         """
+        if _should_throttle_alert(event):
+            logger.info("notify.throttled event_type=%s title=%s", event.event_type, event.title)
+            return []
         targets = await asyncio.to_thread(self._resolve_targets, event)
         if not targets:
             return []

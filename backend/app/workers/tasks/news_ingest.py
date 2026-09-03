@@ -16,9 +16,10 @@ from typing import Any
 
 import httpx
 from celery.utils.log import get_task_logger
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import settings
+from app.core.database import make_worker_engine
 from app.data_sources.tw import get_tw_sources
 from app.data_sources.us import get_us_sources
 from app.services.data_pipeline_service import DataPipelineService
@@ -28,13 +29,7 @@ logger = get_task_logger(__name__)
 
 
 def _new_engine_sm():
-    engine = create_async_engine(
-        settings.postgres_dsn_rw,
-        pool_size=2,
-        max_overflow=1,
-        pool_pre_ping=True,
-        echo=False,
-    )
+    engine = make_worker_engine(settings.postgres_dsn_rw, name="news_ingest")
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
